@@ -22,7 +22,7 @@
 	<string>1</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_mediaremotetv._tcp</string>
+		<string>_companion-link._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AppleTV Remote needs local network access to discover and control Apple TVs.</string>

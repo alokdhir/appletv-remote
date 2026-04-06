@@ -4,21 +4,20 @@ import Combine
 
 /// Discovers Apple TV devices on the local network via Bonjour.
 ///
-/// Apple TVs advertise two relevant services:
-///   _mediaremotetv._tcp  — Media Remote Protocol (MRP), used for playback control
-///   _airplay._tcp        — AirPlay, used for media casting
-///
-/// We browse for `_mediaremotetv._tcp` to find controllable Apple TVs.
+/// Modern Apple TVs (tvOS 15+) advertise `_companion-link._tcp` — the Companion
+/// protocol used by the Apple Remote app. Older tvOS 14 and earlier used
+/// `_mediaremotetv._tcp` (MRP), but that service is no longer advertised on
+/// current firmware.
 @MainActor
 final class DeviceDiscovery: ObservableObject {
     @Published var devices: [AppleTVDevice] = []
     @Published var isSearching = false
+    @Published var browserError: String?
 
     private var browser: NWBrowser?
-    private var resolvers: [String: NWConnection] = [:]
 
-    // Bonjour service type for the Apple TV Media Remote Protocol
-    private let serviceType = "_mediaremotetv._tcp"
+    // Bonjour service type for the Apple TV Companion protocol (tvOS 15+)
+    private let serviceType = "_companion-link._tcp"
 
     func startDiscovery() {
         guard browser == nil else { return }
@@ -36,10 +35,13 @@ final class DeviceDiscovery: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    break
+                    self?.browserError = nil
                 case .failed(let error):
                     self?.isSearching = false
-                    print("Browser failed: \(error)")
+                    self?.browserError = error.localizedDescription
+                    print("Bonjour browser failed: \(error)")
+                case .cancelled:
+                    self?.isSearching = false
                 default:
                     break
                 }

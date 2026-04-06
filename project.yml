@@ -27,7 +27,7 @@ targets:
       properties:
         CFBundleDisplayName: AppleTV Remote
         NSBonjourServices:
-          - _mediaremotetv._tcp
+          - _companion-link._tcp
         NSLocalNetworkUsageDescription: "AppleTV Remote needs local network access to discover and control Apple TVs."
     entitlements:
       path: AppleTVRemote.entitlements
