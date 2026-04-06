@@ -32,7 +32,7 @@ targets:
     entitlements:
       path: AppleTVRemote.entitlements
       properties:
-        com.apple.security.app-sandbox: true
+        com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
     settings:
       base:
