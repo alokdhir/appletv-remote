@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "appletv_remote",
+  "project_id": "d2325514-3476-46e9-9c7f-d7984a8505af"
+}
