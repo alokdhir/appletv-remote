@@ -67,7 +67,8 @@ struct CredentialStore {
 /// Credentials obtained after a successful MRP pairing handshake.
 struct PairingCredentials: Codable {
     let clientID: String      // UUID this client registered with
-    let ltsk: Data            // Long-term secret key (from SRP exchange)
-    let ltpk: Data            // Long-term public key
+    let ltsk: Data            // Long-term secret key (Ed25519 private key bytes)
+    let ltpk: Data            // Long-term public key (Ed25519 public key bytes)
     let deviceLTPK: Data      // Apple TV's long-term public key
+    let deviceID: String      // Apple TV's pairing identifier
 }
