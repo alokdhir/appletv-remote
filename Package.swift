@@ -14,9 +14,7 @@ let package = Package(
                 .product(name: "BigInt", package: "BigInt")
             ],
             path: "Sources/AppleTVRemote",
-            resources: [
-                .process("Resources")
-            ]
+            exclude: ["Resources/Info.plist"]
         )
     ]
 )

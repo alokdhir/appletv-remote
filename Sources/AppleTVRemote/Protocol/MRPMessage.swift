@@ -22,13 +22,15 @@ enum MRPMessage {
     case remoteCommand(RemoteCommand)
     case deviceInfo
     case cryptoPairing(Data)   // data = TLV8-encoded HAP pairing payload
+    case clientUpdatesConfig   // subscribe to now-playing + volume state pushes
 
     // MARK: - Message type IDs
 
     private enum MessageType: Int32 {
-        case deviceInfo      = 1
-        case cryptoPairing   = 6
-        case sendCommand     = 9
+        case deviceInfo        = 1
+        case cryptoPairing     = 6
+        case sendCommand       = 9
+        case clientUpdates     = 21
     }
 
     // MARK: - HID usages for SendCommandMessage
@@ -58,6 +60,8 @@ enum MRPMessage {
             return encodeDeviceInfo()
         case .cryptoPairing(let tlv8):
             return encodeCryptoPairing(tlv8)
+        case .clientUpdatesConfig:
+            return encodeClientUpdatesConfig()
         }
     }
 
@@ -107,6 +111,25 @@ enum MRPMessage {
         var outer = Data()
         outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.cryptoPairing.rawValue))
         outer.appendBytesField(fieldNumber: Int(MessageType.cryptoPairing.rawValue), value: inner)
+
+        return frameLengthPrefixed(outer)
+    }
+
+    private func encodeClientUpdatesConfig() -> Data {
+        // ClientUpdatesConfigMessage: subscribe to all push notification categories
+        //   field 1 artworkUpdates     : bool = true
+        //   field 2 nowPlayingUpdates  : bool = true
+        //   field 3 volumeUpdates      : bool = true
+        //   field 4 keyboardUpdates    : bool = false
+        var inner = Data()
+        inner.appendBoolField(fieldNumber: 1, value: true)
+        inner.appendBoolField(fieldNumber: 2, value: true)
+        inner.appendBoolField(fieldNumber: 3, value: true)
+        inner.appendBoolField(fieldNumber: 4, value: false)
+
+        var outer = Data()
+        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.clientUpdates.rawValue))
+        outer.appendBytesField(fieldNumber: Int(MessageType.clientUpdates.rawValue), value: inner)
 
         return frameLengthPrefixed(outer)
     }

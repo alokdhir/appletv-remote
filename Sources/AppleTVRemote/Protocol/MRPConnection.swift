@@ -104,6 +104,14 @@ final class MRPConnection: ObservableObject {
 
     private func sendDeviceInfo() {
         guard let data = MRPMessage.deviceInfo.encoded() else { return }
+        sendRaw(data) { [weak self] in
+            // After DEVICE_INFO, subscribe to now-playing updates
+            self?.sendClientUpdatesSubscription()
+        }
+    }
+
+    private func sendClientUpdatesSubscription() {
+        guard let data = MRPMessage.clientUpdatesConfig.encoded() else { return }
         sendRaw(data)
     }
 
@@ -171,7 +179,9 @@ final class MRPConnection: ObservableObject {
         case 1:  // DEVICE_INFO_MESSAGE — Apple TV acknowledged our hello
             if state == .connecting { state = .connected }
         default:
-            break
+            if let update = MRPDecoder.decodeNowPlaying(from: data) {
+                nowPlaying = update.applied(to: nowPlaying)
+            }
         }
     }
 
