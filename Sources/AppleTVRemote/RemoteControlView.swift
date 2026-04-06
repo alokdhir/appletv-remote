@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RemoteControlView: View {
     let device: AppleTVDevice
-    @ObservedObject var connection: MRPConnection
+    @ObservedObject var connection: CompanionConnection
     @State private var pairingPin = ""
 
     var body: some View {
@@ -15,8 +15,12 @@ struct RemoteControlView: View {
             case .disconnected:
                 connectPrompt
             case .connecting:
-                ProgressView("Connecting…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 16) {
+                    ProgressView("Connecting…")
+                    Button("Cancel") { connection.disconnect() }
+                        .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .awaitingPairingPin:
                 pairingView
             case .connected:

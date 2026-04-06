@@ -70,7 +70,10 @@ struct DeviceRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "appletv.fill")
-                .foregroundStyle(Color.accentColor)
+                .font(.system(size: 13))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(Color.black, in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name)
                     .font(.subheadline)
