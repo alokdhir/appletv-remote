@@ -8,3 +8,4 @@
 .dolt/
 *.db
 .beads/.beads-credential-key
+AppleTVRemote.xcodeproj/
