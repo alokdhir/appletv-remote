@@ -307,11 +307,11 @@ final class CompanionConnection: ObservableObject {
         }
         let identifier = msg["_i"] as? String ?? ""
         let msgType    = msg["_t"] as? Int ?? 0
-        let txn        = msg["_x"] as? UInt32 ?? 0
+        // _x is decoded as Int by decodeDict; cast via Int before UInt32
+        let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
         print("Companion ← OPACK \(identifier) type=\(msgType) txn=\(txn)")
 
         if identifier == "_ping" {
-            // Respond with a pong matching the transaction ID
             sendEncrypted(OPACK.encodePong(txn: txn))
         }
     }

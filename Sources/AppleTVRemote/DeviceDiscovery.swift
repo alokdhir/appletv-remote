@@ -75,17 +75,16 @@ final class DeviceDiscovery: ObservableObject {
     private func handleBrowseResults(_ results: Set<NWBrowser.Result>) {
         // Filter to Apple TVs only — HomePods and Macs also advertise _companion-link._tcp.
         // Companion TXT records use `rpMd` for model (e.g. AppleTV14,1). HomePods use
-        // AudioAccessory*, Macs use Mac*. Fall back to allowing the result if metadata is absent
-        // (some firmwares omit TXT records in browse results).
+        // AudioAccessory*, Macs use Mac*. Require rpMd to be present and start with "AppleTV".
         let appletvResults = results.filter { result in
             guard case .service(let name, _, _, _) = result.endpoint else { return false }
             guard case .bonjour(let txt) = result.metadata else {
-                print("Discovery: \(name) — no TXT metadata, allowing")
-                return true
+                print("Discovery: \(name) — no TXT metadata, skipping")
+                return false
             }
             let model = txt.dictionary["rpMd"] ?? ""
             print("Discovery: \(name) rpMd='\(model)'")
-            return model.isEmpty || model.hasPrefix("AppleTV")
+            return model.hasPrefix("AppleTV")
         }
 
         // Cancel resolvers for services that disappeared

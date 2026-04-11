@@ -144,8 +144,6 @@ enum MRPMessage {
         case .menu:         return .menu
         case .home:         return .home
         case .playPause:    return .playPause
-        case .skipForward:  return .skipForward
-        case .skipBackward: return .skipBackward
         case .volumeUp:     return .volumeUp
         case .volumeDown:   return .volumeDown
         }

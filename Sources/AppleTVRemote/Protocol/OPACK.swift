@@ -107,9 +107,10 @@ enum OPACK {
 
     // MARK: - Session message helpers
 
-    /// Encode a `_pong` response to an ATV `_ping` event.
+    /// Encode a `_pong` response to an ATV `_ping` request.
+    /// _t: 3 = response (ATV sends _ping as _t: 2 request, expects _t: 3 response).
     static func encodePong(txn: UInt32) -> Data {
-        pack(["_i": "_pong", "_t": 2, "_x": txn] as [String: Any])
+        pack(["_i": "_pong", "_t": 3, "_x": txn] as [String: Any])
     }
 
     /// Encode `_systemInfo` request — tells the ATV who we are.

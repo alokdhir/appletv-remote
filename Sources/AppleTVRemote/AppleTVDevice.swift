@@ -50,23 +50,20 @@ enum RemoteCommand {
     case home
     case playPause
     case volumeUp, volumeDown
-    case skipForward, skipBackward
 
     /// Companion protocol HID keycode for this command.
     var hidKeycode: UInt8 {
         switch self {
-        case .up:           return 1
-        case .down:         return 2
-        case .left:         return 3
-        case .right:        return 4
-        case .menu:         return 5
-        case .select:       return 6
-        case .home:         return 7
-        case .volumeUp:     return 8
-        case .volumeDown:   return 9
-        case .playPause:    return 14
-        case .skipForward:  return 15
-        case .skipBackward: return 16
+        case .up:          return 1
+        case .down:        return 2
+        case .left:        return 3
+        case .right:       return 4
+        case .menu:        return 5
+        case .select:      return 6
+        case .home:        return 7
+        case .volumeUp:    return 8
+        case .volumeDown:  return 9
+        case .playPause:   return 14
         }
     }
 }

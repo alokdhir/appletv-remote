@@ -135,24 +135,20 @@ struct RemoteControlView: View {
                     }
                 }
 
-                // Menu + Home
-                HStack(spacing: 16) {
-                    LabeledRemoteButton(sfSymbol: "arrow.uturn.backward", label: "Menu") {
+                // Back + Home — mirrors physical button positions on the Siri Remote
+                HStack(spacing: 48) {
+                    LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
                         connection.send(.menu)
                     }
-                    LabeledRemoteButton(sfSymbol: "tv", label: "Home") {
+                    LabeledRemoteButton(sfSymbol: "appletv.fill", label: "Home") {
                         connection.send(.home)
                     }
                 }
 
-                // Playback controls
-                HStack(spacing: 16) {
-                    RemoteButton(label: "backward.end.fill",  action: { connection.send(.skipBackward) })
-                    RemoteButton(label: "playpause.fill",     action: { connection.send(.playPause) }, size: 52)
-                    RemoteButton(label: "forward.end.fill",   action: { connection.send(.skipForward) })
-                }
+                // Play/Pause — centered, matching the physical remote
+                RemoteButton(label: "playpause.fill", action: { connection.send(.playPause) }, size: 52)
 
-                // Volume
+                // Volume — side buttons on the real remote; shown as a row here
                 HStack(spacing: 24) {
                     LabeledRemoteButton(sfSymbol: "speaker.minus.fill", label: "Vol −") {
                         connection.send(.volumeDown)
