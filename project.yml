@@ -26,6 +26,7 @@ targets:
       path: Sources/AppleTVRemote/Resources/Info.plist
       properties:
         CFBundleDisplayName: AppleTV Remote
+        CFBundleIconName: AppIcon
         NSBonjourServices:
           - _companion-link._tcp
         NSLocalNetworkUsageDescription: "AppleTV Remote needs local network access to discover and control Apple TVs."
@@ -40,3 +41,4 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
