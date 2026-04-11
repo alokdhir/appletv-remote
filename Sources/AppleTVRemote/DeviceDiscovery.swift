@@ -75,16 +75,32 @@ final class DeviceDiscovery: ObservableObject {
     private func handleBrowseResults(_ results: Set<NWBrowser.Result>) {
         // Filter to Apple TVs only — HomePods and Macs also advertise _companion-link._tcp.
         // Companion TXT records use `rpMd` for model (e.g. AppleTV14,1). HomePods use
-        // AudioAccessory*, Macs use Mac*. Require rpMd to be present and start with "AppleTV".
+        // AudioAccessory*, Macs use Mac*. Only exclude if rpMd is present and is NOT an
+        // Apple TV — browse results sometimes omit TXT records entirely for real Apple TVs.
         let appletvResults = results.filter { result in
             guard case .service(let name, _, _, _) = result.endpoint else { return false }
             guard case .bonjour(let txt) = result.metadata else {
-                print("Discovery: \(name) — no TXT metadata, skipping")
-                return false
+                print("Discovery: \(name) — no TXT metadata, allowing")
+                return true
             }
             let model = txt.dictionary["rpMd"] ?? ""
             print("Discovery: \(name) rpMd='\(model)'")
-            return model.hasPrefix("AppleTV")
+            // rpMd present and identifies as Apple TV → allow
+            if model.hasPrefix("AppleTV") { return true }
+            // rpMd present and identifies as something else → reject
+            if !model.isEmpty { return false }
+            // rpMd absent — use rpFl flags as tiebreaker.
+            // Bit 0x4000 = PIN pairing supported; only Apple TVs have this bit set.
+            // Macs: 0x20000, HomePods: 0x627B2/0x62792 — neither sets 0x4000.
+            let rpflRaw = txt.dictionary["rpFl"] ?? txt.dictionary["rpfl"] ?? ""
+            if !rpflRaw.isEmpty,
+               let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16) {
+                let pairable = (rpfl & 0x4000) != 0
+                print("Discovery: \(name) rpFl=\(rpflRaw) PIN-pairable=\(pairable)")
+                return pairable
+            }
+            // Neither rpMd nor rpFl present — allow (Apple TVs sometimes omit TXT at browse time)
+            return true
         }
 
         // Cancel resolvers for services that disappeared
@@ -117,9 +133,29 @@ final class DeviceDiscovery: ObservableObject {
     private func resolveService(name: String, type: String, domain: String) {
         let resolver = ServiceResolver(name: name, type: type, domain: domain)
         resolvers[name] = resolver
-        resolver.resolve { [weak self] host, port in
+        resolver.resolve { [weak self] host, port, txt in
             Task { @MainActor in
                 guard let self else { return }
+                // Filter at resolve time using rpMd first, then rpFl fallback.
+                if let model = txt["rpMd"] {
+                    if !model.hasPrefix("AppleTV") {
+                        print("Discovery: \(name) resolved rpMd='\(model)' — not an Apple TV, removing")
+                        self.devices.removeAll { $0.id == name }
+                        self.resolvers[name] = nil
+                        return
+                    }
+                } else {
+                    // rpMd absent at resolve time — check rpFl PIN-pairing bit
+                    let rpflRaw = txt["rpFl"] ?? txt["rpfl"] ?? ""
+                    if !rpflRaw.isEmpty,
+                       let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16),
+                       (rpfl & 0x4000) == 0 {
+                        print("Discovery: \(name) resolved rpFl=\(rpflRaw) — not PIN-pairable, removing")
+                        self.devices.removeAll { $0.id == name }
+                        self.resolvers[name] = nil
+                        return
+                    }
+                }
                 print("Resolved \(name) → \(host):\(port)")
                 if let idx = self.devices.firstIndex(where: { $0.id == name }) {
                     self.devices[idx].host = host
@@ -135,7 +171,7 @@ final class DeviceDiscovery: ObservableObject {
 /// Resolves a Bonjour service name to a hostname and port via NetService.
 final class ServiceResolver: NSObject, NetServiceDelegate {
     private let service: NetService
-    private var completion: ((String, Int) -> Void)?
+    private var completion: ((String, Int, [String: String]) -> Void)?
 
     init(name: String, type: String, domain: String) {
         // NetService expects type without trailing dot
@@ -146,7 +182,9 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
         service.delegate = self
     }
 
-    func resolve(completion: @escaping (String, Int) -> Void) {
+    /// Resolves the service. Completion receives `(host, port, txtFields)` — txtFields contains
+    /// all decoded TXT record key/value pairs (empty dict if TXT record is absent).
+    func resolve(completion: @escaping (String, Int, [String: String]) -> Void) {
         self.completion = completion
         service.resolve(withTimeout: 10.0)
     }
@@ -154,6 +192,16 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
     func netServiceDidResolveAddress(_ sender: NetService) {
         guard let addresses = sender.addresses else { return }
         let port = sender.port
+
+        // Read TXT record fields at resolve time (more complete than browse-time metadata).
+        var txtFields: [String: String] = [:]
+        if let txtData = sender.txtRecordData() {
+            let txt = NetService.dictionary(fromTXTRecord: txtData)
+            txtFields = txt.compactMapValues { String(data: $0, encoding: .utf8) }
+            print("ServiceResolver: \(sender.name) TXT: \(txtFields)")
+        } else {
+            print("ServiceResolver: \(sender.name) — txtRecordData() nil at resolve time")
+        }
 
         // Prefer IPv4 (AF_INET=2) over IPv6. On BSD/macOS sockaddr layout:
         // byte 0 = sa_len, byte 1 = sa_family
@@ -172,7 +220,7 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
             if ok {
                 let nullIdx = hostname.firstIndex(of: 0) ?? hostname.endIndex
                 let ip = String(decoding: hostname[..<nullIdx].map { UInt8(bitPattern: $0) }, as: UTF8.self)
-                completion?(ip, port)
+                completion?(ip, port, txtFields)
                 completion = nil
                 return
             }
