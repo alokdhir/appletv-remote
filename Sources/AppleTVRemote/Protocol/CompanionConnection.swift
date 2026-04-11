@@ -25,7 +25,7 @@ final class CompanionConnection: ObservableObject {
     private let readQueue  = DispatchQueue(label: "companion.read",  qos: .userInitiated)
     private let credentialStore = CredentialStore()
     private var receiveBuffer = Data()
-    private var currentDevice: AppleTVDevice?
+    @Published var currentDevice: AppleTVDevice?
 
     // Pairing state
     private var pairing: HAPPairing?
@@ -38,6 +38,9 @@ final class CompanionConnection: ObservableObject {
     private var sendNonce: UInt64 = 0
     private var recvNonce: UInt64 = 0
     private var txnCounter: UInt32 = 0
+
+    // Keepalive
+    private var keepaliveTask: Task<Void, Never>?
 
     // MARK: - Connect / Disconnect
 
@@ -110,6 +113,8 @@ final class CompanionConnection: ObservableObject {
     }
 
     func disconnect() {
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
         let fd = socketFD
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
@@ -264,8 +269,9 @@ final class CompanionConnection: ObservableObject {
                 try pairVerify?.verifyM4(extracted)
                 encryptKey = pairVerify?.sessionEncryptKey
                 decryptKey = pairVerify?.sessionDecryptKey
-                startCompanionSession()
                 state = .connected
+                startCompanionSession()
+                startKeepalive()
             } catch {
                 // Authentication error (code=2) = credentials mismatch; delete and re-pair.
                 // Other errors also delete since stale credentials are the likely cause.
@@ -312,7 +318,37 @@ final class CompanionConnection: ObservableObject {
         print("Companion ← OPACK \(identifier) type=\(msgType) txn=\(txn)")
 
         if identifier == "_ping" {
+            // ATV is checking we're alive — echo back immediately
             sendEncrypted(OPACK.encodePong(txn: txn))
+        } else if identifier == "_pong" {
+            // ATV responded to our keepalive ping — connection confirmed alive
+            print("Companion: keepalive pong txn=\(txn)")
+        }
+    }
+
+    // MARK: - Keepalive
+
+    /// Sends a client-initiated _ping every 5 s during a session.
+    /// The ATV disconnects idle connections that haven't exchanged any frames;
+    /// this keeps the socket alive between button presses.
+    private func startKeepalive() {
+        keepaliveTask?.cancel()
+        keepaliveTask = Task { @MainActor [weak self] in
+            do {
+                while true {
+                    try await Task.sleep(for: .seconds(5))
+                    guard let self, self.state == .connected else { return }
+                    let txn = self.txnCounter
+                    self.txnCounter &+= 1
+                    self.sendEncrypted(OPACK.pack([
+                        "_i": "_ping",
+                        "_t": 2,
+                        "_x": txn,
+                    ] as [String: Any]))
+                }
+            } catch {
+                // Task cancelled via disconnect()
+            }
         }
     }
 

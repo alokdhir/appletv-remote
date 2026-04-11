@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var discovery: DeviceDiscovery
-    @StateObject private var connection = CompanionConnection()
+    @EnvironmentObject private var discovery:  DeviceDiscovery
+    @EnvironmentObject private var connection: CompanionConnection
     @State private var selectedDevice: AppleTVDevice?
 
     var body: some View {

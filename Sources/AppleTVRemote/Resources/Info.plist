@@ -26,5 +26,7 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>AppleTV Remote needs local network access to discover and control Apple TVs.</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 </dict>
 </plist>
