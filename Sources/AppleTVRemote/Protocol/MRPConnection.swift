@@ -104,9 +104,9 @@ final class MRPConnection: ObservableObject {
 
     private func sendDeviceInfo() {
         guard let data = MRPMessage.deviceInfo.encoded() else { return }
-        sendRaw(data) { [weak self] in
+        sendRaw(data) { @Sendable [weak self] in
             // After DEVICE_INFO, subscribe to now-playing updates
-            self?.sendClientUpdatesSubscription()
+            Task { @MainActor [weak self] in self?.sendClientUpdatesSubscription() }
         }
     }
 
@@ -120,7 +120,7 @@ final class MRPConnection: ObservableObject {
         sendRaw(data)
     }
 
-    private func sendRaw(_ data: Data, completion: (() -> Void)? = nil) {
+    private func sendRaw(_ data: Data, completion: (@Sendable () -> Void)? = nil) {
         connection?.send(content: data, completion: .contentProcessed { error in
             if let error { print("MRP send error: \(error)") }
             completion?()

@@ -1,70 +1,62 @@
 import Foundation
-import Security
 
-/// Persists MRP pairing credentials in the macOS Keychain.
+/// Persists Companion pairing credentials as JSON files in Application Support.
 ///
-/// After a successful pairing handshake, the Apple TV issues a unique
-/// identifier and a shared secret. We store these keyed by the device's
-/// Bonjour service name so that subsequent connections skip the pairing step.
+/// Stored at: ~/Library/Application Support/AppleTVRemote/<deviceID>.json
+/// No Keychain access required — avoids macOS password prompts for unsigned apps.
 struct CredentialStore {
-    private let service = "com.adhir.appletv-remote"
+
+    private static let appDir: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask).first!
+        let dir = base.appendingPathComponent("AppleTVRemote", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true)
+        return dir
+    }()
+
+    private func url(for deviceID: String) -> URL {
+        let safe = deviceID.replacingOccurrences(of: "/", with: "_")
+        return Self.appDir.appendingPathComponent("\(safe).json")
+    }
 
     // MARK: - Check
 
     func hasCredentials(for deviceID: String) -> Bool {
-        load(deviceID: deviceID) != nil
+        FileManager.default.fileExists(atPath: url(for: deviceID).path)
     }
 
     // MARK: - Save
 
     func save(credentials: PairingCredentials, for deviceID: String) {
-        guard let data = try? JSONEncoder().encode(credentials) else { return }
-
-        let query: [CFString: Any] = [
-            kSecClass:           kSecClassGenericPassword,
-            kSecAttrService:     service,
-            kSecAttrAccount:     deviceID,
-            kSecValueData:       data,
-            kSecAttrAccessible:  kSecAttrAccessibleAfterFirstUnlock
-        ]
-
-        // Try update first, then add
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
-        if status == errSecItemNotFound {
-            SecItemAdd(query as CFDictionary, nil)
+        guard let data = try? JSONEncoder().encode(credentials) else {
+            print("CredentialStore: encode failed for \(deviceID)")
+            return
+        }
+        do {
+            try data.write(to: url(for: deviceID), options: .atomic)
+            print("CredentialStore: saved credentials for \(deviceID)")
+        } catch {
+            print("CredentialStore: save failed: \(error)")
         }
     }
 
     // MARK: - Load
 
     func load(deviceID: String) -> PairingCredentials? {
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: deviceID,
-            kSecReturnData:  true,
-            kSecMatchLimit:  kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        guard let data = try? Data(contentsOf: url(for: deviceID)) else { return nil }
         return try? JSONDecoder().decode(PairingCredentials.self, from: data)
     }
 
     // MARK: - Delete
 
     func delete(deviceID: String) {
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: deviceID
-        ]
-        SecItemDelete(query as CFDictionary)
+        try? FileManager.default.removeItem(at: url(for: deviceID))
+        print("CredentialStore: deleted credentials for \(deviceID)")
     }
 }
 
-/// Credentials obtained after a successful MRP pairing handshake.
+/// Credentials obtained after a successful Companion pairing handshake.
 struct PairingCredentials: Codable {
     let clientID: String      // UUID this client registered with
     let ltsk: Data            // Long-term secret key (Ed25519 private key bytes)

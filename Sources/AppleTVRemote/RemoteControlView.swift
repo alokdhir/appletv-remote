@@ -3,7 +3,10 @@ import SwiftUI
 struct RemoteControlView: View {
     let device: AppleTVDevice
     @ObservedObject var connection: CompanionConnection
+    @EnvironmentObject var discovery: DeviceDiscovery
     @State private var pairingPin = ""
+    @State private var cancelEnabled = false
+    @FocusState private var pinFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,8 +22,14 @@ struct RemoteControlView: View {
                     ProgressView("Connecting…")
                     Button("Cancel") { connection.disconnect() }
                         .buttonStyle(.bordered)
+                        .disabled(!cancelEnabled)
+                        .opacity(cancelEnabled ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    cancelEnabled = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { cancelEnabled = true }
+                }
             case .awaitingPairingPin:
                 pairingView
             case .connected:
@@ -61,7 +70,8 @@ struct RemoteControlView: View {
             Text(device.name)
                 .font(.title3.weight(.medium))
             Button("Connect") {
-                connection.connect(to: device)
+                let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                connection.connect(to: fresh)
             }
             .buttonStyle(.borderedProminent)
         }
@@ -83,10 +93,20 @@ struct RemoteControlView: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.center)
                 .frame(width: 100)
+                .focused($pinFocused)
+                .onAppear { pinFocused = true }
+                .onChange(of: pairingPin) { new in
+                    let digits = new.filter(\.isNumber)
+                    if digits != new { pairingPin = digits }
+                    if digits.count >= 4 {
+                        pairingPin = String(digits.prefix(4))
+                        submitPin()
+                    }
+                }
                 .onSubmit { submitPin() }
             Button("Pair") { submitPin() }
                 .buttonStyle(.borderedProminent)
-                .disabled(pairingPin.isEmpty)
+                .disabled(pairingPin.count < 4)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,15 +119,20 @@ struct RemoteControlView: View {
                     NowPlayingCard(info: info)
                 }
 
-                // Navigation pad
-                VStack(spacing: 4) {
-                    RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
-                    HStack(spacing: 4) {
-                        RemoteButton(label: "chevron.left",   action: { connection.send(.left) })
-                        RemoteButton(label: "return",          action: { connection.send(.select) }, size: 52)
-                        RemoteButton(label: "chevron.right",  action: { connection.send(.right) })
+                // Navigation pad — circular ring matching the real Apple TV remote
+                ZStack {
+                    Circle()
+                        .fill(.quaternary)
+                        .frame(width: 164, height: 164)
+                    VStack(spacing: 4) {
+                        RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
+                        HStack(spacing: 4) {
+                            RemoteButton(label: "chevron.left",   action: { connection.send(.left) })
+                            RemoteButton(label: "return",          action: { connection.send(.select) }, size: 52)
+                            RemoteButton(label: "chevron.right",  action: { connection.send(.right) })
+                        }
+                        RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
                     }
-                    RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
                 }
 
                 // Menu + Home

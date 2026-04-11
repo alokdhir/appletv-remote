@@ -104,12 +104,14 @@ struct SRPClient {
         let exp  = privateKey + u * x
         let S    = base.power(exp, modulus: N)
 
-        // K = SHA-512(PAD(S))
-        let K = sha512(pad(S.toData(), to: len))
+        // K = SHA-512(S) — srptools/pyatv convention: no padding of S
+        let K = sha512(S.toData())
 
-        // M1 = H(H(N) XOR H(g) | H(I) | s | PAD(A) | PAD(B) | K)
-        let hN   = sha512(pad(N.toData(), to: len))
-        let hg   = sha512(pad(g.toData(), to: len))
+        // M1 = H(H(N) XOR H(g) | H(I) | s | A | B | K)
+        // srptools hashes raw g bytes (not padded to group size).
+        // H(N) is fine as-is since N.toData() is already 384 bytes.
+        let hN   = sha512(N.toData())
+        let hg   = sha512(g.toData())   // g = [0x05], 1 byte — NOT padded to 384
         let hNxg = Data(zip(hN, hg).map { $0 ^ $1 })
         let hI   = sha512(Data(SRPClient.username.utf8))
         let M1   = sha512(hNxg + hI + salt

@@ -22,6 +22,7 @@ struct TLV8 {
         case fragmentData  = 0x0C
         case fragmentLast  = 0x0D
         case sessionID     = 0x0E
+        case name          = 0x11   // Companion-specific: OPACK-encoded {"name": string}
         case separator     = 0xFF
     }
 
@@ -84,4 +85,7 @@ struct TLV8 {
     subscript(tag: Tag) -> Data? {
         entries.first(where: { $0.0 == tag.rawValue })?.1
     }
+
+    /// All entries as (tag byte, data) pairs — for debugging.
+    var allEntries: [(UInt8, Data)] { entries }
 }

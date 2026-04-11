@@ -40,6 +40,7 @@ struct DeviceListView: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("Refresh")
         }
         .padding(.horizontal, 12)

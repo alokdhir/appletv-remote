@@ -14,7 +14,7 @@ import CryptoKit
 /// After M6 completes the pairing, credentials are available via `credentials`.
 ///
 /// Reference: HAP specification §5.6, pyatv protocols/mrp/pairing.py
-final class HAPPairing {
+final class HAPPairing: @unchecked Sendable {
 
     enum Step: Int { case m1 = 1, m2, m3, m4, m5, m6, done }
     enum PairingError: Error {
@@ -47,8 +47,8 @@ final class HAPPairing {
     /// Returns the TLV8 payload for M1 (initial client hello).
     func m1Payload() -> Data {
         var tlv = TLV8()
+        tlv.append(.method, byte: 0x00)   // 0 = Pair Setup without MFi (method before state, per pyatv)
         tlv.append(.state,  byte: UInt8(Step.m1.rawValue))
-        tlv.append(.method, byte: 0x00)   // 0 = Pair Setup without MFi
         return tlv.encode()
     }
 
@@ -86,11 +86,17 @@ final class HAPPairing {
         try checkState(tlv, expected: .m4)
 
         guard let serverProof = tlv[.proof] else { throw PairingError.missingTLVField("proof") }
-        guard let expected = sessionResult?.expectedServerProof else { return Data() }
+        guard let expected = sessionResult?.expectedServerProof else {
+            throw PairingError.missingTLVField("sessionResult (M3 not completed?)")
+        }
         guard serverProof == expected else { throw PairingError.serverProofMismatch }
+        print("HAPPairing: server proof verified ✓")
 
         step = .m4
-        return try buildM5Payload()
+        let m5 = try buildM5Payload()
+        let hex = m5.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
+        print("HAPPairing: M5 TLV8 (\(m5.count) bytes) first 32: \(hex)")
+        return m5
     }
 
     /// Process server's M6 response (Apple TV identity); returns PairingCredentials on success.
@@ -111,8 +117,15 @@ final class HAPPairing {
         let plain = try ChaChaPoly.open(box, using: key)
 
         let inner = TLV8.decode(plain)
+        // Dump all TLV8 fields in M6 inner payload to verify we get the right LTPK
+        print("HAPPairing M6 inner TLV8 (\(plain.count) bytes):")
+        for (tag, value) in inner.allEntries {
+            let hex = value.map { String(format: "%02x", $0) }.joined(separator: " ")
+            print("  tag=0x\(String(format: "%02x", tag)) len=\(value.count) hex=\(hex)")
+        }
         guard let atv_id   = inner[.identifier] else { throw PairingError.missingTLVField("identifier") }
         guard let atv_ltpk = inner[.publicKey]  else { throw PairingError.missingTLVField("publicKey") }
+        print("HAPPairing M6: deviceLTPK = \(atv_ltpk.map { String(format: "%02x", $0) }.joined(separator: " "))")
 
         let creds = PairingCredentials(
             clientID:     clientID,
@@ -154,10 +167,18 @@ final class HAPPairing {
         inner.append(.identifier, idData)
         inner.append(.publicKey,  ltpkData)
         inner.append(.signature,  Data(signature))
+        // Companion-specific: tag=0x11 with OPACK {"name": ...}.
+        // Without this the ATV stores us in the HAP-only controller store, which the
+        // Companion pair-verify service does not check → error=2 (Authentication) in M4.
+        inner.append(.name, OPACK.encodeDeviceName("Mac Remote"))
 
         // Encrypt with ChaCha20-Poly1305, nonce = "PS-Msg05" zero-padded to 12 bytes
-        let nonce    = try ChaChaPoly.Nonce(data: noncePadded("PS-Msg05"))
-        let sealedBox = try ChaChaPoly.seal(inner.encode(), using: key, nonce: nonce)
+        let nonceData = noncePadded("PS-Msg05")
+        print("HAPPairing: M5 nonce hex: \(nonceData.map { String(format: "%02x", $0) }.joined(separator: " "))")
+        let nonce    = try ChaChaPoly.Nonce(data: nonceData)
+        let innerEncoded = inner.encode()
+        print("HAPPairing: M5 inner TLV8 (\(innerEncoded.count) bytes): \(innerEncoded.map { String(format: "%02x", $0) }.joined(separator: " "))")
+        let sealedBox = try ChaChaPoly.seal(innerEncoded, using: key, nonce: nonce)
         // combined = nonce(12) + ciphertext + tag(16); we want ciphertext + tag
         let encPayload = sealedBox.ciphertext + sealedBox.tag
 
