@@ -44,6 +44,40 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Connect / Disconnect
 
+    /// Sends a Wake-on-LAN magic packet, waits ~5 s for the Apple TV to boot,
+    /// then connects.  The UI shows "Waking up Apple TV…" during the delay.
+    func wakeAndConnect(to device: AppleTVDevice) {
+        guard state == .disconnected else { return }
+        state = .waking
+        currentDevice = device
+
+        let mac    = MACStore.load(for: device.id)
+        let hostIP = device.host
+
+        Task {
+            // Fire the magic packet off the main thread
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    if let mac {
+                        try? WakeOnLAN.send(mac: mac, targetIP: hostIP)
+                    } else {
+                        print("WoL: no stored MAC for \(device.id) — only broadcast possible once MAC is learned")
+                    }
+                    cont.resume()
+                }
+            }
+
+            // Give the Apple TV time to wake (sleep → ready typically 3–6 s)
+            try? await Task.sleep(for: .seconds(5))
+
+            await MainActor.run {
+                guard self.state == .waking else { return }  // user cancelled
+                self.state = .disconnected
+                self.connect(to: device)
+            }
+        }
+    }
+
     func connect(to device: AppleTVDevice) {
         guard state == .disconnected else { return }
         guard let host = device.host, let port = device.port else {

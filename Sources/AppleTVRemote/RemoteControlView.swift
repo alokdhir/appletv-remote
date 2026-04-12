@@ -17,6 +17,8 @@ struct RemoteControlView: View {
             switch connection.state {
             case .disconnected:
                 connectPrompt
+            case .waking:
+                wakingView
             case .connecting:
                 VStack(spacing: 16) {
                     ProgressView("Connecting…")
@@ -63,17 +65,63 @@ struct RemoteControlView: View {
     }
 
     private var connectPrompt: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Image(systemName: "appletv.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(Color.accentColor)
             Text(device.name)
                 .font(.title3.weight(.medium))
-            Button("Connect") {
-                let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
-                connection.connect(to: fresh)
+
+            let hasMac = MACStore.load(for: device.id) != nil
+
+            if hasMac {
+                // Wake + connect (primary) — shown when we have a stored MAC
+                Button {
+                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                    connection.wakeAndConnect(to: fresh)
+                } label: {
+                    Label("Wake & Connect", systemImage: "power")
+                }
+                .buttonStyle(.borderedProminent)
+
+                // Plain connect (secondary) — in case the ATV is already awake
+                Button("Connect") {
+                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                    connection.connect(to: fresh)
+                }
+                .buttonStyle(.bordered)
+                .font(.callout)
+            } else {
+                Button("Connect") {
+                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                    connection.connect(to: fresh)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Text("Wake & Connect will appear after the first successful connection.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 200)
             }
-            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var wakingView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "power.circle.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(Color.accentColor)
+                .opacity(0.85)
+            Text("Waking up \(device.name)…")
+                .font(.title3.weight(.medium))
+            Text("Sent wake signal · connecting in ~5 s")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Cancel") { connection.disconnect() }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -183,6 +231,7 @@ struct RemoteControlView: View {
     private var statusColor: Color {
         switch connection.state {
         case .connected:          return .green
+        case .waking:             return .blue
         case .connecting:         return .yellow
         case .awaitingPairingPin: return .orange
         case .error:              return .red

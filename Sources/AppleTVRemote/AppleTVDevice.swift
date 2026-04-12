@@ -26,6 +26,7 @@ struct AppleTVDevice: Identifiable, Hashable {
 /// Possible states of the connection to an Apple TV.
 enum ConnectionState: Equatable {
     case disconnected
+    case waking           // WoL packet sent, waiting for Apple TV to boot
     case connecting
     case awaitingPairingPin
     case connected
@@ -33,11 +34,12 @@ enum ConnectionState: Equatable {
 
     var displayText: String {
         switch self {
-        case .disconnected:      return "Disconnected"
-        case .connecting:        return "Connecting…"
+        case .disconnected:       return "Disconnected"
+        case .waking:             return "Waking up Apple TV…"
+        case .connecting:         return "Connecting…"
         case .awaitingPairingPin: return "Enter PIN shown on Apple TV"
-        case .connected:         return "Connected"
-        case .error(let msg):    return "Error: \(msg)"
+        case .connected:          return "Connected"
+        case .error(let msg):     return "Error: \(msg)"
         }
     }
 }

@@ -161,6 +161,16 @@ final class DeviceDiscovery: ObservableObject {
                     self.devices[idx].host = host
                     self.devices[idx].port = UInt16(port)
                 }
+                // Cache MAC address from ARP so Wake-on-LAN works when the ATV sleeps.
+                // Run off-main so the blocking ARP lookup doesn't stall the UI.
+                let deviceID = name
+                let resolvedIP = host
+                DispatchQueue.global(qos: .utility).async {
+                    if let mac = MACStore.lookupFromARP(ip: resolvedIP) {
+                        print("Discovery: \(deviceID) ARP MAC=\(mac)")
+                        MACStore.save(mac: mac, for: deviceID)
+                    }
+                }
             }
         }
     }
