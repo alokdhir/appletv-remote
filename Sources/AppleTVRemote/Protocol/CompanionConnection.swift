@@ -48,12 +48,14 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Connect / Disconnect
 
-    /// Smart connect: pings the device first (1 s timeout).
+    /// Smart connect: probes the device first (1 s TCP timeout).
     /// - If it responds → connect directly (device is already on).
     /// - If it doesn't  → send WoL, wait 5 s, connect and send Wake HID for HDMI-CEC.
+    ///
+    /// Uses Task.detached so the blocking probe never touches the main thread.
     func wakeAndConnect(to device: AppleTVDevice) {
         guard state == .disconnected else { return }
-        state = .waking   // show spinner while we ping
+        state = .waking
         currentDevice = device
 
         guard let host = device.host, let port = device.port else {
@@ -61,51 +63,39 @@ final class CompanionConnection: ObservableObject {
             return
         }
 
-        Task {
-            let reachable = await Self.isReachable(host: host, port: Int(port), timeoutSeconds: 1)
+        let mac = MACStore.load(for: device.id)
 
-            await MainActor.run {
-                guard self.state == .waking else { return }  // user cancelled
-                if reachable {
-                    // Device is on — connect immediately, no WoL needed
-                    print("SmartConnect: device responded to ping, connecting directly")
-                    self.state = .disconnected
-                    self.connect(to: device)
-                } else {
-                    // Device is asleep — send WoL then wait
-                    print("SmartConnect: no response, sending WoL")
-                    let mac = MACStore.load(for: device.id)
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        if let mac {
-                            try? WakeOnLAN.send(mac: mac, targetIP: host)
-                        }
-                    }
-                    Task {
-                        try? await Task.sleep(for: .seconds(5))
-                        await MainActor.run {
-                            guard self.state == .waking else { return }
-                            self.sendWakeOnConnect = true
-                            self.state = .disconnected
-                            self.connect(to: device)
-                        }
-                    }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // Blocking probe — safe here because we're detached from MainActor
+            let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 1)
+            print("SmartConnect: \(device.name) reachable=\(reachable)")
+
+            if reachable {
+                let weakSelf = self
+                await MainActor.run {
+                    guard let conn = weakSelf, conn.state == .waking else { return }
+                    conn.state = .disconnected
+                    conn.connect(to: device)
+                }
+            } else {
+                // Send WoL while still on background thread
+                if let mac { try? WakeOnLAN.send(mac: mac, targetIP: host) }
+
+                // Wait for the ATV to boot
+                try? await Task.sleep(for: .seconds(5))
+
+                let weakSelf = self
+                await MainActor.run {
+                    guard let conn = weakSelf, conn.state == .waking else { return }
+                    conn.sendWakeOnConnect = true
+                    conn.state = .disconnected
+                    conn.connect(to: device)
                 }
             }
         }
     }
 
-    /// Non-blocking TCP probe: attempts to connect to host:port within `timeoutSeconds`.
-    /// Returns true if the connection succeeds (device is awake and accepting connections).
-    /// Must be called from a background thread (uses blocking poll).
-    private static func isReachable(host: String, port: Int, timeoutSeconds: Double) async -> Bool {
-        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: isReachableSync(host: host, port: port, timeoutSeconds: timeoutSeconds))
-            }
-        }
-    }
-
-    private static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
+    private nonisolated static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { Darwin.close(fd) }
