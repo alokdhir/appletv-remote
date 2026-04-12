@@ -42,6 +42,10 @@ final class CompanionConnection: ObservableObject {
     // Keepalive
     private var keepaliveTask: Task<Void, Never>?
 
+    // Set to true when connect() was initiated via wakeAndConnect() so we
+    // auto-send the Wake HID command after the session is established.
+    private var sendWakeOnConnect = false
+
     // MARK: - Connect / Disconnect
 
     /// Sends a Wake-on-LAN magic packet, waits ~5 s for the Apple TV to boot,
@@ -72,6 +76,7 @@ final class CompanionConnection: ObservableObject {
 
             await MainActor.run {
                 guard self.state == .waking else { return }  // user cancelled
+                self.sendWakeOnConnect = true
                 self.state = .disconnected
                 self.connect(to: device)
             }
@@ -159,6 +164,7 @@ final class CompanionConnection: ObservableObject {
         pairVerify = nil
         encryptKey = nil
         decryptKey = nil
+        sendWakeOnConnect = false
     }
 
     // MARK: - Remote Commands (post-session)
@@ -166,16 +172,28 @@ final class CompanionConnection: ObservableObject {
     func send(_ command: RemoteCommand) {
         guard state == .connected else { return }
         let keycode = command.hidKeycode
-        let txn = txnCounter; txnCounter &+= 1
-        sendEncrypted(OPACK.pack([
-            "_i": "_hidC", "_t": 2, "_x": txn,
-            "_c": ["_hBtS": 1, "_hidC": Int(keycode)] as [String: Any],
-        ] as [String: Any]))
-        let txn2 = txnCounter; txnCounter &+= 1
-        sendEncrypted(OPACK.pack([
-            "_i": "_hidC", "_t": 2, "_x": txn2,
-            "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
-        ] as [String: Any]))
+
+        if command.sendReleaseOnly {
+            // Wake/Sleep: single "button up" (release) event only — no press first.
+            // The Companion protocol triggers the power/CEC action on the release edge.
+            let txn = txnCounter; txnCounter &+= 1
+            sendEncrypted(OPACK.pack([
+                "_i": "_hidC", "_t": 2, "_x": txn,
+                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
+            ] as [String: Any]))
+        } else {
+            // Normal buttons: down then up
+            let txn = txnCounter; txnCounter &+= 1
+            sendEncrypted(OPACK.pack([
+                "_i": "_hidC", "_t": 2, "_x": txn,
+                "_c": ["_hBtS": 1, "_hidC": Int(keycode)] as [String: Any],
+            ] as [String: Any]))
+            let txn2 = txnCounter; txnCounter &+= 1
+            sendEncrypted(OPACK.pack([
+                "_i": "_hidC", "_t": 2, "_x": txn2,
+                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
+            ] as [String: Any]))
+        }
     }
 
     // MARK: - Session Init
@@ -306,6 +324,14 @@ final class CompanionConnection: ObservableObject {
                 state = .connected
                 startCompanionSession()
                 startKeepalive()
+                if sendWakeOnConnect {
+                    sendWakeOnConnect = false
+                    // Small delay to let the session handshake complete before
+                    // sending the Wake HID event — triggers HDMI-CEC TV power-on
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.send(.wake)
+                    }
+                }
             } catch {
                 // Authentication error (code=2) = credentials mismatch; delete and re-pair.
                 // Other errors also delete since stale credentials are the likely cause.

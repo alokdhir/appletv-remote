@@ -146,6 +146,7 @@ enum MRPMessage {
         case .playPause:    return .playPause
         case .volumeUp:     return .volumeUp
         case .volumeDown:   return .volumeDown
+        case .wake, .sleep: return nil   // Companion-only; no MRP HID usage
         }
     }
 

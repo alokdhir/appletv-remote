@@ -52,6 +52,8 @@ enum RemoteCommand {
     case home
     case playPause
     case volumeUp, volumeDown
+    case wake   // power on — also triggers HDMI-CEC TV power-on
+    case sleep  // power off
 
     /// Companion protocol HID keycode for this command.
     var hidKeycode: UInt8 {
@@ -65,7 +67,19 @@ enum RemoteCommand {
         case .home:        return 7
         case .volumeUp:    return 8
         case .volumeDown:  return 9
+        case .sleep:       return 12
+        case .wake:        return 13
         case .playPause:   return 14
+        }
+    }
+
+    /// True if this command should be sent as a single "button up" event only,
+    /// rather than a down+up pair.  The Companion protocol requires Wake/Sleep
+    /// to be sent as a release event to trigger the power/CEC action.
+    var sendReleaseOnly: Bool {
+        switch self {
+        case .wake, .sleep: return true
+        default:            return false
         }
     }
 }
