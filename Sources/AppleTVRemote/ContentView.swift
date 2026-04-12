@@ -28,6 +28,11 @@ struct ContentView: View {
             discovery.stopDiscovery()
             connection.disconnect()
         }
+        .onChange(of: selectedDevice) { newDevice in
+            // Disconnect from the previous device whenever the selection changes.
+            // RemoteControlView will show the Connect button for the new device.
+            connection.disconnect()
+        }
     }
 
     private var placeholderView: some View {
