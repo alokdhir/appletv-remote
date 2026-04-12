@@ -107,10 +107,32 @@ enum OPACK {
 
     // MARK: - Session message helpers
 
+    /// Encode a client `_ping` heartbeat.
+    /// Uses explicit key ordering (_i, _t, _x) and small-int encoding for _t.
+    static func encodePing(txn: UInt32) -> Data {
+        var out = Data()
+        out.append(0xE3)              // dict, 3 entries
+        encodeString("_i", into: &out)
+        encodeString("_ping", into: &out)
+        encodeString("_t", into: &out)
+        out.append(0x08 + 2)          // small int: 2 (request)
+        encodeString("_x", into: &out)
+        encodeUInt32(txn, into: &out)
+        return out
+    }
+
     /// Encode a `_pong` response to an ATV `_ping` request.
     /// _t: 3 = response (ATV sends _ping as _t: 2 request, expects _t: 3 response).
     static func encodePong(txn: UInt32) -> Data {
-        pack(["_i": "_pong", "_t": 3, "_x": txn] as [String: Any])
+        var out = Data()
+        out.append(0xE3)              // dict, 3 entries
+        encodeString("_i", into: &out)
+        encodeString("_pong", into: &out)
+        encodeString("_t", into: &out)
+        out.append(0x08 + 3)          // small int: 3 (response)
+        encodeString("_x", into: &out)
+        encodeUInt32(txn, into: &out)
+        return out
     }
 
     /// Encode `_systemInfo` request — tells the ATV who we are.

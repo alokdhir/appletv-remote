@@ -39,8 +39,10 @@ final class CompanionConnection: ObservableObject {
     private var recvNonce: UInt64 = 0
     private var txnCounter: UInt32 = 0
 
-    // Keepalive
-    private var keepaliveTask: Task<Void, Never>?
+    // Keepalive — DispatchSourceTimer is used instead of Task.sleep because
+    // the MainActor cooperative scheduler can delay Task resumptions when
+    // DispatchQueue.main is busy with the read-loop dispatches.
+    private var keepaliveTimer: DispatchSourceTimer?
 
     // Set to true when connect() was initiated via wakeAndConnect() so we
     // auto-send the Wake HID command after the session is established.
@@ -201,8 +203,8 @@ final class CompanionConnection: ObservableObject {
     }
 
     func disconnect() {
-        keepaliveTask?.cancel()
-        keepaliveTask = nil
+        keepaliveTimer?.cancel()
+        keepaliveTimer = nil
         let fd = socketFD
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
@@ -440,25 +442,28 @@ final class CompanionConnection: ObservableObject {
     /// Sends a client-initiated _ping every 5 s during a session.
     /// The ATV disconnects idle connections that haven't exchanged any frames;
     /// this keeps the socket alive between button presses.
+    ///
+    /// Uses DispatchSourceTimer (not Task.sleep) so the timer fires reliably on
+    /// DispatchQueue.main without depending on the Swift concurrency scheduler,
+    /// which can be delayed when the MainActor is busy with read-loop dispatches.
     private func startKeepalive() {
-        keepaliveTask?.cancel()
-        keepaliveTask = Task { @MainActor [weak self] in
-            do {
-                while true {
-                    try await Task.sleep(for: .seconds(5))
-                    guard let self, self.state == .connected else { return }
-                    let txn = self.txnCounter
-                    self.txnCounter &+= 1
-                    self.sendEncrypted(OPACK.pack([
-                        "_i": "_ping",
-                        "_t": 2,
-                        "_x": txn,
-                    ] as [String: Any]))
-                }
-            } catch {
-                // Task cancelled via disconnect()
+        keepaliveTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        // Fire immediately so the first ping goes out right away, then every 5 s.
+        timer.schedule(deadline: .now(), repeating: 5.0)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.state == .connected else {
+                self?.keepaliveTimer?.cancel()
+                self?.keepaliveTimer = nil
+                return
             }
+            let txn = self.txnCounter
+            self.txnCounter &+= 1
+            print("Companion → keepalive _ping txn=\(txn)")
+            self.sendEncrypted(OPACK.encodePing(txn: txn))
         }
+        timer.resume()
+        keepaliveTimer = timer
     }
 
     private func sendEncrypted(_ opackData: Data) {
