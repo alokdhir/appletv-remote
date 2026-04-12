@@ -48,39 +48,98 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Connect / Disconnect
 
-    /// Sends a Wake-on-LAN magic packet, waits ~5 s for the Apple TV to boot,
-    /// then connects.  The UI shows "Waking up Apple TV…" during the delay.
+    /// Smart connect: pings the device first (1 s timeout).
+    /// - If it responds → connect directly (device is already on).
+    /// - If it doesn't  → send WoL, wait 5 s, connect and send Wake HID for HDMI-CEC.
     func wakeAndConnect(to device: AppleTVDevice) {
         guard state == .disconnected else { return }
-        state = .waking
+        state = .waking   // show spinner while we ping
         currentDevice = device
 
-        let mac    = MACStore.load(for: device.id)
-        let hostIP = device.host
+        guard let host = device.host, let port = device.port else {
+            state = .error("Device not yet resolved — try again")
+            return
+        }
 
         Task {
-            // Fire the magic packet off the main thread
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    if let mac {
-                        try? WakeOnLAN.send(mac: mac, targetIP: hostIP)
-                    } else {
-                        print("WoL: no stored MAC for \(device.id) — only broadcast possible once MAC is learned")
-                    }
-                    cont.resume()
-                }
-            }
-
-            // Give the Apple TV time to wake (sleep → ready typically 3–6 s)
-            try? await Task.sleep(for: .seconds(5))
+            let reachable = await Self.isReachable(host: host, port: Int(port), timeoutSeconds: 1)
 
             await MainActor.run {
                 guard self.state == .waking else { return }  // user cancelled
-                self.sendWakeOnConnect = true
-                self.state = .disconnected
-                self.connect(to: device)
+                if reachable {
+                    // Device is on — connect immediately, no WoL needed
+                    print("SmartConnect: device responded to ping, connecting directly")
+                    self.state = .disconnected
+                    self.connect(to: device)
+                } else {
+                    // Device is asleep — send WoL then wait
+                    print("SmartConnect: no response, sending WoL")
+                    let mac = MACStore.load(for: device.id)
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        if let mac {
+                            try? WakeOnLAN.send(mac: mac, targetIP: host)
+                        }
+                    }
+                    Task {
+                        try? await Task.sleep(for: .seconds(5))
+                        await MainActor.run {
+                            guard self.state == .waking else { return }
+                            self.sendWakeOnConnect = true
+                            self.state = .disconnected
+                            self.connect(to: device)
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// Non-blocking TCP probe: attempts to connect to host:port within `timeoutSeconds`.
+    /// Returns true if the connection succeeds (device is awake and accepting connections).
+    /// Must be called from a background thread (uses blocking poll).
+    private static func isReachable(host: String, port: Int, timeoutSeconds: Double) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: isReachableSync(host: host, port: port, timeoutSeconds: timeoutSeconds))
+            }
+        }
+    }
+
+    private static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+
+        // Set non-blocking
+        let flags = fcntl(fd, F_GETFL, 0)
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+
+        var addr = sockaddr_in()
+        addr.sin_len    = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port   = in_port_t(port).bigEndian
+        inet_pton(AF_INET, host, &addr.sin_addr)
+
+        let result = withUnsafePointer(to: addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        if result == 0 { return true }           // immediate connect (rare but possible)
+        guard errno == EINPROGRESS else { return false }
+
+        // Wait for writability with poll()
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        let ms    = Int32(timeoutSeconds * 1000)
+        let ready = poll(&pfd, 1, ms)
+        guard ready > 0 else { return false }
+
+        // Check for async connect error
+        var err: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
+        return err == 0
     }
 
     func connect(to device: AppleTVDevice) {
