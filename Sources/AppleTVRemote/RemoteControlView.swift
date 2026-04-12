@@ -65,45 +65,21 @@ struct RemoteControlView: View {
     }
 
     private var connectPrompt: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Image(systemName: "appletv.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(Color.accentColor)
             Text(device.name)
                 .font(.title3.weight(.medium))
-
-            let hasMac = MACStore.load(for: device.id) != nil
-
-            if hasMac {
-                // Wake + connect (primary) — shown when we have a stored MAC
-                Button {
-                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+            Button("Connect") {
+                let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                if MACStore.load(for: fresh.id) != nil {
                     connection.wakeAndConnect(to: fresh)
-                } label: {
-                    Label("Wake & Connect", systemImage: "power")
-                }
-                .buttonStyle(.borderedProminent)
-
-                // Plain connect (secondary) — in case the ATV is already awake
-                Button("Connect") {
-                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                } else {
                     connection.connect(to: fresh)
                 }
-                .buttonStyle(.bordered)
-                .font(.callout)
-            } else {
-                Button("Connect") {
-                    let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
-                    connection.connect(to: fresh)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Text("Wake & Connect will appear after the first successful connection.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 200)
             }
+            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
