@@ -3,35 +3,76 @@ import AppKit
 
 @main
 struct AppleTVRemoteApp: App {
-    @StateObject private var discovery  = DeviceDiscovery()
-    @StateObject private var connection = CompanionConnection()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(discovery)
-                .environmentObject(connection)
+                .environmentObject(appDelegate.discovery)
+                .environmentObject(appDelegate.connection)
                 .preferredColorScheme(.dark)
         }
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+    }
+}
 
-        // Menu bar remote: window-style floating panel
-        MenuBarExtra {
+// MARK: - App Delegate
+
+/// Owns the shared model objects and the menu bar status item.
+/// Using NSStatusItem directly instead of SwiftUI MenuBarExtra avoids rendering
+/// issues that can prevent the icon from appearing on some macOS versions.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let discovery  = DeviceDiscovery()
+    let connection = CompanionConnection()
+
+    private var statusItem: NSStatusItem?
+    private var popover:    NSPopover?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMenuBar()
+    }
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = statusItem?.button else { return }
+
+        let img = NSImage(systemSymbolName: "appletv.remote.gen2",
+                          accessibilityDescription: "Apple TV Remote")
+        img?.isTemplate = true
+        button.image = img
+        button.action = #selector(togglePopover(_:))
+        button.target = self
+
+        let contentVC = NSHostingController(rootView:
             MenuBarRemoteView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .preferredColorScheme(.dark)
-        } label: {
-            Image(systemName: "appletv.remote.gen2")
+        )
+        contentVC.sizingOptions = .preferredContentSize
+
+        let pop = NSPopover()
+        pop.contentViewController = contentVC
+        pop.behavior = .transient
+        popover = pop
+    }
+
+    @objc private func togglePopover(_ sender: AnyObject?) {
+        guard let pop = popover, let button = statusItem?.button else { return }
+        if pop.isShown {
+            pop.performClose(nil)
+        } else {
+            pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: false)
         }
-        .menuBarExtraStyle(.window)
     }
 }
 
-// MARK: - Menu bar remote window
+// MARK: - Menu bar remote view
 
 struct MenuBarRemoteView: View {
     @EnvironmentObject var discovery:  DeviceDiscovery
@@ -118,7 +159,7 @@ struct MenuBarRemoteView: View {
         .padding(16)
     }
 
-    // ── Disconnected: activate main window ───────────────────────────────────
+    // ── Disconnected ──────────────────────────────────────────────────────────
 
     private var disconnectedView: some View {
         VStack(spacing: 12) {
