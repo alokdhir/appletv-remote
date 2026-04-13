@@ -25,10 +25,6 @@ struct ContentView: View {
         .onAppear {
             discovery.startDiscovery()
         }
-        .onDisappear {
-            discovery.stopDiscovery()
-            connection.disconnect()
-        }
         .onChange(of: selectedDevice) { newDevice in
             if let id = newDevice?.id { lastDeviceID = id }
             connection.disconnect()

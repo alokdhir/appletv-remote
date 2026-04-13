@@ -312,9 +312,9 @@ struct MenuBarRemoteView: View {
     }
 
     private func openMainWindow() {
-        // orderFront brings the window forward without stealing key status from
-        // the popover — the menu bar remote stays active and non-washed-out.
-        NSApp.windows.first { $0.canBecomeMain }?.orderFront(nil)
+        guard let win = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
     }
 }
 
