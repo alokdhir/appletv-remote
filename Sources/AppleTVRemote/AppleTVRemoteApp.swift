@@ -38,15 +38,18 @@ final class MenuBarController: NSObject {
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection) {
         guard statusItem == nil else { return }   // only once
 
-        // Status item
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Status item — squareLength ensures it's always visible even if the image fails
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         guard let button = item.button else { return }
 
-        let img = NSImage(systemSymbolName: "appletv.remote.gen2",
-                          accessibilityDescription: "Apple TV Remote")
+        // Try successively simpler symbols; all are available on macOS 13+
+        let img = NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
+                ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
+                ?? NSImage(systemSymbolName: "tv",      accessibilityDescription: nil)
         img?.isTemplate = true
         button.image = img
+        button.imageScaling = .scaleProportionallyDown
         button.action = #selector(toggle(_:))
         button.target = self
 
