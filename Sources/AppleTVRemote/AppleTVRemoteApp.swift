@@ -108,6 +108,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
         if pop.isShown {
+            // Deactivate before closing so the main window never gets a chance
+            // to surface between performClose and the popoverDidClose callback.
+            NSApp.deactivate()
             pop.performClose(nil)
         } else {
             // Activate before showing so the popover renders with active (non-washed-out) colours.
