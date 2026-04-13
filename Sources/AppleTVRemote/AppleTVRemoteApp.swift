@@ -194,6 +194,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Show Main Window
+        let show = NSMenuItem(title: "Show Main Window",
+                              action: #selector(showMainWindow), keyEquivalent: "")
+        show.target = self
+        menu.addItem(show)
+
+        menu.addItem(.separator())
+
         // Launch at Startup
         let launch = NSMenuItem(title: "Launch at Startup",
                                 action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
@@ -216,6 +224,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     // Called by NSMenuDelegate when the menu closes so left-click continues to show the popover.
     nonisolated func menuDidClose(_ menu: NSMenu) {
         Task { @MainActor in self.statusItem?.menu = nil }
+    }
+
+    @objc private func showMainWindow(_ sender: Any?) {
+        openMainWindow()
     }
 
     @objc private func showAbout(_ sender: Any?) {
