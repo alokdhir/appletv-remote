@@ -48,13 +48,27 @@ private final class WindowHider: NSObject, NSWindowDelegate {
     }
 }
 
-/// Background view that attaches WindowHider as the window delegate.
-private struct MainWindowConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { view.window?.delegate = WindowHider.shared }
-        return view
+/// NSView subclass that intercepts window attachment to hide the window before
+/// it ever appears on screen (avoiding the startup flash).
+private class WindowSetupView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        window.delegate = WindowHider.shared
+        guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
+        // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
+        // before our async orderOut runs.
+        window.alphaValue = 0
+        DispatchQueue.main.async {
+            window.orderOut(nil)
+            window.alphaValue = 1
+        }
     }
+}
+
+/// Background view that attaches window lifecycle hooks at the earliest possible point.
+private struct MainWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { WindowSetupView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
