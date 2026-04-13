@@ -439,7 +439,9 @@ final class CompanionConnection: ObservableObject {
         case "_pong":
             print("Companion: _pong received txn=\(txn) ✓")
         default:
-            break
+            if !identifier.isEmpty {
+                print("Companion ← unhandled: \(identifier) txn=\(txn)")
+            }
         }
     }
 
@@ -454,8 +456,8 @@ final class CompanionConnection: ObservableObject {
         keepaliveTimer?.cancel()
         guard let clientID = credentialStore.load(deviceID: currentDevice?.id ?? "")?.clientID else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        // First fire at 20 s — well inside the ~30 s idle window.
-        timer.schedule(deadline: .now() + 20.0, repeating: 20.0)
+        // First fire at 10 s — keeps us well inside any idle window the ATV enforces.
+        timer.schedule(deadline: .now() + 10.0, repeating: 10.0)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .connected else {
                 self?.keepaliveTimer?.cancel()

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct AppleTVRemoteApp: App {
@@ -32,8 +33,9 @@ struct AppleTVRemoteApp: App {
 final class MenuBarController: NSObject {
     static let shared = MenuBarController()
 
-    private var statusItem: NSStatusItem?
-    private var popover:    NSPopover?
+    private var statusItem:       NSStatusItem?
+    private var popover:          NSPopover?
+    private var stateCancellable: AnyCancellable?
 
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection) {
         guard statusItem == nil else { return }   // only once
@@ -66,17 +68,29 @@ final class MenuBarController: NSObject {
         pop.contentViewController = vc
         pop.behavior = .transient
         popover = pop
+
+        // Re-activate whenever connection state changes while the popover is visible,
+        // so the popover doesn't appear washed-out (inactive) after a disconnect.
+        stateCancellable = connection.$state
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.popover?.isShown == true else { return }
+                NSApp.activate(ignoringOtherApps: true)
+                self.popover?.contentViewController?.view.window?.makeKey()
+            }
     }
 
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
+        // Always activate before any action so the popover is never washed-out on open
+        NSApp.activate(ignoringOtherApps: true)
         if pop.isShown {
             pop.performClose(nil)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Clear first responder so no button shows a focus ring on open
             DispatchQueue.main.async {
+                pop.contentViewController?.view.window?.makeKey()
                 pop.contentViewController?.view.window?.makeFirstResponder(nil)
             }
         }
