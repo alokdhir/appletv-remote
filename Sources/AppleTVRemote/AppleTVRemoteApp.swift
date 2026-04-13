@@ -107,12 +107,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
-        // Activate the app so the popover isn't washed-out, then immediately
-        // push the main window back so it doesn't come to the foreground.
-        NSApp.activate(ignoringOtherApps: true)
         if pop.isShown {
             pop.performClose(nil)
         } else {
+            // Activate before showing so the popover renders with active (non-washed-out) colours.
+            NSApp.activate(ignoringOtherApps: true)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             DispatchQueue.main.async {
                 let popWin = pop.contentViewController?.view.window
