@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import ServiceManagement
 
 @main
 struct AppleTVRemoteApp: App {
@@ -77,7 +78,7 @@ private struct MainWindowConfigurator: NSViewRepresentable {
 // MARK: - Menu bar controller
 
 @MainActor
-final class MenuBarController: NSObject, NSPopoverDelegate {
+final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     static let shared = MenuBarController()
 
     private var statusItem:       NSStatusItem?
@@ -99,6 +100,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         button.imageScaling = .scaleProportionallyDown
         button.action = #selector(toggle(_:))
         button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         let vc = NSHostingController(rootView:
             MenuBarRemoteView()
@@ -134,6 +136,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
+
+        // Right-click → context menu instead of popover.
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showContextMenu()
+            return
+        }
+
         if pop.isShown {
             // Deactivate before closing so the main window never gets a chance
             // to surface between performClose and the popoverDidClose callback.
@@ -151,6 +160,67 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 // surface as the next key window when the popover closes.
                 NSApp.windows.filter { $0 !== popWin }.forEach { $0.orderOut(nil) }
             }
+        }
+    }
+
+    // MARK: - Context menu
+
+    private func showContextMenu() {
+        let menu = NSMenu()
+        menu.delegate = self
+
+        // About
+        let about = NSMenuItem(title: "About Apple TV Remote",
+                               action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+
+        menu.addItem(.separator())
+
+        // Launch at Startup
+        let launch = NSMenuItem(title: "Launch at Startup",
+                                action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
+        launch.target = self
+        launch.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+        menu.addItem(launch)
+
+        menu.addItem(.separator())
+
+        // Quit
+        let quit = NSMenuItem(title: "Quit Apple TV Remote",
+                              action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(quit)
+
+        // Temporarily assign the menu so the status item shows it anchored correctly.
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+    }
+
+    // Called by NSMenuDelegate when the menu closes so left-click continues to show the popover.
+    nonisolated func menuDidClose(_ menu: NSMenu) {
+        Task { @MainActor in self.statusItem?.menu = nil }
+    }
+
+    @objc private func showAbout(_ sender: Any?) {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Apple TV Remote",
+            .credits: NSAttributedString(
+                string: "Control your Apple TV from the menu bar.",
+                attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
+            )
+        ])
+    }
+
+    @objc private func toggleLaunchAtStartup(_ sender: Any?) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            print("Launch at startup toggle failed: \(error)")
         }
     }
 }
