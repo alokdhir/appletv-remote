@@ -73,8 +73,8 @@ final class MenuBarController: NSObject {
         if pop.isShown {
             pop.performClose(nil)
         } else {
+            NSApp.activate(ignoringOtherApps: true)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: false)
         }
     }
 }
