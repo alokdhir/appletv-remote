@@ -254,6 +254,26 @@ final class CompanionConnection: ObservableObject {
         }
     }
 
+    /// Sends a long-press: holds the button down for `ms` milliseconds before releasing.
+    func sendLongPress(_ command: RemoteCommand, ms: Int = 700) {
+        guard state == .connected else { return }
+        let keycode = command.hidKeycode
+        let txn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.pack([
+            "_i": "_hidC", "_t": 2, "_x": txn,
+            "_c": ["_hBtS": 1, "_hidC": Int(keycode)] as [String: Any],
+        ] as [String: Any]))
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(ms))
+            guard self.state == .connected else { return }
+            let txn2 = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.pack([
+                "_i": "_hidC", "_t": 2, "_x": txn2,
+                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
+            ] as [String: Any]))
+        }
+    }
+
     // MARK: - Session Init
 
     private func startCompanionSession() {

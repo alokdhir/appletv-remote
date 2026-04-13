@@ -160,6 +160,8 @@ struct RemoteControlView: View {
                     }
                     LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
                         connection.send(.home)
+                    } longPressAction: {
+                        connection.sendLongPress(.home)
                     }
                 }
 
@@ -237,16 +239,34 @@ struct LabeledRemoteButton: View {
     let sfSymbol: String
     let label: String
     let action: () -> Void
+    var longPressAction: (() -> Void)? = nil
+
+    @GestureState private var isPressed = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: sfSymbol)
-                .font(.system(size: 20, weight: .medium))
-                .frame(width: 52, height: 44)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        let content = Image(systemName: sfSymbol)
+            .font(.system(size: 20, weight: .medium))
+            .frame(width: 52, height: 44)
+            .background(.quaternary.opacity(isPressed ? 0.5 : 1),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .help(label)
+
+        if let longPress = longPressAction {
+            content
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.4)
+                        .updating($isPressed) { v, s, _ in s = v }
+                        .onEnded { _ in longPress() }
+                )
+                .simultaneousGesture(TapGesture().onEnded { action() })
+        } else {
+            content
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.001)
+                        .updating($isPressed) { v, s, _ in s = v }
+                        .onEnded { _ in action() }
+                )
         }
-        .buttonStyle(.plain)
-        .help(label)
     }
 }
 

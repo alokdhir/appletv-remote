@@ -303,6 +303,8 @@ struct MenuBarRemoteView: View {
                 }
                 LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
                     connection.send(.home)
+                } longPressAction: {
+                    connection.sendLongPress(.home)
                 }
             }
 
