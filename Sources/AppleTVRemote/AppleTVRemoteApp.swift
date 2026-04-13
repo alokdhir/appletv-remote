@@ -4,18 +4,28 @@ import Combine
 
 @main
 struct AppleTVRemoteApp: App {
-    @StateObject private var discovery  = DeviceDiscovery()
-    @StateObject private var connection = CompanionConnection()
+    @StateObject private var discovery   = DeviceDiscovery()
+    @StateObject private var connection  = CompanionConnection()
+    @StateObject private var autoConnect = AutoConnectStore()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
+                .environmentObject(autoConnect)
                 .preferredColorScheme(.dark)
                 .background(MainWindowConfigurator())   // hide-on-close, no disconnect
                 .onAppear {
-                    MenuBarController.shared.setUp(discovery: discovery, connection: connection)
+                    MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
+                }
+                .onChange(of: discovery.devices) { devices in
+                    guard connection.state == .disconnected else { return }
+                    if let device = devices.first(where: {
+                        autoConnect.isEnabled($0.id) && $0.host != nil
+                    }) {
+                        connection.connect(to: device)
+                    }
                 }
         }
         .windowResizability(.contentSize)
@@ -58,7 +68,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var popover:          NSPopover?
     private var stateCancellable: AnyCancellable?
 
-    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection) {
+    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore) {
         guard statusItem == nil else { return }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -78,6 +88,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             MenuBarRemoteView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
+                .environmentObject(autoConnect)
                 .preferredColorScheme(.dark)
         )
         vc.sizingOptions = .preferredContentSize

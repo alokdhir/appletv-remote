@@ -1,7 +1,30 @@
 import SwiftUI
 
+// MARK: - Auto-connect store
+
+final class AutoConnectStore: ObservableObject {
+    private let key = "autoConnectDeviceIDs"
+
+    @Published private(set) var deviceIDs: Set<String>
+
+    init() {
+        let saved = UserDefaults.standard.stringArray(forKey: "autoConnectDeviceIDs") ?? []
+        deviceIDs = Set(saved)
+    }
+
+    func isEnabled(_ id: String) -> Bool { deviceIDs.contains(id) }
+
+    func setEnabled(_ id: String, _ on: Bool) {
+        if on { deviceIDs.insert(id) } else { deviceIDs.remove(id) }
+        UserDefaults.standard.set(Array(deviceIDs), forKey: key)
+    }
+}
+
+// MARK: - Device list
+
 struct DeviceListView: View {
     @EnvironmentObject private var discovery: DeviceDiscovery
+    @EnvironmentObject private var autoConnect: AutoConnectStore
     @Binding var selectedDevice: AppleTVDevice?
 
     var body: some View {
@@ -14,8 +37,14 @@ struct DeviceListView: View {
                 emptyState
             } else {
                 List(discovery.devices, selection: $selectedDevice) { device in
-                    DeviceRow(device: device)
-                        .tag(device)
+                    DeviceRow(
+                        device: device,
+                        autoConnect: Binding(
+                            get: { autoConnect.isEnabled(device.id) },
+                            set: { autoConnect.setEnabled(device.id, $0) }
+                        )
+                    )
+                    .tag(device)
                 }
                 .listStyle(.sidebar)
             }
@@ -67,6 +96,7 @@ struct DeviceListView: View {
 
 struct DeviceRow: View {
     let device: AppleTVDevice
+    @Binding var autoConnect: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -84,6 +114,12 @@ struct DeviceRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Spacer()
+            Toggle("Auto-connect", isOn: $autoConnect)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .scaleEffect(0.7)
+                .help("Connect to this Apple TV at startup")
         }
         .padding(.vertical, 2)
     }
