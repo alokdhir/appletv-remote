@@ -421,27 +421,35 @@ final class CompanionConnection: ObservableObject {
 
     private func handleOPACKMessage(_ data: Data) {
         guard let msg = OPACK.decodeDict(data) else {
-            print("Companion: E_OPACK decode failed, \(data.count) bytes")
+            print("Companion: E_OPACK decode failed (\(data.count)B) hex: \(data.prefix(32).map{String(format:"%02x",$0)}.joined(separator:" "))")
             return
         }
         let identifier = msg["_i"] as? String ?? ""
         // _x is decoded as Int by decodeDict; cast via Int before UInt32
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
 
+        // Log every message so we can see what the ATV sends
+        let kvDesc = msg.keys.sorted().map { k -> String in
+            switch msg[k] {
+            case let s as String: return "\(k)=\"\(s)\""
+            case let i as Int:    return "\(k)=\(i)"
+            case let d as Data:   return "\(k)=<\(d.count)B>"
+            default:              return "\(k)=?"
+            }
+        }.joined(separator: " ")
+        print("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
+
         switch identifier {
         case "_heartbeat":
-            // ATV-initiated heartbeat — respond immediately to reset its 30 s timer
             sendEncrypted(OPACK.encodeHeartbeatResponse(txn: txn))
-            print("Companion: ATV _heartbeat → responded with response txn=\(txn) ✓")
+            print("Companion → _heartbeat response txn=\(txn) ✓")
         case "_ping":
-            // Transport-level ping (less common) — respond with pong
             sendEncrypted(OPACK.encodePong(txn: txn))
+            print("Companion → _pong txn=\(txn) ✓")
         case "_pong":
-            print("Companion: _pong received txn=\(txn) ✓")
+            break
         default:
-            if !identifier.isEmpty {
-                print("Companion ← unhandled: \(identifier) txn=\(txn)")
-            }
+            break
         }
     }
 
