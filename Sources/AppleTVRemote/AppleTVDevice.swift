@@ -44,6 +44,17 @@ enum ConnectionState: Equatable {
     }
 }
 
+/// Metadata for the currently-playing media item.
+struct NowPlayingInfo {
+    var title: String?
+    var artist: String?
+    var album: String?
+    var artworkData: Data?
+    var playbackRate: Float = 0
+    var elapsedTime: TimeInterval?
+    var duration: TimeInterval?
+}
+
 /// Commands that can be sent to an Apple TV.
 enum RemoteCommand {
     case up, down, left, right

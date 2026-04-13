@@ -11,6 +11,7 @@ struct AppleTVRemoteApp: App {
             ContentView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
+                .preferredColorScheme(.dark)
         }
         .windowResizability(.contentSize)
         .commands {
@@ -22,6 +23,7 @@ struct AppleTVRemoteApp: App {
             MenuBarRemoteView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
+                .preferredColorScheme(.dark)
         } label: {
             MenuBarIconView()
         }
@@ -147,10 +149,10 @@ struct MenuBarRemoteView: View {
                 LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
                     connection.send(.menu)
                 }
-                LabeledRemoteButton(sfSymbol: "playpause.fill", label: "Play") {
+                LabeledRemoteButton(sfSymbol: "playpause.fill", label: "Play/Pause") {
                     connection.send(.playPause)
                 }
-                LabeledRemoteButton(sfSymbol: "appletv.fill", label: "Home") {
+                LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
                     connection.send(.home)
                 }
             }

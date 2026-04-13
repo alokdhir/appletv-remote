@@ -93,10 +93,7 @@ final class HAPPairing: @unchecked Sendable {
         print("HAPPairing: server proof verified ✓")
 
         step = .m4
-        let m5 = try buildM5Payload()
-        let hex = m5.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-        print("HAPPairing: M5 TLV8 (\(m5.count) bytes) first 32: \(hex)")
-        return m5
+        return try buildM5Payload()
     }
 
     /// Process server's M6 response (Apple TV identity); returns PairingCredentials on success.
@@ -117,15 +114,8 @@ final class HAPPairing: @unchecked Sendable {
         let plain = try ChaChaPoly.open(box, using: key)
 
         let inner = TLV8.decode(plain)
-        // Dump all TLV8 fields in M6 inner payload to verify we get the right LTPK
-        print("HAPPairing M6 inner TLV8 (\(plain.count) bytes):")
-        for (tag, value) in inner.allEntries {
-            let hex = value.map { String(format: "%02x", $0) }.joined(separator: " ")
-            print("  tag=0x\(String(format: "%02x", tag)) len=\(value.count) hex=\(hex)")
-        }
         guard let atv_id   = inner[.identifier] else { throw PairingError.missingTLVField("identifier") }
         guard let atv_ltpk = inner[.publicKey]  else { throw PairingError.missingTLVField("publicKey") }
-        print("HAPPairing M6: deviceLTPK = \(atv_ltpk.map { String(format: "%02x", $0) }.joined(separator: " "))")
 
         let creds = PairingCredentials(
             clientID:     clientID,
@@ -174,10 +164,8 @@ final class HAPPairing: @unchecked Sendable {
 
         // Encrypt with ChaCha20-Poly1305, nonce = "PS-Msg05" zero-padded to 12 bytes
         let nonceData = noncePadded("PS-Msg05")
-        print("HAPPairing: M5 nonce hex: \(nonceData.map { String(format: "%02x", $0) }.joined(separator: " "))")
         let nonce    = try ChaChaPoly.Nonce(data: nonceData)
         let innerEncoded = inner.encode()
-        print("HAPPairing: M5 inner TLV8 (\(innerEncoded.count) bytes): \(innerEncoded.map { String(format: "%02x", $0) }.joined(separator: " "))")
         let sealedBox = try ChaChaPoly.seal(innerEncoded, using: key, nonce: nonce)
         // combined = nonce(12) + ciphertext + tag(16); we want ciphertext + tag
         let encPayload = sealedBox.ciphertext + sealedBox.tag
@@ -216,9 +204,3 @@ private extension Data {
     }
 }
 
-// MARK: - PairingCredentials (add deviceID field)
-
-// Note: PairingCredentials is defined in CredentialStore.swift.
-// We extend it here with a deviceID field needed by HAPPairing.
-// If the struct in CredentialStore.swift doesn't have deviceID yet,
-// that file needs updating — see CredentialStore.swift.

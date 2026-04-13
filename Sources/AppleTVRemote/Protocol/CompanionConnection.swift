@@ -104,7 +104,7 @@ final class CompanionConnection: ObservableObject {
 
         // Set non-blocking
         let flags = fcntl(fd, F_GETFL, 0)
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
 
         var addr = sockaddr_in()
         addr.sin_len    = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -183,6 +183,13 @@ final class CompanionConnection: ObservableObject {
             }
 
             print("Companion: TCP connected to \(host):\(port)")
+
+            // Enable TCP keepalive so the kernel sends probes if traffic stops.
+            // This prevents routers from silently dropping idle TCP state.
+            var enable: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enable, socklen_t(MemoryLayout<Int32>.size))
+            var idleSec: Int32 = 10   // start probing after 10 s idle
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idleSec, socklen_t(MemoryLayout<Int32>.size))
 
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -297,8 +304,6 @@ final class CompanionConnection: ObservableObject {
         }
         let tlv = TLV8.decode(extracted)
         let step = tlv[.state]?.first ?? 0
-        let hex32 = extracted.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-        print("Companion psNext step=\(step) (\(extracted.count) bytes) hex: \(hex32)")
 
         switch step {
         case 2:  // M2: ATV sent salt + public key → need PIN
@@ -310,8 +315,6 @@ final class CompanionConnection: ObservableObject {
                 let m5 = try pairing?.processM4(extracted) ?? Data()
                 sendFrame(.psNext, payload: OPACK.wrapPsNextData(m5))
             } catch {
-                let hex = extracted.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-                print("Companion M4 error: \(error), first 32 bytes: \(hex)")
                 state = .error("Pairing M4 failed: \(error)")
             }
 
@@ -335,8 +338,7 @@ final class CompanionConnection: ObservableObject {
             }
 
         default:
-            let fullHex = extracted.map { String(format: "%02x", $0) }.joined(separator: " ")
-            print("Companion: unexpected PS_Next state \(step), full hex: \(fullHex)")
+            print("Companion: unexpected PS_Next state \(step)")
         }
     }
 
@@ -418,30 +420,13 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func handleOPACKMessage(_ data: Data) {
-        // Always log raw hex so we can see exactly what the ATV sends
-        let hexPrefix = data.prefix(64).map { String(format: "%02x", $0) }.joined(separator: " ")
-        print("Companion ← E_OPACK raw (\(data.count)B): \(hexPrefix)\(data.count > 64 ? "…" : "")")
-
         guard let msg = OPACK.decodeDict(data) else {
             print("Companion: E_OPACK decode failed, \(data.count) bytes")
             return
         }
         let identifier = msg["_i"] as? String ?? ""
-        let msgType    = msg["_t"] as? Int ?? 0
         // _x is decoded as Int by decodeDict; cast via Int before UInt32
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
-
-        // Log all decoded keys so we can see what the ATV is actually sending
-        let keys = msg.keys.sorted()
-        let kvDesc = keys.map { k -> String in
-            switch msg[k] {
-            case let s as String: return "\(k)=\(s.isEmpty ? "(empty)" : s)"
-            case let i as Int:    return "\(k)=\(i)"
-            case let d as Data:   return "\(k)=<\(d.count)B>"
-            default:              return "\(k)=?"
-            }
-        }.joined(separator: " ")
-        print("Companion ← OPACK \(identifier.isEmpty ? "(no _i)" : identifier) type=\(msgType) txn=\(txn) | \(kvDesc)")
 
         switch identifier {
         case "_heartbeat":
@@ -460,18 +445,17 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Keepalive
 
-    /// Sends a client-initiated _ping every 5 s during a session.
-    /// The ATV disconnects idle connections that haven't exchanged any frames;
-    /// this keeps the socket alive between button presses.
-    ///
-    /// Uses DispatchSourceTimer (not Task.sleep) so the timer fires reliably on
-    /// DispatchQueue.main without depending on the Swift concurrency scheduler,
-    /// which can be delayed when the MainActor is busy with read-loop dispatches.
+    /// Resends _systemInfo every 20 s to keep the ATV's idle-session timer from firing.
+    /// The ATV processes _systemInfo silently (no "No request handler" error), so it is
+    /// the safest known message to use as a keepalive without triggering a disconnect.
+    /// _ping and _heartbeat are ignored by the ATV for timer purposes; _interest returns
+    /// "No request handler" and causes an immediate close.
     private func startKeepalive() {
         keepaliveTimer?.cancel()
+        guard let clientID = credentialStore.load(deviceID: currentDevice?.id ?? "")?.clientID else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        // Fire immediately so the first ping goes out right away, then every 5 s.
-        timer.schedule(deadline: .now(), repeating: 5.0)
+        // First fire at 20 s — well inside the ~30 s idle window.
+        timer.schedule(deadline: .now() + 20.0, repeating: 20.0)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .connected else {
                 self?.keepaliveTimer?.cancel()
@@ -480,8 +464,8 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter
             self.txnCounter &+= 1
-            print("Companion → keepalive _heartbeat txn=\(txn)")
-            self.sendEncrypted(OPACK.encodeHeartbeat(txn: txn))
+            print("Companion → keepalive _systemInfo txn=\(txn)")
+            self.sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, txn: txn))
         }
         timer.resume()
         keepaliveTimer = timer
@@ -540,7 +524,6 @@ final class CompanionConnection: ObservableObject {
                     offset += n
                 }
             }
-            print("Companion → \(type) sent OK")
         }
     }
 
@@ -555,10 +538,13 @@ final class CompanionConnection: ObservableObject {
                 if n <= 0 {
                     // EOF or error (or socket closed by disconnect())
                     let err = n < 0 ? errno : 0
+                    let reason = err == 0 ? "EOF (ATV closed connection)" :
+                                 "errno \(err): \(String(cString: strerror(err)))"
+                    print("Companion: read loop ended — \(reason)")
                     DispatchQueue.main.async {
                         guard let self, self.socketFD >= 0 else { return }
                         if err != 0 {
-                            self.state = .error("Read error (errno \(err))")
+                            self.state = .error("Read error: \(reason)")
                         } else {
                             self.state = .disconnected
                         }
@@ -586,9 +572,6 @@ final class CompanionConnection: ObservableObject {
             default:
                 print("Companion: unhandled frame 0x\(String(frame.type.rawValue, radix: 16))")
             }
-        }
-        if !receiveBuffer.isEmpty {
-            print("Companion: \(receiveBuffer.count) bytes buffered, hex: \(receiveBuffer.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " "))")
         }
     }
 }

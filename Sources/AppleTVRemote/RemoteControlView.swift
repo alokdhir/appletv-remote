@@ -164,7 +164,7 @@ struct RemoteControlView: View {
                     LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
                         connection.send(.menu)
                     }
-                    LabeledRemoteButton(sfSymbol: "appletv.fill", label: "Home") {
+                    LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
                         connection.send(.home)
                     }
                 }
@@ -246,18 +246,16 @@ struct LabeledRemoteButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: sfSymbol)
-                    .font(.system(size: 18, weight: .medium))
-                Text(label)
-                    .font(.caption2)
-            }
-            .frame(width: 64, height: 52)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: sfSymbol)
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 52, height: 44)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .help(label)
     }
 }
+
 
 // MARK: - Now Playing Card
 

@@ -74,7 +74,7 @@ final class CompanionPairVerify {
 
         // Decrypt ATV's identity
         guard encData.count > 16 else { throw VerifyError.decryptionFailed }
-        let box   = try ChaChaPoly.SealedBox(combined: nonceBytes("PV-Msg02") + encData)
+        let box   = try ChaChaPoly.SealedBox(combined: noncePadded("PV-Msg02") + encData)
         let plain = try ChaChaPoly.open(box, using: encKey)
 
         let inner = TLV8.decode(plain)
@@ -91,12 +91,6 @@ final class CompanionPairVerify {
         let ourEphPK = Data(ephemeralPrivate.publicKey.rawRepresentation)
         let ourInfo = ourEphPK + idData + atvEphemeralKeyData
         let sig = try ltsk.signature(for: ourInfo)
-        let ltpk = Data(ltsk.publicKey.rawRepresentation)
-        print("PV M3: clientID=\(creds.clientID)")
-        print("PV M3: ltpk (\(ltpk.count)B) = \(ltpk.hex)")
-        print("PV M3: ourEphPK (\(ourEphPK.count)B) = \(ourEphPK.hex)")
-        print("PV M3: ourInfo (\(ourInfo.count)B) = \(ourInfo.hex)")
-
         var innerOut = TLV8()
         innerOut.append(.identifier, idData)
         innerOut.append(.signature, Data(sig))
@@ -146,14 +140,8 @@ final class CompanionPairVerify {
     }
 
     private func noncePadded(_ string: String) -> Data {
-        // duplicate of nonceBytes; keeping both for clarity
         let bytes = Data(string.utf8)
         precondition(bytes.count <= 12)
-        return Data(repeating: 0, count: 12 - bytes.count) + bytes
-    }
-
-    private func nonceBytes(_ string: String) -> Data {
-        let bytes = Data(string.utf8)
         return Data(repeating: 0, count: 12 - bytes.count) + bytes
     }
 }

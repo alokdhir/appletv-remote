@@ -24,32 +24,6 @@ import Foundation
 ///   0xE0–0xEF    dict,   count = byte - 0xE0   (0–15 key-value pairs)
 enum OPACK {
 
-    // MARK: - Pairing helpers
-
-    // MARK: - HID command encoding
-
-    /// Encode a HID button event for sending over the encrypted E_OPACK channel.
-    ///
-    /// Produces: `{ "_i": "_hidC", "_t": 2, "_x": txn, "_c": { "_hidC": keycode, "_hBtS": state } }`
-    /// where state 1 = key-down, 2 = key-up.
-    static func encodeHIDEvent(keycode: UInt8, state: UInt8, txn: UInt32) -> Data {
-        var out = Data()
-        out.append(0xE4)                        // dict, 4 entries
-        encodeString("_i", into: &out)
-        encodeString("_hidC", into: &out)
-        encodeString("_t", into: &out)
-        out.append(0x08 + 2)                    // small int: 2 (request)
-        encodeString("_x", into: &out)
-        encodeUInt32(txn, into: &out)
-        encodeString("_c", into: &out)
-        out.append(0xE2)                        // nested dict, 2 entries
-        encodeString("_hidC", into: &out)
-        out.append(0x08 + keycode)              // small int: keycode
-        encodeString("_hBtS", into: &out)
-        out.append(0x08 + state)                // small int: state
-        return out
-    }
-
     private static func encodeUInt32(_ value: UInt32, into out: inout Data) {
         out.append(0x32)
         out.append(UInt8((value >> 24) & 0xFF))
@@ -107,20 +81,6 @@ enum OPACK {
 
     // MARK: - Session message helpers
 
-    /// Encode a client `_heartbeat` keepalive request (type=2).
-    /// The Companion session timer on the ATV is reset by `_heartbeat`, not `_ping`.
-    static func encodeHeartbeat(txn: UInt32) -> Data {
-        var out = Data()
-        out.append(0xE3)              // dict, 3 entries
-        encodeString("_i", into: &out)
-        encodeString("_heartbeat", into: &out)
-        encodeString("_t", into: &out)
-        out.append(0x08 + 2)          // small int: 2 (request)
-        encodeString("_x", into: &out)
-        encodeUInt32(txn, into: &out)
-        return out
-    }
-
     /// Encode a `_heartbeat` response (type=3) when the ATV initiates the heartbeat.
     static func encodeHeartbeatResponse(txn: UInt32) -> Data {
         var out = Data()
@@ -129,19 +89,6 @@ enum OPACK {
         encodeString("_heartbeat", into: &out)
         encodeString("_t", into: &out)
         out.append(0x08 + 3)          // small int: 3 (response)
-        encodeString("_x", into: &out)
-        encodeUInt32(txn, into: &out)
-        return out
-    }
-
-    /// Encode a client `_ping` transport probe (kept for completeness; not used for session keepalive).
-    static func encodePing(txn: UInt32) -> Data {
-        var out = Data()
-        out.append(0xE3)              // dict, 3 entries
-        encodeString("_i", into: &out)
-        encodeString("_ping", into: &out)
-        encodeString("_t", into: &out)
-        out.append(0x08 + 2)          // small int: 2 (request)
         encodeString("_x", into: &out)
         encodeUInt32(txn, into: &out)
         return out
