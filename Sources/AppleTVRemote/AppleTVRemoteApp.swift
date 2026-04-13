@@ -25,69 +25,9 @@ struct AppleTVRemoteApp: App {
                 .environmentObject(connection)
                 .preferredColorScheme(.dark)
         } label: {
-            MenuBarIconView()
+            Image(systemName: "appletv.remote.gen2")
         }
         .menuBarExtraStyle(.window)
-    }
-}
-
-// MARK: - Menu bar icon (d-pad chevrons, monochrome template)
-
-private struct MenuBarIconView: View {
-    var body: some View {
-        Canvas { ctx, size in
-            let cx = size.width  / 2
-            let cy = size.height / 2
-            let r  = min(cx, cy) * 0.82
-
-            // Outer ring
-            ctx.stroke(
-                Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: 2*r, height: 2*r)),
-                with: .foreground, lineWidth: 1.2
-            )
-
-            // Four chevrons
-            let reach = r * 0.55
-            let span  = r * 0.28
-            let back  = r * 0.18
-            let lw: CGFloat = 1.4
-
-            func chevron(tx: CGFloat, ty: CGFloat,
-                         lx: CGFloat, ly: CGFloat,
-                         rx: CGFloat, ry: CGFloat) -> Path {
-                var p = Path()
-                p.move(to: CGPoint(x: lx, y: ly))
-                p.addLine(to: CGPoint(x: tx, y: ty))
-                p.addLine(to: CGPoint(x: rx, y: ry))
-                return p
-            }
-
-            // Up
-            ctx.stroke(chevron(tx: cx,        ty: cy - reach,
-                               lx: cx - span, ly: cy - reach + back,
-                               rx: cx + span, ry: cy - reach + back),
-                       with: .foreground, style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
-            // Down
-            ctx.stroke(chevron(tx: cx,        ty: cy + reach,
-                               lx: cx - span, ly: cy + reach - back,
-                               rx: cx + span, ry: cy + reach - back),
-                       with: .foreground, style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
-            // Left
-            ctx.stroke(chevron(tx: cx - reach, ty: cy,
-                               lx: cx - reach + back, ly: cy - span,
-                               rx: cx - reach + back, ry: cy + span),
-                       with: .foreground, style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
-            // Right
-            ctx.stroke(chevron(tx: cx + reach, ty: cy,
-                               lx: cx + reach - back, ly: cy - span,
-                               rx: cx + reach - back, ry: cy + span),
-                       with: .foreground, style: StrokeStyle(lineWidth: lw, lineCap: .round, lineJoin: .round))
-
-            // Centre dot
-            ctx.fill(Path(ellipseIn: CGRect(x: cx - 1.5, y: cy - 1.5, width: 3, height: 3)),
-                     with: .foreground)
-        }
-        .frame(width: 18, height: 18)
     }
 }
 
