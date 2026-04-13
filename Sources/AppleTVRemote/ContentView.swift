@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var discovery:  DeviceDiscovery
     @EnvironmentObject private var connection: CompanionConnection
     @State private var selectedDevice: AppleTVDevice?
+    @AppStorage("lastDeviceID") private var lastDeviceID = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -29,9 +30,13 @@ struct ContentView: View {
             connection.disconnect()
         }
         .onChange(of: selectedDevice) { newDevice in
-            // Disconnect from the previous device whenever the selection changes.
-            // RemoteControlView will show the Connect button for the new device.
+            if let id = newDevice?.id { lastDeviceID = id }
             connection.disconnect()
+        }
+        .onChange(of: discovery.devices) { devices in
+            if selectedDevice == nil, !lastDeviceID.isEmpty {
+                selectedDevice = devices.first { $0.id == lastDeviceID }
+            }
         }
     }
 
