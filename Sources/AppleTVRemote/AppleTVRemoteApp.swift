@@ -75,6 +75,10 @@ final class MenuBarController: NSObject {
         } else {
             NSApp.activate(ignoringOtherApps: true)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Clear first responder so no button shows a focus ring on open
+            DispatchQueue.main.async {
+                pop.contentViewController?.view.window?.makeFirstResponder(nil)
+            }
         }
     }
 }
