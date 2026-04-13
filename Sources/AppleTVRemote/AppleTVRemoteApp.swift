@@ -120,9 +120,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 let popWin = pop.contentViewController?.view.window
                 popWin?.makeKey()
                 popWin?.makeFirstResponder(nil)
-                // Send every non-popover window to the back — main window must not
-                // appear in front just because the menu bar button was clicked.
-                NSApp.windows.filter { $0 !== popWin }.forEach { $0.orderBack(nil) }
+                // Fully hide every non-popover window so macOS has nothing to
+                // surface as the next key window when the popover closes.
+                NSApp.windows.filter { $0 !== popWin }.forEach { $0.orderOut(nil) }
             }
         }
     }
