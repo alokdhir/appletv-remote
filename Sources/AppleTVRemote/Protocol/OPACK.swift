@@ -107,8 +107,34 @@ enum OPACK {
 
     // MARK: - Session message helpers
 
-    /// Encode a client `_ping` heartbeat.
-    /// Uses explicit key ordering (_i, _t, _x) and small-int encoding for _t.
+    /// Encode a client `_heartbeat` keepalive request (type=2).
+    /// The Companion session timer on the ATV is reset by `_heartbeat`, not `_ping`.
+    static func encodeHeartbeat(txn: UInt32) -> Data {
+        var out = Data()
+        out.append(0xE3)              // dict, 3 entries
+        encodeString("_i", into: &out)
+        encodeString("_heartbeat", into: &out)
+        encodeString("_t", into: &out)
+        out.append(0x08 + 2)          // small int: 2 (request)
+        encodeString("_x", into: &out)
+        encodeUInt32(txn, into: &out)
+        return out
+    }
+
+    /// Encode a `_heartbeat` response (type=3) when the ATV initiates the heartbeat.
+    static func encodeHeartbeatResponse(txn: UInt32) -> Data {
+        var out = Data()
+        out.append(0xE3)              // dict, 3 entries
+        encodeString("_i", into: &out)
+        encodeString("_heartbeat", into: &out)
+        encodeString("_t", into: &out)
+        out.append(0x08 + 3)          // small int: 3 (response)
+        encodeString("_x", into: &out)
+        encodeUInt32(txn, into: &out)
+        return out
+    }
+
+    /// Encode a client `_ping` transport probe (kept for completeness; not used for session keepalive).
     static func encodePing(txn: UInt32) -> Data {
         var out = Data()
         out.append(0xE3)              // dict, 3 entries

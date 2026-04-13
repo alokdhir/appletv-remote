@@ -418,6 +418,10 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func handleOPACKMessage(_ data: Data) {
+        // Always log raw hex so we can see exactly what the ATV sends
+        let hexPrefix = data.prefix(64).map { String(format: "%02x", $0) }.joined(separator: " ")
+        print("Companion ← E_OPACK raw (\(data.count)B): \(hexPrefix)\(data.count > 64 ? "…" : "")")
+
         guard let msg = OPACK.decodeDict(data) else {
             print("Companion: E_OPACK decode failed, \(data.count) bytes")
             return
@@ -426,14 +430,31 @@ final class CompanionConnection: ObservableObject {
         let msgType    = msg["_t"] as? Int ?? 0
         // _x is decoded as Int by decodeDict; cast via Int before UInt32
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
-        print("Companion ← OPACK \(identifier) type=\(msgType) txn=\(txn)")
 
-        if identifier == "_ping" {
-            // ATV is checking we're alive — echo back immediately
+        // Log all decoded keys so we can see what the ATV is actually sending
+        let keys = msg.keys.sorted()
+        let kvDesc = keys.map { k -> String in
+            switch msg[k] {
+            case let s as String: return "\(k)=\(s.isEmpty ? "(empty)" : s)"
+            case let i as Int:    return "\(k)=\(i)"
+            case let d as Data:   return "\(k)=<\(d.count)B>"
+            default:              return "\(k)=?"
+            }
+        }.joined(separator: " ")
+        print("Companion ← OPACK \(identifier.isEmpty ? "(no _i)" : identifier) type=\(msgType) txn=\(txn) | \(kvDesc)")
+
+        switch identifier {
+        case "_heartbeat":
+            // ATV-initiated heartbeat — respond immediately to reset its 30 s timer
+            sendEncrypted(OPACK.encodeHeartbeatResponse(txn: txn))
+            print("Companion: ATV _heartbeat → responded with response txn=\(txn) ✓")
+        case "_ping":
+            // Transport-level ping (less common) — respond with pong
             sendEncrypted(OPACK.encodePong(txn: txn))
-        } else if identifier == "_pong" {
-            // ATV responded to our keepalive ping — connection confirmed alive
-            print("Companion: keepalive pong txn=\(txn)")
+        case "_pong":
+            print("Companion: _pong received txn=\(txn) ✓")
+        default:
+            break
         }
     }
 
@@ -459,8 +480,8 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter
             self.txnCounter &+= 1
-            print("Companion → keepalive _ping txn=\(txn)")
-            self.sendEncrypted(OPACK.encodePing(txn: txn))
+            print("Companion → keepalive _heartbeat txn=\(txn)")
+            self.sendEncrypted(OPACK.encodeHeartbeat(txn: txn))
         }
         timer.resume()
         keepaliveTimer = timer
