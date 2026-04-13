@@ -3,14 +3,18 @@ import AppKit
 
 @main
 struct AppleTVRemoteApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var discovery  = DeviceDiscovery()
+    @StateObject private var connection = CompanionConnection()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(appDelegate.discovery)
-                .environmentObject(appDelegate.connection)
+                .environmentObject(discovery)
+                .environmentObject(connection)
                 .preferredColorScheme(.dark)
+                .onAppear {
+                    MenuBarController.shared.setUp(discovery: discovery, connection: connection)
+                }
         }
         .windowResizability(.contentSize)
         .commands {
@@ -19,49 +23,49 @@ struct AppleTVRemoteApp: App {
     }
 }
 
-// MARK: - App Delegate
+// MARK: - Menu bar controller
 
-/// Owns the shared model objects and the menu bar status item.
-/// Using NSStatusItem directly instead of SwiftUI MenuBarExtra avoids rendering
-/// issues that can prevent the icon from appearing on some macOS versions.
+/// Owns the NSStatusItem and NSPopover for the menu bar remote.
+/// Implemented as a singleton so the status item is never deallocated.
+/// setUp() is called once from ContentView.onAppear after the app is running.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    let discovery  = DeviceDiscovery()
-    let connection = CompanionConnection()
+final class MenuBarController: NSObject {
+    static let shared = MenuBarController()
 
     private var statusItem: NSStatusItem?
     private var popover:    NSPopover?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        setupMenuBar()
-    }
+    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection) {
+        guard statusItem == nil else { return }   // only once
 
-    private func setupMenuBar() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        guard let button = statusItem?.button else { return }
+        // Status item
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
+        guard let button = item.button else { return }
 
         let img = NSImage(systemSymbolName: "appletv.remote.gen2",
                           accessibilityDescription: "Apple TV Remote")
         img?.isTemplate = true
         button.image = img
-        button.action = #selector(togglePopover(_:))
+        button.action = #selector(toggle(_:))
         button.target = self
 
-        let contentVC = NSHostingController(rootView:
+        // Popover
+        let vc = NSHostingController(rootView:
             MenuBarRemoteView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .preferredColorScheme(.dark)
         )
-        contentVC.sizingOptions = .preferredContentSize
+        vc.sizingOptions = .preferredContentSize
 
         let pop = NSPopover()
-        pop.contentViewController = contentVC
+        pop.contentViewController = vc
         pop.behavior = .transient
         popover = pop
     }
 
-    @objc private func togglePopover(_ sender: AnyObject?) {
+    @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
         if pop.isShown {
             pop.performClose(nil)
@@ -89,11 +93,10 @@ struct MenuBarRemoteView: View {
         .frame(width: 220)
     }
 
-    // ── Connected: compact remote ─────────────────────────────────────────────
+    // ── Connected ─────────────────────────────────────────────────────────────
 
     private var connectedView: some View {
         VStack(spacing: 14) {
-            // Device name + disconnect
             HStack {
                 Text(connection.currentDevice?.name ?? "Apple TV")
                     .font(.subheadline.weight(.semibold))
@@ -109,7 +112,6 @@ struct MenuBarRemoteView: View {
                 .help("Disconnect")
             }
 
-            // Navigation pad
             ZStack {
                 Circle()
                     .fill(.quaternary)
@@ -125,7 +127,6 @@ struct MenuBarRemoteView: View {
                 }
             }
 
-            // Back · Play/Pause · Home
             HStack(spacing: 28) {
                 LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
                     connection.send(.menu)
@@ -138,7 +139,6 @@ struct MenuBarRemoteView: View {
                 }
             }
 
-            // Volume
             HStack(spacing: 20) {
                 LabeledRemoteButton(sfSymbol: "speaker.minus.fill", label: "Vol −") {
                     connection.send(.volumeDown)
@@ -148,13 +148,10 @@ struct MenuBarRemoteView: View {
                 }
             }
 
-            // Open main window link
-            Button("Open Full Remote…") {
-                openMainWindow()
-            }
-            .font(.caption)
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            Button("Open Full Remote…") { openMainWindow() }
+                .font(.caption)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
         }
         .padding(16)
     }
@@ -168,10 +165,8 @@ struct MenuBarRemoteView: View {
                 .foregroundStyle(.tertiary)
             Text("No Apple TV Connected")
                 .font(.subheadline.weight(.medium))
-            Button("Open Remote") {
-                openMainWindow()
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Open Remote") { openMainWindow() }
+                .buttonStyle(.borderedProminent)
         }
         .padding(24)
         .frame(maxWidth: .infinity)
