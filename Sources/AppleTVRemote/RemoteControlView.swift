@@ -53,12 +53,6 @@ struct RemoteControlView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            if connection.state == .connected {
-                Button("Disconnect") { connection.disconnect() }
-                    .font(.caption)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.red)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

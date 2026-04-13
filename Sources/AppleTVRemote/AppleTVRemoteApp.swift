@@ -100,20 +100,10 @@ struct MenuBarRemoteView: View {
 
     private var connectedView: some View {
         VStack(spacing: 14) {
-            HStack {
-                Text(connection.currentDevice?.name ?? "Apple TV")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
-                Button {
-                    connection.disconnect()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Disconnect")
-            }
+            Text(connection.currentDevice?.name ?? "Apple TV")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             ZStack {
                 Circle()
