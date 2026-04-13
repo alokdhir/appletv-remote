@@ -163,6 +163,23 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: - Open main window
+
+    func openMainWindow() {
+        // Close the popover first so the main window isn't competing with it.
+        if let pop = popover, pop.isShown {
+            NSApp.deactivate()
+            pop.performClose(nil)
+        }
+        let popWin = popover?.contentViewController?.view.window
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows
+                .first { $0 !== popWin && $0.canBecomeMain }?
+                .makeKeyAndOrderFront(nil)
+        }
+    }
+
     // MARK: - Context menu
 
     private func showContextMenu() {
@@ -312,9 +329,7 @@ struct MenuBarRemoteView: View {
     }
 
     private func openMainWindow() {
-        guard let win = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        win.makeKeyAndOrderFront(nil)
+        MenuBarController.shared.openMainWindow()
     }
 }
 
