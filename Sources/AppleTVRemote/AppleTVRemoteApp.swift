@@ -29,6 +29,7 @@ struct AppleTVRemoteApp: App {
 
 /// Intercepts the window close button and hides instead of closing,
 /// so the connection stays alive when the user dismisses the main window.
+@MainActor
 private final class WindowHider: NSObject, NSWindowDelegate {
     static let shared = WindowHider()
     func windowShouldClose(_ sender: NSWindow) -> Bool {
