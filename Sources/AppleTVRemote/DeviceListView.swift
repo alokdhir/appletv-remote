@@ -26,6 +26,7 @@ struct DeviceListView: View {
     @EnvironmentObject private var discovery: DeviceDiscovery
     @EnvironmentObject private var autoConnect: AutoConnectStore
     @Binding var selectedDevice: AppleTVDevice?
+    @AppStorage("hideWindowAtStartup") private var hideWindowAtStartup = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,6 +49,21 @@ struct DeviceListView: View {
                 }
                 .listStyle(.sidebar)
             }
+
+            Divider()
+
+            HStack {
+                Text("Hide window at startup")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $hideWindowAtStartup)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .scaleEffect(0.7)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
     }
 

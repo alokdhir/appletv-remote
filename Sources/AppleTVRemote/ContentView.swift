@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var connection: CompanionConnection
     @State private var selectedDevice: AppleTVDevice?
     @AppStorage("lastDeviceID") private var lastDeviceID = ""
+    @AppStorage("hideWindowAtStartup") private var hideWindowAtStartup = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,6 +25,11 @@ struct ContentView: View {
         .frame(minHeight: 480)
         .onAppear {
             discovery.startDiscovery()
+            if hideWindowAtStartup {
+                DispatchQueue.main.async {
+                    NSApp.windows.first { $0.canBecomeMain }?.orderOut(nil)
+                }
+            }
         }
         .onDisappear {
             discovery.stopDiscovery()
