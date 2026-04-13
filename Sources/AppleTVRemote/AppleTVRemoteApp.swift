@@ -13,6 +13,7 @@ struct AppleTVRemoteApp: App {
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .preferredColorScheme(.dark)
+                .background(MainWindowConfigurator())   // hide-on-close, no disconnect
                 .onAppear {
                     MenuBarController.shared.setUp(discovery: discovery, connection: connection)
                 }
@@ -24,11 +25,30 @@ struct AppleTVRemoteApp: App {
     }
 }
 
+// MARK: - Hide main window on close (don't disconnect)
+
+/// Intercepts the window close button and hides instead of closing,
+/// so the connection stays alive when the user dismisses the main window.
+private final class WindowHider: NSObject, NSWindowDelegate {
+    static let shared = WindowHider()
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+}
+
+/// Background view that attaches WindowHider as the window delegate.
+private struct MainWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { view.window?.delegate = WindowHider.shared }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
 // MARK: - Menu bar controller
 
-/// Owns the NSStatusItem and NSPopover for the menu bar remote.
-/// Implemented as a singleton so the status item is never deallocated.
-/// setUp() is called once from ContentView.onAppear after the app is running.
 @MainActor
 final class MenuBarController: NSObject {
     static let shared = MenuBarController()
@@ -38,14 +58,12 @@ final class MenuBarController: NSObject {
     private var stateCancellable: AnyCancellable?
 
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection) {
-        guard statusItem == nil else { return }   // only once
+        guard statusItem == nil else { return }
 
-        // Status item — squareLength ensures it's always visible even if the image fails
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         guard let button = item.button else { return }
 
-        // Try successively simpler symbols; all are available on macOS 13+
         let img = NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
                 ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
                 ?? NSImage(systemSymbolName: "tv",      accessibilityDescription: nil)
@@ -55,7 +73,6 @@ final class MenuBarController: NSObject {
         button.action = #selector(toggle(_:))
         button.target = self
 
-        // Popover
         let vc = NSHostingController(rootView:
             MenuBarRemoteView()
                 .environmentObject(discovery)
@@ -69,29 +86,33 @@ final class MenuBarController: NSObject {
         pop.behavior = .transient
         popover = pop
 
-        // Re-activate whenever connection state changes while the popover is visible,
-        // so the popover doesn't appear washed-out (inactive) after a disconnect.
+        // Re-key the popover window when state changes while it's visible,
+        // so it doesn't look washed-out after a disconnect/reconnect.
         stateCancellable = connection.$state
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                guard let self, self.popover?.isShown == true else { return }
-                NSApp.activate(ignoringOtherApps: true)
+                guard let self, self.popover?.isShown == true, NSApp.isActive else { return }
                 self.popover?.contentViewController?.view.window?.makeKey()
             }
     }
 
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
-        // Always activate before any action so the popover is never washed-out on open
+        // Activate the app so the popover isn't washed-out, then immediately
+        // push the main window back so it doesn't come to the foreground.
         NSApp.activate(ignoringOtherApps: true)
         if pop.isShown {
             pop.performClose(nil)
         } else {
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             DispatchQueue.main.async {
-                pop.contentViewController?.view.window?.makeKey()
-                pop.contentViewController?.view.window?.makeFirstResponder(nil)
+                let popWin = pop.contentViewController?.view.window
+                popWin?.makeKey()
+                popWin?.makeFirstResponder(nil)
+                // Send every non-popover window to the back — main window must not
+                // appear in front just because the menu bar button was clicked.
+                NSApp.windows.filter { $0 !== popWin }.forEach { $0.orderBack(nil) }
             }
         }
     }
@@ -184,7 +205,8 @@ struct MenuBarRemoteView: View {
     }
 
     private func openMainWindow() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+        // orderFront brings the window forward without stealing key status from
+        // the popover — the menu bar remote stays active and non-washed-out.
+        NSApp.windows.first { $0.canBecomeMain }?.orderFront(nil)
     }
 }
