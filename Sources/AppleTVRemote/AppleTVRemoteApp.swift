@@ -7,6 +7,7 @@ struct AppleTVRemoteApp: App {
     @StateObject private var discovery   = DeviceDiscovery()
     @StateObject private var connection  = CompanionConnection()
     @StateObject private var autoConnect = AutoConnectStore()
+    @StateObject private var reconnector = AutoReconnector()
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +19,7 @@ struct AppleTVRemoteApp: App {
                 .background(MainWindowConfigurator())   // hide-on-close, no disconnect
                 .onAppear {
                     MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
+                    reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
                 }
                 .onChange(of: discovery.devices) { devices in
                     guard connection.state == .disconnected else { return }
@@ -243,5 +245,66 @@ struct MenuBarRemoteView: View {
         // orderFront brings the window forward without stealing key status from
         // the popover — the menu bar remote stays active and non-washed-out.
         NSApp.windows.first { $0.canBecomeMain }?.orderFront(nil)
+    }
+}
+
+// MARK: - Auto-reconnect on connection drop
+
+/// Watches for unexpected disconnects on auto-connect devices and retries up to 3 times.
+@MainActor
+final class AutoReconnector: ObservableObject {
+    private var cancellable: AnyCancellable?
+    private var retryTask:   Task<Void, Never>?
+    private var retryCount  = 0
+    private let maxRetries  = 3
+    private let retryDelay: TimeInterval = 5
+
+    func setUp(connection: CompanionConnection,
+               discovery: DeviceDiscovery,
+               autoConnect: AutoConnectStore) {
+        cancellable = connection.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak connection, weak discovery, weak autoConnect] state in
+                guard let self, let connection, let discovery, let autoConnect else { return }
+                switch state {
+                case .disconnected, .error:
+                    // Only retry if the device that just dropped has auto-connect on.
+                    guard let device = connection.currentDevice,
+                          autoConnect.isEnabled(device.id),
+                          self.retryCount < self.maxRetries else {
+                        self.retryCount = 0
+                        return
+                    }
+                    self.scheduleRetry(device: device, connection: connection, discovery: discovery)
+                case .connected:
+                    // Successful connection — reset retry counter.
+                    self.retryCount = 0
+                    self.retryTask?.cancel()
+                    self.retryTask = nil
+                default:
+                    break
+                }
+            }
+    }
+
+    private func scheduleRetry(device: AppleTVDevice,
+                               connection: CompanionConnection,
+                               discovery: DeviceDiscovery) {
+        retryTask?.cancel()
+        retryCount += 1
+        let attempt = retryCount
+        print("AutoReconnector: scheduling retry \(attempt)/\(maxRetries) in \(retryDelay)s for \(device.name)")
+        retryTask = Task {
+            try? await Task.sleep(for: .seconds(retryDelay))
+            guard !Task.isCancelled else { return }
+            // Use the freshest resolved device from discovery in case IP changed.
+            let target = discovery.devices.first { $0.id == device.id } ?? device
+            guard target.host != nil else {
+                print("AutoReconnector: device not yet resolved, skipping retry \(attempt)")
+                return
+            }
+            print("AutoReconnector: connecting (attempt \(attempt)/\(maxRetries))")
+            connection.connect(to: target)
+        }
     }
 }
