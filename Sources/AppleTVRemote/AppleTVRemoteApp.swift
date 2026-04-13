@@ -58,6 +58,8 @@ private class WindowSetupView: NSView {
         super.viewDidMoveToWindow()
         guard let window else { return }
         window.delegate = WindowHider.shared
+        // Store a direct reference so MenuBarController can show it reliably.
+        MenuBarController.shared.mainWindow = window
         guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
         // before our async orderOut runs.
@@ -84,6 +86,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var statusItem:       NSStatusItem?
     private var popover:          NSPopover?
     private var stateCancellable: AnyCancellable?
+    weak var mainWindow:          NSWindow?
 
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore) {
         guard statusItem == nil else { return }
@@ -166,17 +169,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     // MARK: - Open main window
 
     func openMainWindow() {
-        // Close the popover first so the main window isn't competing with it.
         if let pop = popover, pop.isShown {
             NSApp.deactivate()
             pop.performClose(nil)
         }
-        let popWin = popover?.contentViewController?.view.window
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows
-                .first { $0 !== popWin && $0.canBecomeMain }?
-                .makeKeyAndOrderFront(nil)
+            self.mainWindow?.makeKeyAndOrderFront(nil)
         }
     }
 
