@@ -51,7 +51,7 @@ private struct MainWindowConfigurator: NSViewRepresentable {
 // MARK: - Menu bar controller
 
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, NSPopoverDelegate {
     static let shared = MenuBarController()
 
     private var statusItem:       NSStatusItem?
@@ -85,6 +85,7 @@ final class MenuBarController: NSObject {
         let pop = NSPopover()
         pop.contentViewController = vc
         pop.behavior = .transient
+        pop.delegate = self
         popover = pop
 
         // Re-key the popover window when state changes while it's visible,
@@ -96,6 +97,12 @@ final class MenuBarController: NSObject {
                 guard let self, self.popover?.isShown == true, NSApp.isActive else { return }
                 self.popover?.contentViewController?.view.window?.makeKey()
             }
+    }
+
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        Task { @MainActor in
+            NSApp.deactivate()
+        }
     }
 
     @objc private func toggle(_ sender: AnyObject?) {
