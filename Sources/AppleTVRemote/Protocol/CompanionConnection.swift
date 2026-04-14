@@ -169,14 +169,26 @@ final class CompanionConnection: ObservableObject {
                 return
             }
 
-            // Connect (blocking; LAN latency < 1 ms)
-            let connectResult = withUnsafePointer(to: addr) { ptr in
-                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            // Connect — retry up to 3 times for transient network errors
+            // (EHOSTUNREACH / ENETUNREACH / ETIMEDOUT) which resolve on their own
+            // after the ATV finishes waking or the ARP cache refreshes.
+            let transientErrnos: Set<Int32> = [EHOSTUNREACH, ENETUNREACH, ETIMEDOUT, ECONNREFUSED]
+            var connectResult: Int32 = -1
+            var lastErrno:     Int32 = 0
+            for attempt in 0..<3 {
+                connectResult = withUnsafePointer(to: addr) { ptr in
+                    ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
                 }
+                lastErrno = errno
+                if connectResult == 0 { break }
+                guard transientErrnos.contains(lastErrno), attempt < 2 else { break }
+                print("Companion: connect attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                Thread.sleep(forTimeInterval: 1)
             }
             guard connectResult == 0 else {
-                let msg = "connect() failed: \(String(cString: strerror(errno)))"
+                let msg = "connect() failed: \(String(cString: strerror(lastErrno)))"
                 Darwin.close(fd)
                 DispatchQueue.main.async { self?.state = .error(msg) }
                 return
