@@ -191,7 +191,14 @@ struct RemoteControlView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Retry") { connection.connect(to: device) }
+            Button("Retry") {
+                let fresh = discovery.devices.first { $0.id == device.id } ?? device
+                if MACStore.load(for: fresh.id) != nil {
+                    connection.wakeAndConnect(to: fresh)
+                } else {
+                    connection.connect(to: fresh)
+                }
+            }
                 .buttonStyle(.bordered)
         }
         .padding(24)

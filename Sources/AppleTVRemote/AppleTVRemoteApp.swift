@@ -27,7 +27,7 @@ struct AppleTVRemoteApp: App {
                     if let device = devices.first(where: {
                         autoConnect.isEnabled($0.id) && $0.host != nil
                     }) {
-                        connection.connect(to: device)
+                        connection.wakeAndConnect(to: device)
                     }
                 }
         }
@@ -402,7 +402,7 @@ final class AutoReconnector: ObservableObject {
                 return
             }
             print("AutoReconnector: connecting (attempt \(attempt)/\(maxRetries))")
-            connection.connect(to: target)
+            connection.wakeAndConnect(to: target)
         }
     }
 }
