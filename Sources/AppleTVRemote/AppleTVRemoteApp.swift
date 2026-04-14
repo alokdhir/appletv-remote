@@ -287,7 +287,7 @@ struct MenuBarRemoteView: View {
                     RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
                     HStack(spacing: 2) {
                         RemoteButton(label: "chevron.left",  action: { connection.send(.left) })
-                        RemoteButton(label: "return",         action: { connection.send(.select) }, size: 48)
+                        RemoteButton(label: "circle.fill",    action: { connection.send(.select) }, size: 48)
                         RemoteButton(label: "chevron.right", action: { connection.send(.right) })
                     }
                     RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
