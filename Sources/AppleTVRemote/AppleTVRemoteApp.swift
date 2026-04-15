@@ -53,6 +53,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
+
+    /// Dock-icon click while no windows are visible: re-show the main window
+    /// (which WindowHider ordered out rather than closed). Returning `false`
+    /// tells AppKit we've handled the reopen ourselves so it doesn't try to
+    /// un-miniaturize or surface some other window on top.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows {
+            MenuBarController.shared.openMainWindow()
+        }
+        return false
+    }
 }
 
 // MARK: - Hide main window on close (don't disconnect)
