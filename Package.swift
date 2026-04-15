@@ -8,10 +8,17 @@ let package = Package(
         .package(url: "https://github.com/attaswift/BigInt.git", from: "5.3.0")
     ],
     targets: [
+        .target(
+            name: "AppleTVProtocol",
+            dependencies: [
+                .product(name: "BigInt", package: "BigInt")
+            ],
+            path: "Sources/AppleTVProtocol"
+        ),
         .executableTarget(
             name: "AppleTVRemote",
             dependencies: [
-                .product(name: "BigInt", package: "BigInt")
+                "AppleTVProtocol"
             ],
             path: "Sources/AppleTVRemote",
             exclude: ["Resources/Info.plist"],

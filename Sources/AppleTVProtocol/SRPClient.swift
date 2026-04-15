@@ -12,11 +12,11 @@ import BigInt
 /// Password  P: 4-digit PIN shown on the Apple TV
 ///
 /// Reference: HAP specification §5.6, pyatv protocols/mrp/pairing.py
-struct SRPClient {
+public struct SRPClient {
 
     // MARK: - Group parameters (RFC 5054, §A.2 — 3072-bit group)
 
-    static let N = BigUInt(Data([
+    public static let N = BigUInt(Data([
         0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xC9,0x0F,0xDA,0xA2,0x21,0x68,0xC2,0x34,
         0xC4,0xC6,0x62,0x8B,0x80,0xDC,0x1C,0xD1,0x29,0x02,0x4E,0x08,0x8A,0x67,0xCC,0x74,
         0x02,0x0B,0xBE,0xA6,0x3B,0x13,0x9B,0x22,0x51,0x4A,0x08,0x79,0x8E,0x34,0x04,0xDD,
@@ -43,18 +43,18 @@ struct SRPClient {
         0x4B,0x82,0xD1,0x20,0xA9,0x3A,0xD2,0xCA,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF
     ]))
 
-    static let g = BigUInt(5)
-    static let Nbytes = 384  // byte length of N (3072 bits)
-    static let username = "Pair-Setup"
+    public static let g = BigUInt(5)
+    public static let Nbytes = 384  // byte length of N (3072 bits)
+    public static let username = "Pair-Setup"
 
     // MARK: - Instance state
 
     /// Client private key (random 256-bit value)
-    let privateKey: BigUInt
+    public let privateKey: BigUInt
     /// Client public key A = g^a mod N (sent to Apple TV)
-    let publicKey: BigUInt
+    public let publicKey: BigUInt
 
-    init() {
+    public init() {
         var a: BigUInt
         repeat {
             a = BigUInt.randomInteger(withExactWidth: 256)
@@ -65,10 +65,16 @@ struct SRPClient {
 
     // MARK: - Session key computation
 
-    struct SessionResult {
-        let sessionKeyK: Data        // K = SHA-512(PAD(S))
-        let clientProof: Data        // M1, sent to Apple TV
-        let expectedServerProof: Data // M2, used to verify Apple TV's response
+    public struct SessionResult {
+        public let sessionKeyK: Data        // K = SHA-512(PAD(S))
+        public let clientProof: Data        // M1, sent to Apple TV
+        public let expectedServerProof: Data // M2, used to verify Apple TV's response
+
+        public init(sessionKeyK: Data, clientProof: Data, expectedServerProof: Data) {
+            self.sessionKeyK = sessionKeyK
+            self.clientProof = clientProof
+            self.expectedServerProof = expectedServerProof
+        }
     }
 
     /// Compute the SRP session material after receiving the server's salt and public key.
@@ -77,7 +83,7 @@ struct SRPClient {
     ///   - salt: 16-byte salt from Apple TV's M2 response
     ///   - serverPublicKey: B from Apple TV's M2 response
     ///   - pin: the 4-digit PIN displayed on the Apple TV screen
-    func computeSession(salt: Data, serverPublicKey: Data, pin: String) throws -> SessionResult {
+    public func computeSession(salt: Data, serverPublicKey: Data, pin: String) throws -> SessionResult {
         let N = SRPClient.N
         let g = SRPClient.g
         let len = SRPClient.Nbytes
@@ -141,14 +147,14 @@ struct SRPClient {
 
 extension BigUInt {
     /// Encode as big-endian bytes (no leading zeros unless empty).
-    func toData() -> Data {
+    public func toData() -> Data {
         Data(self.serialize())
     }
 }
 
 // MARK: - Error
 
-enum SRPError: Error {
+public enum SRPError: Error {
     case invalidServerPublicKey
     case invalidScrambling
     case serverProofMismatch

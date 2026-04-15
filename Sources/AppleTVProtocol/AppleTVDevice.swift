@@ -2,29 +2,43 @@ import Foundation
 import Network
 
 /// Represents an Apple TV discovered on the local network.
-struct AppleTVDevice: Identifiable, Hashable {
-    let id: String          // unique identifier (e.g. model ID from TXT record)
-    let name: String
-    let endpoint: NWEndpoint
+public struct AppleTVDevice: Identifiable, Hashable, @unchecked Sendable {
+    public let id: String          // unique identifier (e.g. model ID from TXT record)
+    public let name: String
+    public let endpoint: NWEndpoint
 
     // Populated after resolving the Bonjour service
-    var host: String?
-    var port: UInt16?
+    public var host: String?
+    public var port: UInt16?
 
     // Populated after successful connection / pairing
-    var isPaired: Bool = false
+    public var isPaired: Bool = false
 
-    static func == (lhs: AppleTVDevice, rhs: AppleTVDevice) -> Bool {
+    public init(id: String,
+                name: String,
+                endpoint: NWEndpoint,
+                host: String? = nil,
+                port: UInt16? = nil,
+                isPaired: Bool = false) {
+        self.id = id
+        self.name = name
+        self.endpoint = endpoint
+        self.host = host
+        self.port = port
+        self.isPaired = isPaired
+    }
+
+    public static func == (lhs: AppleTVDevice, rhs: AppleTVDevice) -> Bool {
         lhs.id == rhs.id
     }
 
-    func hash(into hasher: inout Hasher) {
+    public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
 }
 
 /// Possible states of the connection to an Apple TV.
-enum ConnectionState: Equatable {
+public enum ConnectionState: Equatable {
     case disconnected
     case waking           // WoL packet sent, waiting for Apple TV to boot
     case connecting
@@ -32,7 +46,7 @@ enum ConnectionState: Equatable {
     case connected
     case error(String)
 
-    var displayText: String {
+    public var displayText: String {
         switch self {
         case .disconnected:       return "Disconnected"
         case .waking:             return "Waking up Apple TV…"
@@ -44,19 +58,8 @@ enum ConnectionState: Equatable {
     }
 }
 
-/// Metadata for the currently-playing media item.
-struct NowPlayingInfo {
-    var title: String?
-    var artist: String?
-    var album: String?
-    var artworkData: Data?
-    var playbackRate: Float = 0
-    var elapsedTime: TimeInterval?
-    var duration: TimeInterval?
-}
-
 /// Commands that can be sent to an Apple TV.
-enum RemoteCommand {
+public enum RemoteCommand {
     case up, down, left, right
     case select
     case menu
@@ -67,7 +70,7 @@ enum RemoteCommand {
     case sleep  // power off
 
     /// Companion protocol HID keycode for this command.
-    var hidKeycode: UInt8 {
+    public var hidKeycode: UInt8 {
         switch self {
         case .up:          return 1
         case .down:        return 2
@@ -87,7 +90,7 @@ enum RemoteCommand {
     /// True if this command should be sent as a single "button up" event only,
     /// rather than a down+up pair.  The Companion protocol requires Wake/Sleep
     /// to be sent as a release event to trigger the power/CEC action.
-    var sendReleaseOnly: Bool {
+    public var sendReleaseOnly: Bool {
         switch self {
         case .wake, .sleep: return true
         default:            return false

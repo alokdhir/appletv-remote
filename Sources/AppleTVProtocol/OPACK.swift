@@ -22,7 +22,7 @@ import Foundation
 ///   0x92         bytes,  4-byte big-endian length follows
 ///   0xD0–0xDF    array,  count = byte - 0xD0   (0–15 items)
 ///   0xE0–0xEF    dict,   count = byte - 0xE0   (0–15 key-value pairs)
-enum OPACK {
+public enum OPACK {
 
     private static func encodeUInt32(_ value: UInt32, into out: inout Data) {
         out.append(0x32)
@@ -36,7 +36,7 @@ enum OPACK {
 
     /// Encode any Swift value into OPACK bytes.
     /// Supports: String, Int, UInt32, Bool, Data, [String: Any], [Any].
-    static func pack(_ value: Any) -> Data {
+    public static func pack(_ value: Any) -> Data {
         var out = Data()
         packValue(value, into: &out)
         return out
@@ -82,7 +82,7 @@ enum OPACK {
     // MARK: - Session message helpers
 
     /// Encode a `_heartbeat` response (type=3) when the ATV initiates the heartbeat.
-    static func encodeHeartbeatResponse(txn: UInt32) -> Data {
+    public static func encodeHeartbeatResponse(txn: UInt32) -> Data {
         var out = Data()
         out.append(0xE3)              // dict, 3 entries
         encodeString("_i", into: &out)
@@ -96,7 +96,7 @@ enum OPACK {
 
     /// Encode a `_pong` response to an ATV `_ping` request.
     /// _t: 3 = response (ATV sends _ping as _t: 2 request, expects _t: 3 response).
-    static func encodePong(txn: UInt32) -> Data {
+    public static func encodePong(txn: UInt32) -> Data {
         var out = Data()
         out.append(0xE3)              // dict, 3 entries
         encodeString("_i", into: &out)
@@ -109,7 +109,7 @@ enum OPACK {
     }
 
     /// Encode `_systemInfo` request — tells the ATV who we are.
-    static func encodeSystemInfo(clientID: String, txn: UInt32) -> Data {
+    public static func encodeSystemInfo(clientID: String, txn: UInt32) -> Data {
         pack([
             "_i": "_systemInfo",
             "_t": 2,
@@ -130,7 +130,7 @@ enum OPACK {
     }
 
     /// Encode `_sessionStart` request.
-    static func encodeSessionStart(txn: UInt32, localSID: UInt32) -> Data {
+    public static func encodeSessionStart(txn: UInt32, localSID: UInt32) -> Data {
         pack([
             "_i": "_sessionStart",
             "_t": 2,
@@ -144,7 +144,7 @@ enum OPACK {
 
     /// Decode a top-level OPACK dict into [String: Any].
     /// Supports string, int, bytes, and nested dict values — enough for E_OPACK session messages.
-    static func decodeDict(_ data: Data) -> [String: Any]? {
+    public static func decodeDict(_ data: Data) -> [String: Any]? {
         var cursor = data.startIndex
         guard let count = readDictHeader(data, cursor: &cursor) else { return nil }
         var result = [String: Any]()
@@ -228,7 +228,7 @@ enum OPACK {
     /// This registers the controller in the Companion controller store on the ATV, which is the
     /// store checked during pair-verify. Without it, the ATV stores us in HAP-only and rejects
     /// pair-verify M3 with error=2 (Authentication).
-    static func encodeDeviceName(_ displayName: String) -> Data {
+    public static func encodeDeviceName(_ displayName: String) -> Data {
         var out = Data()
         out.append(0xE1)   // dict, 1 entry
         encodeString("name", into: &out)
@@ -237,7 +237,7 @@ enum OPACK {
     }
 
     /// Wrap raw TLV8 bytes in `{"_pd": data}` for pvNext frames.
-    static func wrapPairingData(_ tlvData: Data) -> Data {
+    public static func wrapPairingData(_ tlvData: Data) -> Data {
         var out = Data()
         out.append(0xE1)                    // dict, 1 entry
         encodeString("_pd", into: &out)
@@ -247,7 +247,7 @@ enum OPACK {
 
     /// Wrap raw TLV8 bytes for psStart — `{"_pd": data, "_pwTy": 1}`.
     /// `_pwTy: 1` triggers PIN display on the Apple TV.
-    static func wrapPsStartData(_ tlvData: Data) -> Data {
+    public static func wrapPsStartData(_ tlvData: Data) -> Data {
         var out = Data()
         out.append(0xE2)                    // dict, 2 entries
         encodeString("_pd", into: &out)
@@ -258,7 +258,7 @@ enum OPACK {
     }
 
     /// Wrap raw TLV8 bytes for psNext (M3/M5) — `{"_pd": data, "_pwTy": 1}`.
-    static func wrapPsNextData(_ tlvData: Data) -> Data {
+    public static func wrapPsNextData(_ tlvData: Data) -> Data {
         var out = Data()
         out.append(0xE2)                    // dict, 2 entries
         encodeString("_pd", into: &out)
@@ -270,7 +270,7 @@ enum OPACK {
 
     /// Wrap raw TLV8 bytes for pvStart — `{"_pd": data, "_auTy": 4}`.
     /// `_auTy: 4` tells the ATV this is a HAP pair-verify request.
-    static func wrapPvStartData(_ tlvData: Data) -> Data {
+    public static func wrapPvStartData(_ tlvData: Data) -> Data {
         var out = Data()
         out.append(0xE2)                    // dict, 2 entries
         encodeString("_pd", into: &out)
@@ -281,7 +281,7 @@ enum OPACK {
     }
 
     /// Extract the `_pd` bytes value from an OPACK dict, or nil if not found.
-    static func extractPairingData(from opack: Data) -> Data? {
+    public static func extractPairingData(from opack: Data) -> Data? {
         var cursor = opack.startIndex
         guard let count = readDictHeader(opack, cursor: &cursor) else { return nil }
         for _ in 0..<count {

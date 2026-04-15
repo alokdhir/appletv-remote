@@ -1,4 +1,5 @@
 import SwiftUI
+import AppleTVProtocol
 
 // MARK: - Auto-connect store
 

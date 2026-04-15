@@ -10,14 +10,14 @@ import Darwin
 /// for networks that block limited broadcast.
 ///
 /// Call off the main thread — this blocks briefly on the sendto syscall.
-enum WakeOnLAN {
+public enum WakeOnLAN {
 
-    enum WoLError: LocalizedError {
+    public enum WoLError: LocalizedError {
         case invalidMAC(String)
         case socketFailed(errno: Int32)
         case sendFailed(errno: Int32)
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .invalidMAC(let m):    return "Invalid MAC address: '\(m)'"
             case .socketFailed(let e):  return "Socket creation failed (errno \(e))"
@@ -28,7 +28,7 @@ enum WakeOnLAN {
 
     /// Send a WoL magic packet for `mac` (colon-separated hex, e.g. "a1:b2:c3:d4:e5:f6").
     /// Pass `targetIP` to also send a unicast copy to the device's last known address.
-    static func send(mac: String, targetIP: String? = nil) throws {
+    public static func send(mac: String, targetIP: String? = nil) throws {
         // Normalise and parse MAC
         let norm    = mac.lowercased().replacingOccurrences(of: "-", with: ":")
         let octets  = norm.split(separator: ":").compactMap { UInt8($0, radix: 16) }

@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Combine
 import Darwin
+import AppleTVProtocol
 
 /// Discovers Apple TV devices on the local network via Bonjour.
 ///
@@ -103,14 +104,15 @@ final class DeviceDiscovery: ObservableObject {
             return true
         }
 
-        // Cancel resolvers for services that disappeared
+        // Cancel resolvers for services that disappeared.
+        // Collect stale keys first — mutating `resolvers` while iterating
+        // `resolvers.keys` (a live view) is undefined behavior in Swift.
         let currentNames = Set(appletvResults.compactMap { result -> String? in
             guard case .service(let name, _, _, _) = result.endpoint else { return nil }
             return name
         })
-        for name in resolvers.keys where !currentNames.contains(name) {
-            resolvers[name] = nil
-        }
+        let staleKeys = resolvers.keys.filter { !currentNames.contains($0) }
+        for name in staleKeys { resolvers.removeValue(forKey: name) }
 
         for result in appletvResults {
             guard case .service(let name, let type_, let domain, _) = result.endpoint else { continue }

@@ -2,9 +2,11 @@ import SwiftUI
 import AppKit
 import Combine
 import ServiceManagement
+import AppleTVProtocol
 
 @main
 struct AppleTVRemoteApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var discovery   = DeviceDiscovery()
     @StateObject private var connection  = CompanionConnection()
     @StateObject private var autoConnect = AutoConnectStore()
@@ -35,6 +37,20 @@ struct AppleTVRemoteApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+    }
+}
+
+// MARK: - App delegate
+
+/// Keeps the app alive when all windows close. Without this, SwiftUI's default
+/// `applicationShouldTerminateAfterLastWindowClosed == true` terminates the
+/// process whenever the user closes a secondary window (e.g. the standard
+/// About panel) while the main window is hidden — since the menu-bar status
+/// item is not a window, AppKit considers the app window-less and quits it.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }
 
@@ -88,6 +104,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var stateCancellable: AnyCancellable?
     weak var mainWindow:          NSWindow?
 
+    /// Set while `openMainWindow()` is transitioning from popover → main window.
+    /// Tells `popoverDidClose` to skip its deactivate (which would otherwise
+    /// steal focus from the main window we just raised).
+    private var suppressPopoverDeactivate = false
+
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore) {
         guard statusItem == nil else { return }
 
@@ -133,6 +154,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     nonisolated func popoverDidClose(_ notification: Notification) {
         Task { @MainActor in
+            if self.suppressPopoverDeactivate {
+                self.suppressPopoverDeactivate = false
+                return
+            }
             NSApp.deactivate()
         }
     }
@@ -170,7 +195,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     func openMainWindow() {
         if let pop = popover, pop.isShown {
-            NSApp.deactivate()
+            // Suppress the deactivate that popoverDidClose would otherwise queue
+            // — if it ran after our activate+show below, it would steal focus
+            // from the main window we just raised.
+            suppressPopoverDeactivate = true
             pop.performClose(nil)
         }
         DispatchQueue.main.async {
@@ -349,6 +377,13 @@ struct MenuBarRemoteView: View {
 // MARK: - Auto-reconnect on connection drop
 
 /// Watches for unexpected disconnects on auto-connect devices and retries up to 3 times.
+///
+/// The retry is debounced: the counter only increments if the connection stays
+/// in `.disconnected`/`.error` for the full `retryDelay` window. Transitions
+/// into `.waking`/`.connecting`/`.awaitingPairingPin` cancel the pending retry
+/// without consuming an attempt — this is what prevents the internal
+/// `.waking → .disconnected → .connecting` transition in `wakeAndConnect` from
+/// burning through the retry budget on every successful connect.
 @MainActor
 final class AutoReconnector: ObservableObject {
     private var cancellable: AnyCancellable?
@@ -365,22 +400,28 @@ final class AutoReconnector: ObservableObject {
             .sink { [weak self, weak connection, weak discovery, weak autoConnect] state in
                 guard let self, let connection, let discovery, let autoConnect else { return }
                 switch state {
-                case .disconnected, .error:
-                    // Only retry if the device that just dropped has auto-connect on.
-                    guard let device = connection.currentDevice,
-                          autoConnect.isEnabled(device.id),
-                          self.retryCount < self.maxRetries else {
-                        self.retryCount = 0
-                        return
-                    }
-                    self.scheduleRetry(device: device, connection: connection, discovery: discovery)
                 case .connected:
-                    // Successful connection — reset retry counter.
+                    // Success — reset counter and cancel any pending retry.
                     self.retryCount = 0
                     self.retryTask?.cancel()
                     self.retryTask = nil
-                default:
-                    break
+                case .connecting, .waking, .awaitingPairingPin:
+                    // Mid-handshake — cancel any pending retry so the transient
+                    // `.disconnected` that happened before this doesn't count
+                    // against the retry budget.
+                    self.retryTask?.cancel()
+                    self.retryTask = nil
+                case .disconnected, .error:
+                    guard let device = connection.currentDevice,
+                          autoConnect.isEnabled(device.id) else {
+                        self.retryCount = 0
+                        self.retryTask?.cancel()
+                        self.retryTask = nil
+                        return
+                    }
+                    // If a retry is already pending, let the debounce finish.
+                    if let task = self.retryTask, !task.isCancelled { return }
+                    self.scheduleRetry(device: device, connection: connection, discovery: discovery)
                 }
             }
     }
@@ -388,21 +429,32 @@ final class AutoReconnector: ObservableObject {
     private func scheduleRetry(device: AppleTVDevice,
                                connection: CompanionConnection,
                                discovery: DeviceDiscovery) {
-        retryTask?.cancel()
-        retryCount += 1
-        let attempt = retryCount
-        print("AutoReconnector: scheduling retry \(attempt)/\(maxRetries) in \(retryDelay)s for \(device.name)")
-        retryTask = Task {
-            try? await Task.sleep(for: .seconds(retryDelay))
-            guard !Task.isCancelled else { return }
-            // Use the freshest resolved device from discovery in case IP changed.
+        let delay = retryDelay
+        retryTask = Task { [weak self, weak connection, weak discovery] in
+            // Debounce: sleep first, then re-check. If state flipped out of
+            // .disconnected/.error during this window the sink has already
+            // cancelled us — the check below short-circuits without touching
+            // the counter.
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let self, let connection, let discovery else { return }
+            guard self.retryCount < self.maxRetries else {
+                print("AutoReconnector: max retries reached, giving up")
+                self.retryCount = 0
+                self.retryTask = nil
+                return
+            }
+            self.retryCount += 1
+            let attempt = self.retryCount
             let target = discovery.devices.first { $0.id == device.id } ?? device
             guard target.host != nil else {
                 print("AutoReconnector: device not yet resolved, skipping retry \(attempt)")
+                self.retryTask = nil
                 return
             }
-            print("AutoReconnector: connecting (attempt \(attempt)/\(maxRetries))")
+            print("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries))")
             connection.wakeAndConnect(to: target)
+            self.retryTask = nil
         }
     }
 }

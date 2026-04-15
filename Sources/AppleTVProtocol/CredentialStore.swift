@@ -4,7 +4,9 @@ import Foundation
 ///
 /// Stored at: ~/Library/Application Support/AppleTVRemote/<deviceID>.json
 /// No Keychain access required — avoids macOS password prompts for unsigned apps.
-struct CredentialStore {
+public struct CredentialStore {
+
+    public init() {}
 
     private static let appDir: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -22,13 +24,13 @@ struct CredentialStore {
 
     // MARK: - Check
 
-    func hasCredentials(for deviceID: String) -> Bool {
+    public func hasCredentials(for deviceID: String) -> Bool {
         FileManager.default.fileExists(atPath: url(for: deviceID).path)
     }
 
     // MARK: - Save
 
-    func save(credentials: PairingCredentials, for deviceID: String) {
+    public func save(credentials: PairingCredentials, for deviceID: String) {
         guard let data = try? JSONEncoder().encode(credentials) else {
             print("CredentialStore: encode failed for \(deviceID)")
             return
@@ -43,24 +45,32 @@ struct CredentialStore {
 
     // MARK: - Load
 
-    func load(deviceID: String) -> PairingCredentials? {
+    public func load(deviceID: String) -> PairingCredentials? {
         guard let data = try? Data(contentsOf: url(for: deviceID)) else { return nil }
         return try? JSONDecoder().decode(PairingCredentials.self, from: data)
     }
 
     // MARK: - Delete
 
-    func delete(deviceID: String) {
+    public func delete(deviceID: String) {
         try? FileManager.default.removeItem(at: url(for: deviceID))
         print("CredentialStore: deleted credentials for \(deviceID)")
     }
 }
 
 /// Credentials obtained after a successful Companion pairing handshake.
-struct PairingCredentials: Codable {
-    let clientID: String      // UUID this client registered with
-    let ltsk: Data            // Long-term secret key (Ed25519 private key bytes)
-    let ltpk: Data            // Long-term public key (Ed25519 public key bytes)
-    let deviceLTPK: Data      // Apple TV's long-term public key
-    let deviceID: String      // Apple TV's pairing identifier
+public struct PairingCredentials: Codable {
+    public let clientID: String      // UUID this client registered with
+    public let ltsk: Data            // Long-term secret key (Ed25519 private key bytes)
+    public let ltpk: Data            // Long-term public key (Ed25519 public key bytes)
+    public let deviceLTPK: Data      // Apple TV's long-term public key
+    public let deviceID: String      // Apple TV's pairing identifier
+
+    public init(clientID: String, ltsk: Data, ltpk: Data, deviceLTPK: Data, deviceID: String) {
+        self.clientID = clientID
+        self.ltsk = ltsk
+        self.ltpk = ltpk
+        self.deviceLTPK = deviceLTPK
+        self.deviceID = deviceID
+    }
 }

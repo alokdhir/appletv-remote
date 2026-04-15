@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Darwin
+import AppleTVProtocol
 
 /// Manages a connection to an Apple TV via the Companion protocol (_companion-link._tcp).
 ///
@@ -18,7 +19,6 @@ import Darwin
 @MainActor
 final class CompanionConnection: ObservableObject {
     @Published var state: ConnectionState = .disconnected
-    @Published var nowPlaying: NowPlayingInfo?
 
     private var socketFD: Int32 = -1
     private let writeQueue = DispatchQueue(label: "companion.write", qos: .userInitiated)
@@ -100,6 +100,13 @@ final class CompanionConnection: ObservableObject {
     private nonisolated static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
+
+        // Force RST-on-close (SO_LINGER with zero timeout) so the probe socket
+        // does NOT park its local ephemeral port in TIME_WAIT. Otherwise the
+        // real connect() that follows can hit EADDRINUSE when the kernel
+        // happens to pick the same ephemeral port for the same remote 4-tuple.
+        var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
+        setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
         defer { Darwin.close(fd) }
 
         // Set non-blocking
@@ -148,22 +155,13 @@ final class CompanionConnection: ObservableObject {
 
         let deviceCopy = device
         writeQueue.async { [weak self] in
-            // Create socket
-            let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-            guard fd >= 0 else {
-                let msg = "socket() failed: \(String(cString: strerror(errno)))"
-                DispatchQueue.main.async { self?.state = .error(msg) }
-                return
-            }
-
-            // Build sockaddr_in
+            // Build sockaddr_in once — address doesn't change between retries.
             var addr = sockaddr_in()
             addr.sin_len    = UInt8(MemoryLayout<sockaddr_in>.size)
             addr.sin_family = sa_family_t(AF_INET)
             addr.sin_port   = in_port_t(port).bigEndian
             let inetResult = host.withCString { inet_pton(AF_INET, $0, &addr.sin_addr) }
             guard inetResult == 1 else {
-                Darwin.close(fd)
                 let msg = "inet_pton failed for '\(host)'"
                 DispatchQueue.main.async { self?.state = .error(msg) }
                 return
@@ -172,24 +170,48 @@ final class CompanionConnection: ObservableObject {
             // Connect — retry up to 3 times for transient network errors
             // (EHOSTUNREACH / ENETUNREACH / ETIMEDOUT) which resolve on their own
             // after the ATV finishes waking or the ARP cache refreshes.
-            let transientErrnos: Set<Int32> = [EHOSTUNREACH, ENETUNREACH, ETIMEDOUT, ECONNREFUSED]
-            var connectResult: Int32 = -1
-            var lastErrno:     Int32 = 0
+            // EADDRINUSE can happen when a recent probe socket's TIME_WAIT
+            // entry collides with the ephemeral port the kernel picks here.
+            // Each attempt uses a FRESH fd — BSD sockets refuse a second connect()
+            // on an fd that already attempted one (returns EISCONN/EALREADY/EINVAL),
+            // so reusing the fd would burn every retry after the first failure.
+            let transientErrnos: Set<Int32> = [EHOSTUNREACH, ENETUNREACH, ETIMEDOUT, ECONNREFUSED, EADDRINUSE]
+            var fd: Int32 = -1
+            var lastErrno: Int32 = 0
+            var lastFailStage = "socket"
             for attempt in 0..<3 {
-                connectResult = withUnsafePointer(to: addr) { ptr in
+                // Fresh fd per attempt.
+                let trialFD = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+                if trialFD < 0 {
+                    lastErrno = errno
+                    lastFailStage = "socket"
+                    if attempt < 2 {
+                        print("Companion: socket() attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                        Thread.sleep(forTimeInterval: 1)
+                        continue
+                    }
+                    break
+                }
+
+                let rc = withUnsafePointer(to: addr) { ptr in
                     ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                        Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                        Darwin.connect(trialFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                     }
                 }
+                if rc == 0 {
+                    fd = trialFD
+                    break
+                }
+
                 lastErrno = errno
-                if connectResult == 0 { break }
+                lastFailStage = "connect"
+                Darwin.close(trialFD)
                 guard transientErrnos.contains(lastErrno), attempt < 2 else { break }
                 print("Companion: connect attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
                 Thread.sleep(forTimeInterval: 1)
             }
-            guard connectResult == 0 else {
-                let msg = "connect() failed: \(String(cString: strerror(lastErrno)))"
-                Darwin.close(fd)
+            guard fd >= 0 else {
+                let msg = "\(lastFailStage)() failed: \(String(cString: strerror(lastErrno)))"
                 DispatchQueue.main.async { self?.state = .error(msg) }
                 return
             }
@@ -228,7 +250,6 @@ final class CompanionConnection: ObservableObject {
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
         state = .disconnected
-        nowPlaying = nil
         currentDevice = nil
         pairing = nil
         pairVerify = nil

@@ -5,8 +5,8 @@ import Foundation
 /// Format: each entry is tag (1 byte) + length (1 byte, 0–255) + data.
 /// Values longer than 255 bytes are split into consecutive TLVs with the
 /// same tag; the decoder automatically reassembles them.
-struct TLV8 {
-    enum Tag: UInt8 {
+public struct TLV8 {
+    public enum Tag: UInt8 {
         case method        = 0x00
         case identifier    = 0x01
         case salt          = 0x02
@@ -28,19 +28,21 @@ struct TLV8 {
 
     private var entries: [(UInt8, Data)] = []
 
+    public init() {}
+
     // MARK: - Builder
 
-    mutating func append(_ tag: Tag, _ value: Data) {
+    public mutating func append(_ tag: Tag, _ value: Data) {
         entries.append((tag.rawValue, value))
     }
 
-    mutating func append(_ tag: Tag, byte value: UInt8) {
+    public mutating func append(_ tag: Tag, byte value: UInt8) {
         entries.append((tag.rawValue, Data([value])))
     }
 
     // MARK: - Encode
 
-    func encode() -> Data {
+    public func encode() -> Data {
         var out = Data()
         for (tag, value) in entries {
             var remaining = value
@@ -58,7 +60,7 @@ struct TLV8 {
 
     // MARK: - Decode
 
-    static func decode(_ data: Data) -> TLV8 {
+    public static func decode(_ data: Data) -> TLV8 {
         var tlv = TLV8()
         var i = data.startIndex
 
@@ -82,10 +84,10 @@ struct TLV8 {
 
     // MARK: - Lookup
 
-    subscript(tag: Tag) -> Data? {
+    public subscript(tag: Tag) -> Data? {
         entries.first(where: { $0.0 == tag.rawValue })?.1
     }
 
     /// All entries as (tag byte, data) pairs — for debugging.
-    var allEntries: [(UInt8, Data)] { entries }
+    public var allEntries: [(UInt8, Data)] { entries }
 }

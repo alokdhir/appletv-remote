@@ -15,9 +15,9 @@ private extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined(separator: " ") }
 }
 
-final class CompanionPairVerify {
+public final class CompanionPairVerify {
 
-    enum VerifyError: Error {
+    public enum VerifyError: Error {
         case invalidServerPublicKey
         case decryptionFailed
         case signatureInvalid
@@ -28,17 +28,17 @@ final class CompanionPairVerify {
     private let creds: PairingCredentials
     private let ephemeralPrivate = Curve25519.KeyAgreement.PrivateKey()
     private var sessionKey: SymmetricKey?
-    private(set) var sessionEncryptKey: SymmetricKey?
-    private(set) var sessionDecryptKey: SymmetricKey?
+    public private(set) var sessionEncryptKey: SymmetricKey?
+    public private(set) var sessionDecryptKey: SymmetricKey?
 
-    init(credentials: PairingCredentials) {
+    public init(credentials: PairingCredentials) {
         self.creds = credentials
     }
 
     // MARK: - M1
 
     /// TLV8 payload for PV_Start (M1).
-    func m1Payload() -> Data {
+    public func m1Payload() -> Data {
         var tlv = TLV8()
         tlv.append(.state, byte: 1)
         tlv.append(.publicKey, Data(ephemeralPrivate.publicKey.rawRepresentation))
@@ -48,7 +48,7 @@ final class CompanionPairVerify {
     // MARK: - M2 → M3
 
     /// Process PV_Next M2 from ATV; returns TLV8 payload for M3.
-    func processM2(_ data: Data) throws -> Data {
+    public func processM2(_ data: Data) throws -> Data {
         let tlv = TLV8.decode(data)
 
         if let err = tlv[.error] { throw VerifyError.serverError(err.first ?? 0) }
@@ -110,7 +110,7 @@ final class CompanionPairVerify {
 
     // MARK: - M4 verification
 
-    func verifyM4(_ data: Data) throws {
+    public func verifyM4(_ data: Data) throws {
         let tlv = TLV8.decode(data)
         if let err = tlv[.error] {
             print("PV M4: ATV returned error=0x\(String(format: "%02x", err.first ?? 0))")

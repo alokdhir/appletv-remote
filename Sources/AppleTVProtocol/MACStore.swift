@@ -5,17 +5,17 @@ import Foundation
 ///
 /// The MAC is looked up from the OS ARP cache right after a device's IP is resolved.
 /// It stays valid indefinitely — MAC addresses don't change unless hardware is replaced.
-enum MACStore {
+public enum MACStore {
 
     private static func key(for deviceID: String) -> String {
         "com.adhir.appletv-remote.mac.\(deviceID)"
     }
 
-    static func save(mac: String, for deviceID: String) {
+    public static func save(mac: String, for deviceID: String) {
         UserDefaults.standard.set(mac, forKey: key(for: deviceID))
     }
 
-    static func load(for deviceID: String) -> String? {
+    public static func load(for deviceID: String) -> String? {
         UserDefaults.standard.string(forKey: key(for: deviceID))
     }
 
@@ -24,7 +24,7 @@ enum MACStore {
     /// Queries the OS ARP cache for the hardware address of `ip`.
     /// Returns a colon-separated lowercase MAC string, or nil if not found.
     /// Runs the system `arp` tool — call off the main thread.
-    static func lookupFromARP(ip: String) -> String? {
+    public static func lookupFromARP(ip: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/arp")
         process.arguments = ["-n", ip]

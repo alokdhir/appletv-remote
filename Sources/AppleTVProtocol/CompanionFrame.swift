@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Header: 1-byte type + 3-byte big-endian payload length.
 /// Payload: TLV8 for pairing/verify frames, OPACK for encrypted control frames.
-struct CompanionFrame {
+public struct CompanionFrame {
 
-    enum FrameType: UInt8 {
+    public enum FrameType: UInt8 {
         case psStart = 0x03   // Pair-Setup M1 (client → ATV, initiates pairing)
         case psNext  = 0x04   // Pair-Setup M2–M6 (both directions)
         case pvStart = 0x05   // Pair-Verify M1 (client → ATV, initiates verify)
@@ -14,12 +14,17 @@ struct CompanionFrame {
         case eOPACK  = 0x08   // Encrypted OPACK (commands and events after session)
     }
 
-    let type: FrameType
-    let payload: Data
+    public let type: FrameType
+    public let payload: Data
+
+    public init(type: FrameType, payload: Data) {
+        self.type = type
+        self.payload = payload
+    }
 
     // MARK: - Encode
 
-    var encoded: Data {
+    public var encoded: Data {
         let len = payload.count
         var out = Data(capacity: 4 + len)
         out.append(type.rawValue)
@@ -33,7 +38,7 @@ struct CompanionFrame {
     // MARK: - Decode
 
     /// Attempt to read one frame from `buffer`, consuming its bytes on success.
-    static func read(from buffer: inout Data) -> CompanionFrame? {
+    public static func read(from buffer: inout Data) -> CompanionFrame? {
         guard buffer.count >= 4 else { return nil }
 
         let typeByte = buffer[buffer.startIndex]

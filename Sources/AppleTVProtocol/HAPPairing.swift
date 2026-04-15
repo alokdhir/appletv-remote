@@ -14,10 +14,10 @@ import CryptoKit
 /// After M6 completes the pairing, credentials are available via `credentials`.
 ///
 /// Reference: HAP specification §5.6, pyatv protocols/mrp/pairing.py
-final class HAPPairing: @unchecked Sendable {
+public final class HAPPairing: @unchecked Sendable {
 
-    enum Step: Int { case m1 = 1, m2, m3, m4, m5, m6, done }
-    enum PairingError: Error {
+    public enum Step: Int { case m1 = 1, m2, m3, m4, m5, m6, done }
+    public enum PairingError: Error {
         case unexpectedState(UInt8)
         case serverError(UInt8)
         case serverProofMismatch
@@ -25,12 +25,12 @@ final class HAPPairing: @unchecked Sendable {
         case missingTLVField(String)
     }
 
-    private(set) var step: Step = .m1
+    public private(set) var step: Step = .m1
     private var srp = SRPClient()
     private var sessionResult: SRPClient.SessionResult?
     private var encryptKey: SymmetricKey?
     private let ltKeyPair = Curve25519.Signing.PrivateKey()
-    private(set) var credentials: PairingCredentials?
+    public private(set) var credentials: PairingCredentials?
 
     // A stable identifier for this Mac client — persisted in UserDefaults so
     // re-pairings present the same ID to the Apple TV.
@@ -42,10 +42,12 @@ final class HAPPairing: @unchecked Sendable {
         return id
     }()
 
+    public init() {}
+
     // MARK: - Step generators
 
     /// Returns the TLV8 payload for M1 (initial client hello).
-    func m1Payload() -> Data {
+    public func m1Payload() -> Data {
         var tlv = TLV8()
         tlv.append(.method, byte: 0x00)   // 0 = Pair Setup without MFi (method before state, per pyatv)
         tlv.append(.state,  byte: UInt8(Step.m1.rawValue))
@@ -53,7 +55,7 @@ final class HAPPairing: @unchecked Sendable {
     }
 
     /// Process server's M2 response; returns TLV8 payload for M3, needs pin.
-    func processM2(_ data: Data, pin: String) throws -> Data {
+    public func processM2(_ data: Data, pin: String) throws -> Data {
         let tlv = TLV8.decode(data)
         try checkState(tlv, expected: .m2)
 
@@ -81,7 +83,7 @@ final class HAPPairing: @unchecked Sendable {
     }
 
     /// Process server's M4 response (server proof verification); returns TLV8 payload for M5.
-    func processM4(_ data: Data) throws -> Data {
+    public func processM4(_ data: Data) throws -> Data {
         let tlv = TLV8.decode(data)
         try checkState(tlv, expected: .m4)
 
@@ -98,7 +100,7 @@ final class HAPPairing: @unchecked Sendable {
 
     /// Process server's M6 response (Apple TV identity); returns PairingCredentials on success.
     @discardableResult
-    func processM6(_ data: Data) throws -> PairingCredentials {
+    public func processM6(_ data: Data) throws -> PairingCredentials {
         let tlv = TLV8.decode(data)
         try checkState(tlv, expected: .m6)
 

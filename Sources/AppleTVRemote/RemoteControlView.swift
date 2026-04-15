@@ -1,4 +1,5 @@
 import SwiftUI
+import AppleTVProtocol
 
 struct RemoteControlView: View {
     let device: AppleTVDevice
@@ -133,10 +134,6 @@ struct RemoteControlView: View {
     private var remoteLayout: some View {
         ScrollView {
             VStack(spacing: 20) {
-                if let info = connection.nowPlaying {
-                    NowPlayingCard(info: info)
-                }
-
                 // Navigation pad — circular ring matching the real Apple TV remote
                 ZStack {
                     Circle()
@@ -274,60 +271,5 @@ struct LabeledRemoteButton: View {
                         .onEnded { _ in action() }
                 )
         }
-    }
-}
-
-
-// MARK: - Now Playing Card
-
-struct NowPlayingCard: View {
-    let info: NowPlayingInfo
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if let artworkData = info.artworkData,
-               let nsImage = NSImage(data: artworkData) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 52, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.quaternary)
-                    .frame(width: 52, height: 52)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .foregroundStyle(.tertiary)
-                    }
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                if let title = info.title {
-                    Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                }
-                if let artist = info.artist {
-                    Text(artist)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if let album = info.album {
-                    Text(album)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer()
-
-            Image(systemName: info.playbackRate > 0 ? "pause.fill" : "play.fill")
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 }
