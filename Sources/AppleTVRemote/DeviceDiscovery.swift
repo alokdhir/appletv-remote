@@ -45,7 +45,7 @@ final class DeviceDiscovery: ObservableObject {
                 case .failed(let error):
                     self?.isSearching = false
                     self?.browserError = error.localizedDescription
-                    print("Bonjour browser failed: \(error)")
+                    Log.discovery.fail("Bonjour browser failed: \(error)")
                 case .cancelled:
                     self?.isSearching = false
                 default:
@@ -81,11 +81,11 @@ final class DeviceDiscovery: ObservableObject {
         let appletvResults = results.filter { result in
             guard case .service(let name, _, _, _) = result.endpoint else { return false }
             guard case .bonjour(let txt) = result.metadata else {
-                print("Discovery: \(name) — no TXT metadata, allowing")
+                Log.discovery.trace("Discovery: \(name) — no TXT metadata, allowing")
                 return true
             }
             let model = txt.dictionary["rpMd"] ?? ""
-            print("Discovery: \(name) rpMd='\(model)'")
+            Log.discovery.trace("Discovery: \(name) rpMd='\(model)'")
             // rpMd present and identifies as Apple TV → allow
             if model.hasPrefix("AppleTV") { return true }
             // rpMd present and identifies as something else → reject
@@ -97,7 +97,7 @@ final class DeviceDiscovery: ObservableObject {
             if !rpflRaw.isEmpty,
                let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16) {
                 let pairable = (rpfl & 0x4000) != 0
-                print("Discovery: \(name) rpFl=\(rpflRaw) PIN-pairable=\(pairable)")
+                Log.discovery.trace("Discovery: \(name) rpFl=\(rpflRaw) PIN-pairable=\(pairable)")
                 return pairable
             }
             // Neither rpMd nor rpFl present — allow (Apple TVs sometimes omit TXT at browse time)
@@ -141,7 +141,7 @@ final class DeviceDiscovery: ObservableObject {
                 // Filter at resolve time using rpMd first, then rpFl fallback.
                 if let model = txt["rpMd"] {
                     if !model.hasPrefix("AppleTV") {
-                        print("Discovery: \(name) resolved rpMd='\(model)' — not an Apple TV, removing")
+                        Log.discovery.report("Discovery: \(name) resolved rpMd='\(model)' — not an Apple TV, removing")
                         self.devices.removeAll { $0.id == name }
                         self.resolvers[name] = nil
                         return
@@ -152,13 +152,13 @@ final class DeviceDiscovery: ObservableObject {
                     if !rpflRaw.isEmpty,
                        let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16),
                        (rpfl & 0x4000) == 0 {
-                        print("Discovery: \(name) resolved rpFl=\(rpflRaw) — not PIN-pairable, removing")
+                        Log.discovery.report("Discovery: \(name) resolved rpFl=\(rpflRaw) — not PIN-pairable, removing")
                         self.devices.removeAll { $0.id == name }
                         self.resolvers[name] = nil
                         return
                     }
                 }
-                print("Resolved \(name) → \(host):\(port)")
+                Log.discovery.report("Resolved \(name) → \(host):\(port)")
                 if let idx = self.devices.firstIndex(where: { $0.id == name }) {
                     self.devices[idx].host = host
                     self.devices[idx].port = UInt16(port)
@@ -169,7 +169,7 @@ final class DeviceDiscovery: ObservableObject {
                 let resolvedIP = host
                 DispatchQueue.global(qos: .utility).async {
                     if let mac = MACStore.lookupFromARP(ip: resolvedIP) {
-                        print("Discovery: \(deviceID) ARP MAC=\(mac)")
+                        Log.discovery.report("Discovery: \(deviceID) ARP MAC=\(mac)")
                         MACStore.save(mac: mac, for: deviceID)
                     }
                 }
@@ -210,9 +210,9 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
         if let txtData = sender.txtRecordData() {
             let txt = NetService.dictionary(fromTXTRecord: txtData)
             txtFields = txt.compactMapValues { String(data: $0, encoding: .utf8) }
-            print("ServiceResolver: \(sender.name) TXT: \(txtFields)")
+            Log.discovery.trace("ServiceResolver: \(sender.name) TXT: \(txtFields)")
         } else {
-            print("ServiceResolver: \(sender.name) — txtRecordData() nil at resolve time")
+            Log.discovery.trace("ServiceResolver: \(sender.name) — txtRecordData() nil at resolve time")
         }
 
         // Prefer IPv4 (AF_INET=2) over IPv6. On BSD/macOS sockaddr layout:
@@ -240,6 +240,6 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
     }
 
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
-        print("ServiceResolver: failed to resolve \(sender.name) — \(errorDict)")
+        Log.discovery.fail("ServiceResolver: failed to resolve \(sender.name) — \(errorDict)")
     }
 }

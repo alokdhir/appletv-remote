@@ -66,9 +66,9 @@ public enum WakeOnLAN {
                 }
             }
             if n < 0 {
-                print("WoL: sendto \(dest) failed errno \(errno)")
+                Log.wol.fail("WoL: sendto \(dest) failed errno \(errno)")
             } else {
-                print("WoL: sent \(n)-byte magic packet → \(dest) for MAC \(mac)")
+                Log.wol.report("WoL: sent \(n)-byte magic packet → \(dest) for MAC \(mac)")
             }
         }
     }

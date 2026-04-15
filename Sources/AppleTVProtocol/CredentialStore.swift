@@ -32,14 +32,14 @@ public struct CredentialStore {
 
     public func save(credentials: PairingCredentials, for deviceID: String) {
         guard let data = try? JSONEncoder().encode(credentials) else {
-            print("CredentialStore: encode failed for \(deviceID)")
+            Log.credentials.fail("CredentialStore: encode failed for \(deviceID)")
             return
         }
         do {
             try data.write(to: url(for: deviceID), options: .atomic)
-            print("CredentialStore: saved credentials for \(deviceID)")
+            Log.credentials.report("CredentialStore: saved credentials for \(deviceID)")
         } catch {
-            print("CredentialStore: save failed: \(error)")
+            Log.credentials.fail("CredentialStore: save failed: \(error)")
         }
     }
 
@@ -54,7 +54,7 @@ public struct CredentialStore {
 
     public func delete(deviceID: String) {
         try? FileManager.default.removeItem(at: url(for: deviceID))
-        print("CredentialStore: deleted credentials for \(deviceID)")
+        Log.credentials.report("CredentialStore: deleted credentials for \(deviceID)")
     }
 }
 

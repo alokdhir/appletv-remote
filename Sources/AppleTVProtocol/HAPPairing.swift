@@ -92,7 +92,7 @@ public final class HAPPairing: @unchecked Sendable {
             throw PairingError.missingTLVField("sessionResult (M3 not completed?)")
         }
         guard serverProof == expected else { throw PairingError.serverProofMismatch }
-        print("HAPPairing: server proof verified ✓")
+        Log.pairing.report("HAPPairing: server proof verified ✓")
 
         step = .m4
         return try buildM5Payload()

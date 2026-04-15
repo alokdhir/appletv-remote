@@ -55,7 +55,7 @@ public struct CompanionFrame {
         buffer.removeFirst(4 + payloadLen)
 
         guard let type = FrameType(rawValue: typeByte) else {
-            print("Companion: unknown frame type 0x\(String(typeByte, radix: 16))")
+            Log.companion.fail("Companion: unknown frame type 0x\(String(typeByte, radix: 16))")
             return nil
         }
 

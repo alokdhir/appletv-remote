@@ -276,7 +276,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            print("Launch at startup toggle failed: \(error)")
+            Log.app.fail("Launch at startup toggle failed: \(error)")
         }
     }
 }
@@ -439,7 +439,7 @@ final class AutoReconnector: ObservableObject {
             guard !Task.isCancelled,
                   let self, let connection, let discovery else { return }
             guard self.retryCount < self.maxRetries else {
-                print("AutoReconnector: max retries reached, giving up")
+                Log.companion.fail("AutoReconnector: max retries reached, giving up")
                 self.retryCount = 0
                 self.retryTask = nil
                 return
@@ -448,11 +448,11 @@ final class AutoReconnector: ObservableObject {
             let attempt = self.retryCount
             let target = discovery.devices.first { $0.id == device.id } ?? device
             guard target.host != nil else {
-                print("AutoReconnector: device not yet resolved, skipping retry \(attempt)")
+                Log.companion.report("AutoReconnector: device not yet resolved, skipping retry \(attempt)")
                 self.retryTask = nil
                 return
             }
-            print("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries))")
+            Log.companion.report("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries))")
             connection.wakeAndConnect(to: target)
             self.retryTask = nil
         }

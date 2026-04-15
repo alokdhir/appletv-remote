@@ -83,7 +83,7 @@ public final class CompanionPairVerify {
         // the HAP pair-setup identity we stored. Skipping server signature verification is safe for
         // a personal app: the client still authenticates to the ATV via the M3 Ed25519 signature,
         // and the ECDH shared secret is not derivable without the ATV's ephemeral private key.
-        print("PV M2: atvID \(String(data: atvID, encoding: .utf8) ?? atvID.hex) (server sig check skipped)")
+        Log.pairing.trace("PV M2: atvID \(String(data: atvID, encoding: .utf8) ?? atvID.hex) (server sig check skipped)")
 
         // Build M3: sign our identity, encrypt, send
         let ltsk  = try Curve25519.Signing.PrivateKey(rawRepresentation: creds.ltsk)
@@ -113,11 +113,11 @@ public final class CompanionPairVerify {
     public func verifyM4(_ data: Data) throws {
         let tlv = TLV8.decode(data)
         if let err = tlv[.error] {
-            print("PV M4: ATV returned error=0x\(String(format: "%02x", err.first ?? 0))")
+            Log.pairing.fail("PV M4: ATV returned error=0x\(String(format: "%02x", err.first ?? 0))")
             throw VerifyError.serverError(err.first ?? 0)
         }
         let state = tlv[.state]?.first ?? 0
-        print("PV M4: success (state=\(state))")
+        Log.pairing.report("PV M4: success (state=\(state))")
     }
 
     // MARK: - Private helpers

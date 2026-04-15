@@ -70,7 +70,7 @@ final class CompanionConnection: ObservableObject {
         Task.detached(priority: .userInitiated) { [weak self] in
             // Blocking probe — safe here because we're detached from MainActor
             let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 1)
-            print("SmartConnect: \(device.name) reachable=\(reachable)")
+            Log.companion.report("SmartConnect: \(device.name) reachable=\(reachable)")
 
             if reachable {
                 let weakSelf = self
@@ -186,7 +186,7 @@ final class CompanionConnection: ObservableObject {
                     lastErrno = errno
                     lastFailStage = "socket"
                     if attempt < 2 {
-                        print("Companion: socket() attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                        Log.companion.report("Companion: socket() attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
                         Thread.sleep(forTimeInterval: 1)
                         continue
                     }
@@ -207,7 +207,7 @@ final class CompanionConnection: ObservableObject {
                 lastFailStage = "connect"
                 Darwin.close(trialFD)
                 guard transientErrnos.contains(lastErrno), attempt < 2 else { break }
-                print("Companion: connect attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                Log.companion.report("Companion: connect attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
                 Thread.sleep(forTimeInterval: 1)
             }
             guard fd >= 0 else {
@@ -216,7 +216,7 @@ final class CompanionConnection: ObservableObject {
                 return
             }
 
-            print("Companion: TCP connected to \(host):\(port)")
+            Log.companion.report("Companion: TCP connected to \(host):\(port)")
 
             // Enable TCP keepalive so the kernel sends probes if traffic stops.
             // This prevents routers from silently dropping idle TCP state.
@@ -233,10 +233,10 @@ final class CompanionConnection: ObservableObject {
                 self.startReadLoop(fd: Int(fd))
                 // Kick off pairing
                 if self.credentialStore.hasCredentials(for: deviceCopy.id) {
-                    print("Companion: starting pair-verify")
+                    Log.companion.report("Companion: starting pair-verify")
                     self.startPairVerify(device: deviceCopy)
                 } else {
-                    print("Companion: starting pair-setup")
+                    Log.companion.report("Companion: starting pair-setup")
                     self.startPairSetup()
                 }
             }
@@ -353,7 +353,7 @@ final class CompanionConnection: ObservableObject {
         let extracted = opackExtracted ?? payload
         if opackExtracted == nil {
             let hex = payload.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-            print("Companion psNext: OPACK extraction failed, raw payload hex: \(hex)")
+            Log.companion.fail("Companion psNext: OPACK extraction failed, raw payload hex: \(hex)")
         }
         let tlv = TLV8.decode(extracted)
         let step = tlv[.state]?.first ?? 0
@@ -391,7 +391,7 @@ final class CompanionConnection: ObservableObject {
             }
 
         default:
-            print("Companion: unexpected PS_Next state \(step)")
+            Log.companion.fail("Companion: unexpected PS_Next state \(step)")
         }
     }
 
@@ -411,7 +411,7 @@ final class CompanionConnection: ObservableObject {
         let extracted = OPACK.extractPairingData(from: payload) ?? payload
         let tlv = TLV8.decode(extracted)
         let step = tlv[.state]?.first ?? 0
-        print("Companion pvNext step=\(step) (\(extracted.count) bytes TLV8)")
+        Log.companion.trace("Companion pvNext step=\(step) (\(extracted.count) bytes TLV8)")
 
         switch step {
         case 2:  // M2: ATV sent its ephemeral key + encrypted identity
@@ -446,7 +446,7 @@ final class CompanionConnection: ObservableObject {
             }
 
         default:
-            print("Companion: unexpected PV_Next state \(step)")
+            Log.companion.fail("Companion: unexpected PV_Next state \(step)")
         }
     }
 
@@ -468,13 +468,13 @@ final class CompanionConnection: ObservableObject {
             let plain = try ChaChaPoly.open(box, using: key, authenticating: aad)
             handleOPACKMessage(plain)
         } catch {
-            print("Companion: E_OPACK decrypt failed: \(error)")
+            Log.companion.fail("Companion: E_OPACK decrypt failed: \(error)")
         }
     }
 
     private func handleOPACKMessage(_ data: Data) {
         guard let msg = OPACK.decodeDict(data) else {
-            print("Companion: E_OPACK decode failed (\(data.count)B) hex: \(data.prefix(32).map{String(format:"%02x",$0)}.joined(separator:" "))")
+            Log.companion.fail("Companion: E_OPACK decode failed (\(data.count)B) hex: \(data.prefix(32).map{String(format:"%02x",$0)}.joined(separator:" "))")
             return
         }
         let identifier = msg["_i"] as? String ?? ""
@@ -490,15 +490,15 @@ final class CompanionConnection: ObservableObject {
             default:              return "\(k)=?"
             }
         }.joined(separator: " ")
-        print("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
+        Log.companion.trace("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
 
         switch identifier {
         case "_heartbeat":
             sendEncrypted(OPACK.encodeHeartbeatResponse(txn: txn))
-            print("Companion → _heartbeat response txn=\(txn) ✓")
+            Log.companion.trace("Companion → _heartbeat response txn=\(txn) ✓")
         case "_ping":
             sendEncrypted(OPACK.encodePong(txn: txn))
-            print("Companion → _pong txn=\(txn) ✓")
+            Log.companion.trace("Companion → _pong txn=\(txn) ✓")
         case "_pong":
             break
         default:
@@ -527,7 +527,7 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter
             self.txnCounter &+= 1
-            print("Companion → keepalive _systemInfo txn=\(txn)")
+            Log.companion.trace("Companion → keepalive _systemInfo txn=\(txn)")
             self.sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, txn: txn))
         }
         timer.resume()
@@ -551,7 +551,7 @@ final class CompanionConnection: ObservableObject {
             let sealed = try ChaChaPoly.seal(opackData, using: key, nonce: nonce, authenticating: aad)
             sendFrame(.eOPACK, payload: sealed.ciphertext + sealed.tag)
         } catch {
-            print("Companion: encrypt failed: \(error)")
+            Log.companion.fail("Companion: encrypt failed: \(error)")
         }
     }
 
@@ -568,10 +568,10 @@ final class CompanionConnection: ObservableObject {
     private func sendFrame(_ type: CompanionFrame.FrameType, payload: Data) {
         let fd = socketFD
         guard fd >= 0 else {
-            print("Companion: sendFrame called with no socket")
+            Log.companion.fail("Companion: sendFrame called with no socket")
             return
         }
-        print("Companion → sending \(type) (\(payload.count) bytes)")
+        Log.companion.trace("Companion → sending \(type) (\(payload.count) bytes)")
         let frameData = CompanionFrame(type: type, payload: payload).encoded
         writeQueue.async {
             frameData.withUnsafeBytes { rawBuf in
@@ -581,7 +581,7 @@ final class CompanionConnection: ObservableObject {
                 while offset < total {
                     let n = Darwin.write(fd, base + offset, total - offset)
                     if n <= 0 {
-                        print("Companion send error (errno \(errno))")
+                        Log.companion.fail("Companion send error (errno \(errno))")
                         return
                     }
                     offset += n
@@ -603,7 +603,7 @@ final class CompanionConnection: ObservableObject {
                     let err = n < 0 ? errno : 0
                     let reason = err == 0 ? "EOF (ATV closed connection)" :
                                  "errno \(err): \(String(cString: strerror(err)))"
-                    print("Companion: read loop ended — \(reason)")
+                    Log.companion.report("Companion: read loop ended — \(reason)")
                     DispatchQueue.main.async {
                         guard let self, self.socketFD >= 0 else { return }
                         if err != 0 {
@@ -615,7 +615,7 @@ final class CompanionConnection: ObservableObject {
                     return
                 }
                 let chunk = Data(buf[..<n])
-                print("Companion ← \(n) bytes")
+                Log.companion.trace("Companion ← \(n) bytes")
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.receiveBuffer.append(chunk)
@@ -627,13 +627,13 @@ final class CompanionConnection: ObservableObject {
 
     private func processBuffer() {
         while let frame = CompanionFrame.read(from: &receiveBuffer) {
-            print("Companion ← frame \(frame.type) (\(frame.payload.count) bytes)")
+            Log.companion.trace("Companion ← frame \(frame.type) (\(frame.payload.count) bytes)")
             switch frame.type {
             case .psNext:  handlePsNext(frame.payload)
             case .pvNext:  handlePvNext(frame.payload)
             case .eOPACK:  handleEOPACK(frame.payload)
             default:
-                print("Companion: unhandled frame 0x\(String(frame.type.rawValue, radix: 16))")
+                Log.companion.fail("Companion: unhandled frame 0x\(String(frame.type.rawValue, radix: 16))")
             }
         }
     }
