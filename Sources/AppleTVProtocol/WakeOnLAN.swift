@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import AppleTVLogging
 
 /// Sends Wake-on-LAN magic packets over UDP.
 ///

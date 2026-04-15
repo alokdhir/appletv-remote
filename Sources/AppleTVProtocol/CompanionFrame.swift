@@ -1,4 +1,5 @@
 import Foundation
+import AppleTVLogging
 
 /// Companion protocol wire frame.
 ///

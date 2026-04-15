@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import ServiceManagement
+import AppleTVLogging
 import AppleTVProtocol
 
 @main

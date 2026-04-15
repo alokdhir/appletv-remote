@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Darwin
+import AppleTVLogging
 import AppleTVProtocol
 
 /// Manages a connection to an Apple TV via the Companion protocol (_companion-link._tcp).

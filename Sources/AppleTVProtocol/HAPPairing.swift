@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import AppleTVLogging
 
 /// HAP Pair Setup state machine (Steps M1–M6).
 ///

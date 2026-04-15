@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Combine
 import Darwin
+import AppleTVLogging
 import AppleTVProtocol
 
 /// Discovers Apple TV devices on the local network via Bonjour.

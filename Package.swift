@@ -9,8 +9,13 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "AppleTVLogging",
+            path: "Sources/AppleTVLogging"
+        ),
+        .target(
             name: "AppleTVProtocol",
             dependencies: [
+                "AppleTVLogging",
                 .product(name: "BigInt", package: "BigInt")
             ],
             path: "Sources/AppleTVProtocol"
@@ -18,6 +23,7 @@ let package = Package(
         .executableTarget(
             name: "AppleTVRemote",
             dependencies: [
+                "AppleTVLogging",
                 "AppleTVProtocol"
             ],
             path: "Sources/AppleTVRemote",

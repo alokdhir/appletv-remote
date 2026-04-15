@@ -1,4 +1,5 @@
 import Foundation
+import AppleTVLogging
 
 /// Persists Companion pairing credentials as JSON files in Application Support.
 ///

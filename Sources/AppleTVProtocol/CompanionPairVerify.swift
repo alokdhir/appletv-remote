@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import AppleTVLogging
 
 /// HAP Pair Verify over the Companion protocol framing.
 ///
