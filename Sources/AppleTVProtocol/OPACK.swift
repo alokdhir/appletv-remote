@@ -47,16 +47,7 @@ public enum OPACK {
         case let s as String:
             encodeString(s, into: &out)
         case let i as Int:
-            if i >= 0 && i <= 0x27 {
-                out.append(UInt8(0x08 + i))
-            } else {
-                let u = UInt32(bitPattern: Int32(clamping: i))
-                out.append(0x32)
-                out.append(UInt8((u >> 24) & 0xFF))
-                out.append(UInt8((u >> 16) & 0xFF))
-                out.append(UInt8((u >> 8)  & 0xFF))
-                out.append(UInt8( u        & 0xFF))
-            }
+            encodeInt(i, into: &out)
         case let u as UInt32:
             encodeUInt32(u, into: &out)
         case let d as Data:
@@ -64,18 +55,65 @@ public enum OPACK {
         case let b as Bool:
             out.append(b ? 0x01 : 0x02)
         case let dict as [String: Any]:
-            let count = min(dict.count, 15)
-            out.append(UInt8(0xE0 + count))
-            for (k, v) in dict.prefix(count) {
+            // OPACK dicts with 0–15 entries are encoded inline with tag 0xE0+count.
+            // We don't currently emit a variable-length form, so larger dicts are
+            // a programming error (silent truncation was the old behavior — now fails loud).
+            precondition(dict.count <= 15, "OPACK dict with > 15 entries is not supported")
+            out.append(UInt8(0xE0 + dict.count))
+            // Sort keys lexicographically so the wire output is deterministic —
+            // Swift Dictionary iteration order is otherwise unspecified.
+            for k in dict.keys.sorted() {
                 encodeString(k, into: &out)
-                packValue(v, into: &out)
+                packValue(dict[k]!, into: &out)
             }
         case let arr as [Any]:
-            let count = min(arr.count, 15)
-            out.append(UInt8(0xD0 + count))
-            for item in arr.prefix(count) { packValue(item, into: &out) }
+            precondition(arr.count <= 15, "OPACK array with > 15 entries is not supported")
+            out.append(UInt8(0xD0 + arr.count))
+            for item in arr { packValue(item, into: &out) }
         default:
             out.append(0x04)  // null
+        }
+    }
+
+    /// Encode a Swift Int using the narrowest OPACK tag that exactly represents it.
+    ///
+    ///   0x08..0x2F   small int 0–39
+    ///   0x30         uint8   (40..255)
+    ///   0x31         uint16  (256..65535, big-endian)
+    ///   0x32         uint32  (65536..UInt32.max, big-endian)
+    ///   0x33         uint64  (values above UInt32.max, big-endian)
+    ///   0x36         int64   (any negative, two's complement big-endian)
+    ///
+    /// Pre-fix behavior clamped to Int32 range via UInt32(bitPattern: Int32(clamping:)),
+    /// which silently corrupted negatives (−1 → 0xFFFFFFFF = +4294967295) and large
+    /// positives (Int64 overflow clamped to Int32.max).
+    private static func encodeInt(_ i: Int, into out: inout Data) {
+        if i >= 0 {
+            if i <= 0x27 {
+                out.append(UInt8(0x08 + i))
+            } else if i <= 0xFF {
+                out.append(0x30)
+                out.append(UInt8(i))
+            } else if i <= 0xFFFF {
+                out.append(0x31)
+                appendBigEndian(UInt64(i), byteCount: 2, into: &out)
+            } else if i <= 0xFFFF_FFFF {
+                out.append(0x32)
+                appendBigEndian(UInt64(i), byteCount: 4, into: &out)
+            } else {
+                out.append(0x33)
+                appendBigEndian(UInt64(i), byteCount: 8, into: &out)
+            }
+        } else {
+            // Negative → signed 64-bit (0x36), two's complement big-endian.
+            out.append(0x36)
+            appendBigEndian(UInt64(bitPattern: Int64(i)), byteCount: 8, into: &out)
+        }
+    }
+
+    private static func appendBigEndian(_ value: UInt64, byteCount: Int, into out: inout Data) {
+        for offset in stride(from: (byteCount - 1) * 8, through: 0, by: -8) {
+            out.append(UInt8((value >> offset) & 0xFF))
         }
     }
 
@@ -179,26 +217,49 @@ public enum OPACK {
             data.formIndex(after: &cursor)
             return Int(tag) - 0x08
         case 0x30:
-            guard data.distance(from: cursor, to: data.endIndex) >= 2 else { return nil }
-            let v = Int(data[data.index(after: cursor)])
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 1) else { return nil }
             data.formIndex(&cursor, offsetBy: 2)
-            return v
+            return Int(u)
         case 0x31:
-            guard data.distance(from: cursor, to: data.endIndex) >= 3 else { return nil }
-            let v = Int(data[data.index(cursor, offsetBy: 1)]) << 8 |
-                    Int(data[data.index(cursor, offsetBy: 2)])
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 2) else { return nil }
             data.formIndex(&cursor, offsetBy: 3)
-            return v
+            return Int(u)
         case 0x32:
-            guard data.distance(from: cursor, to: data.endIndex) >= 5 else { return nil }
-            let v = Int(data[data.index(cursor, offsetBy: 1)]) << 24 |
-                    Int(data[data.index(cursor, offsetBy: 2)]) << 16 |
-                    Int(data[data.index(cursor, offsetBy: 3)]) << 8  |
-                    Int(data[data.index(cursor, offsetBy: 4)])
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
             data.formIndex(&cursor, offsetBy: 5)
-            return v
+            return Int(u)
+        case 0x33:
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
+            data.formIndex(&cursor, offsetBy: 9)
+            // On 64-bit platforms Int == Int64, so values above Int64.max round-trip lossily.
+            // Our encoder never emits such values (they come from Swift Int input).
+            return Int(bitPattern: UInt(u))
+        case 0x35:
+            // int32, signed big-endian
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
+            data.formIndex(&cursor, offsetBy: 5)
+            return Int(Int32(bitPattern: UInt32(u)))
+        case 0x36:
+            // int64, signed big-endian
+            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
+            data.formIndex(&cursor, offsetBy: 9)
+            return Int(Int64(bitPattern: u))
         default: return nil
         }
+    }
+
+    /// Reads `byteCount` big-endian bytes starting at `cursor + 1` (skipping the tag
+    /// byte at `cursor`). Returns nil if the slice is out of bounds. Does NOT advance
+    /// the cursor — callers do that themselves after consuming the value.
+    private static func readBigEndianUInt(_ data: Data,
+                                          cursor: Data.Index,
+                                          byteCount: Int) -> UInt64? {
+        guard data.distance(from: cursor, to: data.endIndex) >= 1 + byteCount else { return nil }
+        var v: UInt64 = 0
+        for offset in 1...byteCount {
+            v = (v << 8) | UInt64(data[data.index(cursor, offsetBy: offset)])
+        }
+        return v
     }
 
     private static func peekBytes(_ data: Data, cursor: inout Data.Index) -> Data? {

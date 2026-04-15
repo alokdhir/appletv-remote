@@ -31,6 +31,11 @@ let package = Package(
             resources: [
                 .process("Resources/Assets.xcassets")
             ]
+        ),
+        .testTarget(
+            name: "AppleTVProtocolTests",
+            dependencies: ["AppleTVProtocol"],
+            path: "Tests/AppleTVProtocolTests"
         )
     ]
 )
