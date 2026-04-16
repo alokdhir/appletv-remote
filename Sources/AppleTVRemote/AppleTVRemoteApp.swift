@@ -20,7 +20,9 @@ struct AppleTVRemoteApp: App {
                 .environmentObject(connection)
                 .environmentObject(autoConnect)
                 .preferredColorScheme(.dark)
-                .background(MainWindowConfigurator())   // hide-on-close, no disconnect
+                .background(VisualEffectBackground(material: .hudWindow,
+                                                   blendingMode: .behindWindow))
+                .background(MainWindowConfigurator())   // hide-on-close + translucency + no disconnect
                 .onAppear {
                     MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
                     reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
@@ -80,7 +82,8 @@ private final class WindowHider: NSObject, NSWindowDelegate {
 }
 
 /// NSView subclass that intercepts window attachment to hide the window before
-/// it ever appears on screen (avoiding the startup flash).
+/// it ever appears on screen (avoiding the startup flash), and to configure
+/// translucency so the sibling NSVisualEffectView background shows through.
 private class WindowSetupView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -88,6 +91,15 @@ private class WindowSetupView: NSView {
         window.delegate = WindowHider.shared
         // Store a direct reference so MenuBarController can show it reliably.
         MenuBarController.shared.mainWindow = window
+
+        // Translucency — pair with the VisualEffectBackground sibling SwiftUI
+        // places behind ContentView. Without these three lines the window's
+        // default opaque backing paints over the visual-effect view and you
+        // just see a solid dark fill.
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.titlebarAppearsTransparent = true
+
         guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
         // before our async orderOut runs.
@@ -103,6 +115,29 @@ private class WindowSetupView: NSView {
 private struct MainWindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { WindowSetupView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+// MARK: - Visual effect background
+
+/// SwiftUI wrapper around NSVisualEffectView. Placed behind ContentView so the
+/// window picks up macOS's native blurred-translucency look (adapts to dark/light
+/// mode automatically, blurs whatever's behind the window).
+private struct VisualEffectBackground: NSViewRepresentable {
+    let material:     NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material     = material
+        v.blendingMode = blendingMode
+        v.state        = .active
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material     = material
+        nsView.blendingMode = blendingMode
+    }
 }
 
 // MARK: - Menu bar controller
