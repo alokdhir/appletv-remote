@@ -7,13 +7,25 @@ struct ContentView: View {
     @State private var selectedDevice: AppleTVDevice?
     @State private var previousSelectedID: String?
     @AppStorage("lastDeviceID") private var lastDeviceID = ""
+    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
+
+    /// When no device is selected the statusBar (which owns the sidebar toggle)
+    /// isn't visible, so we pin the sidebar open — otherwise the user can't
+    /// get it back. The collapsed preference is still remembered.
+    private var effectivelyCollapsed: Bool {
+        sidebarCollapsed && selectedDevice != nil
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            DeviceListView(selectedDevice: $selectedDevice)
-                .frame(width: 220)
+            if !effectivelyCollapsed {
+                DeviceListView(selectedDevice: $selectedDevice)
+                    .frame(width: 220)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
 
-            Divider()
+                Divider()
+                    .transition(.opacity)
+            }
 
             if let device = selectedDevice {
                 RemoteControlView(device: device, connection: connection)
@@ -24,6 +36,7 @@ struct ContentView: View {
             }
         }
         .frame(minHeight: 480)
+        .animation(.easeInOut(duration: 0.22), value: effectivelyCollapsed)
         .onAppear {
             discovery.startDiscovery()
         }

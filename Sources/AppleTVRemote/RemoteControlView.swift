@@ -8,6 +8,7 @@ struct RemoteControlView: View {
     @State private var pairingPin = ""
     @State private var cancelEnabled = false
     @FocusState private var pinFocused: Bool
+    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +55,20 @@ struct RemoteControlView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    sidebarCollapsed.toggle()
+                }
+            } label: {
+                // Same icon in both states, matching Apple's convention in Finder /
+                // Mail / Notes. The tooltip differentiates.
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(sidebarCollapsed ? "Show devices" : "Hide devices")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
