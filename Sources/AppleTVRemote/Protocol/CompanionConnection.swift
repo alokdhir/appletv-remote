@@ -164,10 +164,6 @@ final class CompanionConnection: ObservableObject {
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
         defer { Darwin.close(fd) }
 
-        // Pin the probe to the primary interface so VPN tunnels / a second
-        // NIC on the same subnet can't cause spurious EHOSTUNREACH.
-        PrimaryInterface.bind(fd: fd)
-
         // Set non-blocking
         let flags = fcntl(fd, F_GETFL, 0)
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
@@ -256,13 +252,6 @@ final class CompanionConnection: ObservableObject {
                     }
                     break
                 }
-
-                // Bind to the primary interface so connect() can't pick a
-                // wrong NIC (second en* on the same subnet, or a VPN tunnel)
-                // and fail with EHOSTUNREACH. Only log the first attempt —
-                // retries would spam the same line.
-                PrimaryInterface.bind(fd: trialFD,
-                                      logHost: attempt == 0 ? host : nil)
 
                 let rc = withUnsafePointer(to: addr) { ptr in
                     ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
