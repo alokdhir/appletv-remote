@@ -40,6 +40,12 @@ final class CompanionConnection: ObservableObject {
     private var recvNonce: UInt64 = 0
     private var txnCounter: UInt32 = 0
 
+    // Heartbeat — the ATV closes idle Companion sockets at ~38 s.
+    // FetchAttentionState is a real Request the ATV actually replies to,
+    // so the reply traffic refreshes its idle timer. _systemInfo is ignored
+    // silently, so it doesn't work as a keepalive.
+    private var keepaliveTimer: DispatchSourceTimer?
+
     // Set to true when connect() was initiated via wakeAndConnect() so we
     // auto-send the Wake HID command after the session is established.
     private var sendWakeOnConnect = false
@@ -159,10 +165,17 @@ final class CompanionConnection: ObservableObject {
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
         defer { Darwin.close(fd) }
 
-        // Pin to the primary interface: on multi-NIC setups where two NICs
-        // share a subnet (en0+en1 both on 192.168.1.0/24), the kernel can
-        // otherwise pick the wrong NIC and synchronously return EHOSTUNREACH.
-        PrimaryInterface.bind(fd: fd)
+        // Pin the source address to the primary interface's IPv4 address.
+        // On multi-NIC setups where two NICs share a subnet (en0+en1 both on
+        // 192.168.1.0/24), neither the kernel's default source selection nor
+        // IP_BOUND_IF(en0) are enough — the kernel still picks the wrong
+        // source IP and connect() synchronously returns EHOSTUNREACH. A
+        // bind(2) to the primary IPv4 address matches what `nc -s` does and
+        // what works for `route get`.
+        let boundSrc = PrimaryInterface.bindSourceAddress(fd: fd, logHost: host)
+        if boundSrc == nil {
+            Log.companion.report("isReachableSync: bindSourceAddress returned nil for \(host)")
+        }
 
         // Set non-blocking
         let flags = fcntl(fd, F_GETFL, 0)
@@ -262,10 +275,11 @@ final class CompanionConnection: ObservableObject {
                     break
                 }
 
-                // Same NIC pinning as isReachableSync — prevents EHOSTUNREACH
-                // from the kernel picking the wrong interface on multi-NIC hosts.
-                PrimaryInterface.bind(fd: trialFD,
-                                      logHost: attempt == 0 ? host : nil)
+                // Same source-IP pinning as isReachableSync — prevents
+                // EHOSTUNREACH from the kernel picking the wrong NIC on
+                // multi-NIC hosts that share a subnet.
+                PrimaryInterface.bindSourceAddress(fd: trialFD,
+                                                   logHost: attempt == 0 ? host : nil)
 
                 let rc = withUnsafePointer(to: addr) { ptr in
                     ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -319,6 +333,8 @@ final class CompanionConnection: ObservableObject {
 
     func disconnect() {
         userInitiatedDisconnect = true
+        keepaliveTimer?.cancel()
+        keepaliveTimer = nil
         let fd = socketFD
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
@@ -404,13 +420,38 @@ final class CompanionConnection: ObservableObject {
         let txn4 = txnCounter; txnCounter &+= 1
         sendEncrypted(OPACK.encodeTextInputStart(txn: txn4))
 
-        // Subscribe to event streams so the ATV pushes traffic on its own.
-        // The inbound events refresh the ATV's idle timer — no periodic
-        // keepalive needed. `_interest` is an Event (_t:1), fire-and-forget.
+        // Subscribe to event streams — the ATV pushes state changes over these
+        // channels. On an idle ATV those pushes are rare, so on their own they
+        // don't prevent the ~38 s idle close; see startKeepalive() for the real
+        // heartbeat. `_interest` is an Event (_t:1), fire-and-forget.
         for event in ["_iMC", "SystemStatus", "TVSystemStatus"] {
             let txn = txnCounter; txnCounter &+= 1
             sendEncrypted(OPACK.encodeInterest(events: [event], txn: txn))
         }
+    }
+
+    /// Send a `FetchAttentionState` Request every 25 s. The ATV drops idle
+    /// Companion sockets at ~38 s; any real Request the ATV responds to
+    /// refreshes its idle timer, and FetchAttentionState is the cheapest
+    /// one pyatv's API exposes.
+    ///
+    /// `_systemInfo` does *not* work as a keepalive — the ATV silently
+    /// ignores it and no response means no timer refresh.
+    private func startKeepalive() {
+        keepaliveTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 25.0, repeating: 25.0)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.state == .connected else {
+                self?.keepaliveTimer?.cancel()
+                self?.keepaliveTimer = nil
+                return
+            }
+            let txn = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: txn))
+        }
+        timer.resume()
+        keepaliveTimer = timer
     }
 
     // MARK: - Pairing PIN

@@ -196,6 +196,20 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode a `FetchAttentionState` Request — a cheap status poll pyatv
+    /// uses as the closest thing to a heartbeat. The ATV responds with
+    /// `_c.state` (an Int), which gives us the reply traffic needed to
+    /// refresh its idle timer. Without periodic traffic like this the ATV
+    /// drops idle Companion sockets at ~38 s.
+    public static func encodeFetchAttentionState(txn: UInt32) -> Data {
+        pack([
+            "_i": "FetchAttentionState",
+            "_t": 2,
+            "_x": txn,
+            "_c": [String: Any](),
+        ] as [String: Any])
+    }
+
     /// Encode `_sessionStart` request.
     public static func encodeSessionStart(txn: UInt32, localSID: UInt32) -> Data {
         pack([

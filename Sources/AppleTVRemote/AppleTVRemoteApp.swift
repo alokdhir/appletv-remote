@@ -455,7 +455,10 @@ final class AutoReconnector: ObservableObject {
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0
     private let maxRetries  = 3
-    private let retryDelay: TimeInterval = 5
+    // Short debounce — the ATV drops idle Companion sockets at ~30 s, and a
+    // pair-verify reconnect only takes ~70 ms. Waiting 5 s here was the main
+    // source of the user-visible "blip" on every idle-close cycle.
+    private let retryDelay: TimeInterval = 0.25
 
     func setUp(connection: CompanionConnection,
                discovery: DeviceDiscovery,
