@@ -167,6 +167,35 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode `_touchStart` request — part of the Companion session handshake.
+    /// The ATV expects this between `_systemInfo` and `_sessionStart`; without
+    /// it the session setup is incomplete and the ATV closes the socket after
+    /// ~35 s. Matches pyatv's CompanionAPI._touch_start (api.py:450-453).
+    public static func encodeTouchStart(txn: UInt32) -> Data {
+        pack([
+            "_i": "_touchStart",
+            "_t": 2,
+            "_x": txn,
+            "_c": [
+                "_height": 1000,
+                "_tFl":    0,
+                "_width":  1000,
+            ] as [String: Any],
+        ] as [String: Any])
+    }
+
+    /// Encode `_tiStart` (text input start) request — sent between
+    /// `_sessionStart` and `_interest`. Empty content payload.
+    /// Matches pyatv's CompanionAPI._text_input_start (api.py:385).
+    public static func encodeTextInputStart(txn: UInt32) -> Data {
+        pack([
+            "_i": "_tiStart",
+            "_t": 2,
+            "_x": txn,
+            "_c": [String: Any](),
+        ] as [String: Any])
+    }
+
     /// Encode `_sessionStart` request.
     public static func encodeSessionStart(txn: UInt32, localSID: UInt32) -> Data {
         pack([
@@ -176,6 +205,25 @@ public enum OPACK {
             "_c": [
                 "_srvT": "com.apple.tvremoteservices",
                 "_sid":  localSID,
+            ] as [String: Any],
+        ] as [String: Any])
+    }
+
+    /// Encode `_interest` event subscription — tells the ATV we want to be
+    /// notified of events of a given type (e.g. `_iMC` for media control).
+    ///
+    /// `_t: 1` marks this as an Event (fire-and-forget, not a request), so the
+    /// ATV does not send a response. Once subscribed, the ATV pushes event
+    /// frames whenever the subscribed state changes, and that inbound traffic
+    /// keeps the connection's app-level idle timer from firing — which is why
+    /// pyatv-style clients never need a periodic keepalive.
+    public static func encodeInterest(events: [String], txn: UInt32) -> Data {
+        pack([
+            "_i": "_interest",
+            "_t": 1,
+            "_x": txn,
+            "_c": [
+                "_regEvents": events as [Any],
             ] as [String: Any],
         ] as [String: Any])
     }

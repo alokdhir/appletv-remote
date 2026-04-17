@@ -40,11 +40,6 @@ final class CompanionConnection: ObservableObject {
     private var recvNonce: UInt64 = 0
     private var txnCounter: UInt32 = 0
 
-    // Keepalive — DispatchSourceTimer is used instead of Task.sleep because
-    // the MainActor cooperative scheduler can delay Task resumptions when
-    // DispatchQueue.main is busy with the read-loop dispatches.
-    private var keepaliveTimer: DispatchSourceTimer?
-
     // Set to true when connect() was initiated via wakeAndConnect() so we
     // auto-send the Wake HID command after the session is established.
     private var sendWakeOnConnect = false
@@ -181,18 +176,27 @@ final class CompanionConnection: ObservableObject {
         }
 
         if result == 0 { return true }           // immediate connect (rare but possible)
-        guard errno == EINPROGRESS else { return false }
+        if errno != EINPROGRESS {
+            Log.companion.report("isReachableSync: connect() returned \(result), errno \(errno) (\(String(cString: strerror(errno))))")
+            return false
+        }
 
         // Wait for writability with poll()
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let ms    = Int32(timeoutSeconds * 1000)
         let ready = poll(&pfd, 1, ms)
-        guard ready > 0 else { return false }
+        if ready <= 0 {
+            Log.companion.report("isReachableSync: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
+            return false
+        }
 
         // Check for async connect error
         var err: Int32 = 0
         var len = socklen_t(MemoryLayout<Int32>.size)
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
+        if err != 0 {
+            Log.companion.report("isReachableSync: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
+        }
         return err == 0
     }
 
@@ -305,8 +309,6 @@ final class CompanionConnection: ObservableObject {
 
     func disconnect() {
         userInitiatedDisconnect = true
-        keepaliveTimer?.cancel()
-        keepaliveTimer = nil
         let fd = socketFD
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
@@ -374,12 +376,31 @@ final class CompanionConnection: ObservableObject {
         guard let clientID = credentialStore.load(deviceID: currentDevice?.id ?? "")?.clientID else {
             return
         }
+        // The ATV's Companion handshake expects all five of these messages,
+        // in order, before it considers the session established. Skipping
+        // `_touchStart` or `_tiStart` leaves the session half-open and the
+        // ATV closes the socket after ~35 s. Mirrors pyatv's CompanionAPI
+        // setup in api.py:151-158.
         let txn1 = txnCounter; txnCounter &+= 1
         sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, txn: txn1))
 
         let txn2 = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTouchStart(txn: txn2))
+
+        let txn3 = txnCounter; txnCounter &+= 1
         let localSID = UInt32.random(in: 0..<UInt32.max)
-        sendEncrypted(OPACK.encodeSessionStart(txn: txn2, localSID: localSID))
+        sendEncrypted(OPACK.encodeSessionStart(txn: txn3, localSID: localSID))
+
+        let txn4 = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTextInputStart(txn: txn4))
+
+        // Subscribe to event streams so the ATV pushes traffic on its own.
+        // The inbound events refresh the ATV's idle timer — no periodic
+        // keepalive needed. `_interest` is an Event (_t:1), fire-and-forget.
+        for event in ["_iMC", "SystemStatus", "TVSystemStatus"] {
+            let txn = txnCounter; txnCounter &+= 1
+            sendEncrypted(OPACK.encodeInterest(events: [event], txn: txn))
+        }
     }
 
     // MARK: - Pairing PIN
@@ -490,7 +511,6 @@ final class CompanionConnection: ObservableObject {
                 decryptKey = pairVerify?.sessionDecryptKey
                 state = .connected
                 startCompanionSession()
-                startKeepalive()
                 if sendWakeOnConnect {
                     sendWakeOnConnect = false
                     // Small delay to let the session handshake complete before
@@ -565,34 +585,6 @@ final class CompanionConnection: ObservableObject {
         default:
             break
         }
-    }
-
-    // MARK: - Keepalive
-
-    /// Resends _systemInfo every 20 s to keep the ATV's idle-session timer from firing.
-    /// The ATV processes _systemInfo silently (no "No request handler" error), so it is
-    /// the safest known message to use as a keepalive without triggering a disconnect.
-    /// _ping and _heartbeat are ignored by the ATV for timer purposes; _interest returns
-    /// "No request handler" and causes an immediate close.
-    private func startKeepalive() {
-        keepaliveTimer?.cancel()
-        guard let clientID = credentialStore.load(deviceID: currentDevice?.id ?? "")?.clientID else { return }
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        // First fire at 10 s — keeps us well inside any idle window the ATV enforces.
-        timer.schedule(deadline: .now() + 10.0, repeating: 10.0)
-        timer.setEventHandler { [weak self] in
-            guard let self, self.state == .connected else {
-                self?.keepaliveTimer?.cancel()
-                self?.keepaliveTimer = nil
-                return
-            }
-            let txn = self.txnCounter
-            self.txnCounter &+= 1
-            Log.companion.trace("Companion → keepalive _systemInfo txn=\(txn)")
-            self.sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, txn: txn))
-        }
-        timer.resume()
-        keepaliveTimer = timer
     }
 
     private func sendEncrypted(_ opackData: Data) {
