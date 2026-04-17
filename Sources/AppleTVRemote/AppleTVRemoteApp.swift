@@ -20,7 +20,7 @@ struct AppleTVRemoteApp: App {
                 .environmentObject(connection)
                 .environmentObject(autoConnect)
                 .preferredColorScheme(.dark)
-                .background(VisualEffectBackground(material: .hudWindow,
+                .background(VisualEffectBackground(material: .underWindowBackground,
                                                    blendingMode: .behindWindow))
                 .background(MainWindowConfigurator())   // hide-on-close + translucency + no disconnect
                 .onAppear {
@@ -99,6 +99,17 @@ private class WindowSetupView: NSView {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
+
+        // Force the window to shrink to its intrinsic content size on launch.
+        // SwiftUI's .windowResizability(.contentSize) establishes min/max but
+        // doesn't clamp the restored saved frame — without this, a previously
+        // resized-large window stays large even after content shrinks.
+        DispatchQueue.main.async {
+            if let content = window.contentView {
+                let fit = content.fittingSize
+                if fit.width > 0, fit.height > 0 { window.setContentSize(fit) }
+            }
+        }
 
         guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
@@ -444,8 +455,8 @@ final class AutoReconnector: ObservableObject {
                autoConnect: AutoConnectStore) {
         cancellable = connection.$state
             .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak connection, weak discovery, weak autoConnect] state in
-                guard let self, let connection, let discovery, let autoConnect else { return }
+            .sink { [weak self, weak connection, weak discovery] state in
+                guard let self, let connection, let discovery else { return }
                 switch state {
                 case .connected:
                     // Success — reset counter and cancel any pending retry.
@@ -459,8 +470,12 @@ final class AutoReconnector: ObservableObject {
                     self.retryTask?.cancel()
                     self.retryTask = nil
                 case .disconnected, .error:
+                    // Retry on any unexpected drop/failure — not just auto-connect
+                    // devices. The only case we *don't* retry is a user-initiated
+                    // Disconnect (via the button), which sets
+                    // userInitiatedDisconnect = true on the connection.
                     guard let device = connection.currentDevice,
-                          autoConnect.isEnabled(device.id) else {
+                          !connection.userInitiatedDisconnect else {
                         self.retryCount = 0
                         self.retryTask?.cancel()
                         self.retryTask = nil

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AppleTVProtocol
 
 struct RemoteControlView: View {
@@ -149,6 +150,8 @@ struct RemoteControlView: View {
     private var remoteLayout: some View {
         ScrollView {
             VStack(spacing: 20) {
+                KeyCatcher { connection.send($0) }
+                    .frame(width: 0, height: 0)
                 // Navigation pad — circular ring matching the real Apple TV remote
                 ZStack {
                     Circle()
@@ -233,6 +236,76 @@ struct RemoteControlView: View {
     private func submitPin() {
         guard !pairingPin.isEmpty else { return }
         connection.submitPairingPin(pairingPin)
+    }
+}
+
+// MARK: - Keyboard shortcuts
+
+/// Zero-size NSView that claims first-responder inside the remote layout so
+/// hardware keys dispatch to the connected Apple TV:
+///
+///   ↑ ↓ ← →     — D-pad
+///   return      — select (D-pad centre)
+///   m           — menu / back
+///   h           — home
+///
+/// Keys with modifiers (⌘/⌃/⌥) are passed through so app-level shortcuts
+/// (⌘Q, ⌘W, ⌘,) keep working.
+private struct KeyCatcher: NSViewRepresentable {
+    let onCommand: (RemoteCommand) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let v = KeyCatcherView()
+        v.onCommand = onCommand
+        return v
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? KeyCatcherView)?.onCommand = onCommand
+    }
+}
+
+private final class KeyCatcherView: NSView {
+    var onCommand: (RemoteCommand) -> Void = { _ in }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Defer to the next runloop tick so SwiftUI finishes wiring up the
+        // window's responder chain before we try to seize focus.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Let ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
+        let mods = event.modifierFlags.intersection([.command, .control, .option])
+        if !mods.isEmpty { super.keyDown(with: event); return }
+
+        if let cmd = command(for: event) {
+            onCommand(cmd)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func command(for event: NSEvent) -> RemoteCommand? {
+        switch event.keyCode {
+        case 126: return .up
+        case 125: return .down
+        case 123: return .left
+        case 124: return .right
+        case 36, 76: return .select          // return, keypad enter
+        default: break
+        }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "m": return .menu
+        case "h": return .home
+        default:  return nil
+        }
     }
 }
 

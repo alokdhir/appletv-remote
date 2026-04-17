@@ -49,15 +49,29 @@ final class CompanionConnection: ObservableObject {
     // auto-send the Wake HID command after the session is established.
     private var sendWakeOnConnect = false
 
+    /// Set when the user explicitly tore down the connection (via `disconnect()`).
+    /// Auto-retry logic checks this to distinguish user-intent cancellation from
+    /// network-driven drops/failures.
+    @Published var userInitiatedDisconnect = false
+
     // MARK: - Connect / Disconnect
 
     /// Smart connect: probes the device first (1 s TCP timeout).
-    /// - If it responds → connect directly (device is already on).
-    /// - If it doesn't  → send WoL, wait 5 s, connect and send Wake HID for HDMI-CEC.
+    /// - If it responds → connect directly (device is already on, no wait).
+    /// - If it doesn't  → send WoL then poll every 3 s (up to 60 s) until the
+    ///   device's Companion port opens, then connect. If still unreachable after
+    ///   60 s, attempt a connect anyway so the user gets a proper error message.
     ///
-    /// Uses Task.detached so the blocking probe never touches the main thread.
+    /// Uses Task.detached so blocking probes never touch the main thread.
     func wakeAndConnect(to device: AppleTVDevice) {
-        guard state == .disconnected else { return }
+        // Accept from `.disconnected` (fresh user action) OR `.error` (Retry
+        // button click — the previous attempt failed and left us in an error
+        // state). Any other state means a connect is already in flight.
+        switch state {
+        case .disconnected, .error: break
+        default: return
+        }
+        userInitiatedDisconnect = false
         state = .waking
         currentDevice = device
 
@@ -69,31 +83,71 @@ final class CompanionConnection: ObservableObject {
         let mac = MACStore.load(for: device.id)
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            // Blocking probe — safe here because we're detached from MainActor
+            // Fast path: device is already on — skip WoL and boot wait entirely.
             let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 1)
             Log.companion.report("SmartConnect: \(device.name) reachable=\(reachable)")
 
             if reachable {
-                let weakSelf = self
+                let s = self
                 await MainActor.run {
-                    guard let conn = weakSelf, conn.state == .waking else { return }
+                    guard let conn = s, conn.state == .waking else { return }
                     conn.state = .disconnected
                     conn.connect(to: device)
                 }
-            } else {
-                // Send WoL while still on background thread
-                if let mac { try? WakeOnLAN.send(mac: mac, targetIP: host) }
+                return
+            }
 
-                // Wait for the ATV to boot
-                try? await Task.sleep(for: .seconds(5))
+            // Slow path: device is off (or sleeping). Send WoL then poll.
+            if let mac { try? WakeOnLAN.send(mac: mac, targetIP: host) }
 
-                let weakSelf = self
-                await MainActor.run {
-                    guard let conn = weakSelf, conn.state == .waking else { return }
-                    conn.sendWakeOnConnect = true
-                    conn.state = .disconnected
-                    conn.connect(to: device)
+            // Poll every 3 s for up to 60 s for the Companion port to open.
+            // Probing the actual port (not just ping) ensures the MRP service
+            // is ready, not just the network stack.
+            let deadline = Date().addingTimeInterval(90)
+            var wolSent = 1          // already sent once above
+
+            while Date() < deadline {
+                // Bail if the user cancelled (tapped Disconnect) while we wait.
+                let s1 = self
+                let cancelled = await MainActor.run { s1?.state != .waking }
+                if cancelled { return }
+
+                try? await Task.sleep(for: .seconds(3))
+
+                // Re-check state after sleeping (user might have disconnected).
+                let s2 = self
+                let stillWaking = await MainActor.run { s2?.state == .waking }
+                if !stillWaking { return }
+
+                if Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 2) {
+                    Log.companion.report("SmartConnect: \(device.name) responded after \(wolSent) WoL packet(s)")
+                    let s3 = self
+                    await MainActor.run {
+                        guard let conn = s3, conn.state == .waking else { return }
+                        conn.sendWakeOnConnect = true
+                        conn.state = .disconnected
+                        conn.connect(to: device)
+                    }
+                    return
                 }
+
+                // Re-send WoL every ~15 s (every 5th poll) in case the first
+                // packet was lost before the NIC's WoL listener was ready.
+                wolSent += 1
+                if wolSent % 5 == 0, let mac {
+                    Log.wol.report("WoL: resending (attempt \(wolSent / 5 + 1))")
+                    try? WakeOnLAN.send(mac: mac, targetIP: host)
+                }
+            }
+
+            // Timed out — attempt connect anyway so the user sees a real error.
+            Log.companion.report("SmartConnect: \(device.name) did not respond in 90 s, trying connect")
+            let s4 = self
+            await MainActor.run {
+                guard let conn = s4, conn.state == .waking else { return }
+                conn.sendWakeOnConnect = true
+                conn.state = .disconnected
+                conn.connect(to: device)
             }
         }
     }
@@ -109,6 +163,10 @@ final class CompanionConnection: ObservableObject {
         var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
         defer { Darwin.close(fd) }
+
+        // Pin the probe to the primary interface so VPN tunnels / a second
+        // NIC on the same subnet can't cause spurious EHOSTUNREACH.
+        PrimaryInterface.bind(fd: fd)
 
         // Set non-blocking
         let flags = fcntl(fd, F_GETFL, 0)
@@ -143,7 +201,12 @@ final class CompanionConnection: ObservableObject {
     }
 
     func connect(to device: AppleTVDevice) {
-        guard state == .disconnected else { return }
+        // Accept from `.disconnected` or `.error` — see wakeAndConnect for why.
+        switch state {
+        case .disconnected, .error: break
+        default: return
+        }
+        userInitiatedDisconnect = false
         guard let host = device.host, let port = device.port else {
             state = .error("Device not yet resolved — try again")
             return
@@ -193,6 +256,13 @@ final class CompanionConnection: ObservableObject {
                     }
                     break
                 }
+
+                // Bind to the primary interface so connect() can't pick a
+                // wrong NIC (second en* on the same subnet, or a VPN tunnel)
+                // and fail with EHOSTUNREACH. Only log the first attempt —
+                // retries would spam the same line.
+                PrimaryInterface.bind(fd: trialFD,
+                                      logHost: attempt == 0 ? host : nil)
 
                 let rc = withUnsafePointer(to: addr) { ptr in
                     ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -245,6 +315,7 @@ final class CompanionConnection: ObservableObject {
     }
 
     func disconnect() {
+        userInitiatedDisconnect = true
         keepaliveTimer?.cancel()
         keepaliveTimer = nil
         let fd = socketFD
