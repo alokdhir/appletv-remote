@@ -35,7 +35,7 @@ struct ContentView: View {
                     .frame(minWidth: 300)
             }
         }
-        .frame(minHeight: 480)
+        .frame(minWidth: effectivelyCollapsed ? 300 : 520, minHeight: 480)
         .animation(.easeInOut(duration: 0.22), value: effectivelyCollapsed)
         .onAppear {
             discovery.startDiscovery()

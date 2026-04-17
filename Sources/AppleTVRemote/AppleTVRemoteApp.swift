@@ -104,11 +104,18 @@ private class WindowSetupView: NSView {
         // SwiftUI's .windowResizability(.contentSize) establishes min/max but
         // doesn't clamp the restored saved frame — without this, a previously
         // resized-large window stays large even after content shrinks.
+        //
+        // Clamp to window.contentMinSize because ScrollView's fittingSize
+        // collapses below the inner frame's minWidth — without the clamp the
+        // window ends up narrower than the declared minimum.
         DispatchQueue.main.async {
-            if let content = window.contentView {
-                let fit = content.fittingSize
-                if fit.width > 0, fit.height > 0 { window.setContentSize(fit) }
-            }
+            guard let content = window.contentView else { return }
+            var fit = content.fittingSize
+            guard fit.width > 0, fit.height > 0 else { return }
+            let minSize = window.contentMinSize
+            fit.width  = max(fit.width,  minSize.width)
+            fit.height = max(fit.height, minSize.height)
+            window.setContentSize(fit)
         }
 
         guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
