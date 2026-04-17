@@ -159,6 +159,11 @@ final class CompanionConnection: ObservableObject {
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
         defer { Darwin.close(fd) }
 
+        // Pin to the primary interface: on multi-NIC setups where two NICs
+        // share a subnet (en0+en1 both on 192.168.1.0/24), the kernel can
+        // otherwise pick the wrong NIC and synchronously return EHOSTUNREACH.
+        PrimaryInterface.bind(fd: fd)
+
         // Set non-blocking
         let flags = fcntl(fd, F_GETFL, 0)
         _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
@@ -256,6 +261,11 @@ final class CompanionConnection: ObservableObject {
                     }
                     break
                 }
+
+                // Same NIC pinning as isReachableSync — prevents EHOSTUNREACH
+                // from the kernel picking the wrong interface on multi-NIC hosts.
+                PrimaryInterface.bind(fd: trialFD,
+                                      logHost: attempt == 0 ? host : nil)
 
                 let rc = withUnsafePointer(to: addr) { ptr in
                     ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -571,7 +581,7 @@ final class CompanionConnection: ObservableObject {
             default:              return "\(k)=?"
             }
         }.joined(separator: " ")
-        Log.companion.trace("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
+        Log.companion.report("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
 
         switch identifier {
         case "_heartbeat":
@@ -588,7 +598,18 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func sendEncrypted(_ opackData: Data) {
-        guard let key = encryptKey else { return }
+        guard let key = encryptKey else {
+            Log.companion.report("Companion → sendEncrypted DROPPED (no key, \(opackData.count)B)")
+            return
+        }
+        // Peek at the OPACK dict so we can see what we tried to send
+        let peek = OPACK.decodeDict(opackData).map { d -> String in
+            let i = d["_i"] as? String ?? "?"
+            let t = d["_t"] as? Int ?? -1
+            let x = d["_x"] as? Int ?? -1
+            return "_i=\(i) _t=\(t) _x=\(x)"
+        } ?? "<undecodable \(opackData.count)B>"
+        Log.companion.report("Companion → OPACK[\(opackData.count)B]: \(peek)")
         do {
             let nonce = try ChaChaPoly.Nonce(data: nonceData(sendNonce))
             sendNonce += 1
