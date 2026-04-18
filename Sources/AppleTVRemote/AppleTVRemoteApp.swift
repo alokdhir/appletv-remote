@@ -19,6 +19,7 @@ struct AppleTVRemoteApp: App {
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .environmentObject(autoConnect)
+                .environmentObject(reconnector)
                 .preferredColorScheme(.dark)
                 .background(VisualEffectBackground(material: .underWindowBackground,
                                                    blendingMode: .behindWindow))
@@ -36,7 +37,11 @@ struct AppleTVRemoteApp: App {
                     }
                 }
         }
-        .windowResizability(.contentSize)
+        // .contentMinSize: window's minimum follows the content's minimum but
+        // the user can still resize larger — which means edge-hover resize
+        // cursors work. We explicitly call setContentSize in WindowSetupView
+        // to pin the initial size, since .contentMinSize doesn't by itself.
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
@@ -100,23 +105,32 @@ private class WindowSetupView: NSView {
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
 
-        // Force the window to shrink to its intrinsic content size on launch.
-        // SwiftUI's .windowResizability(.contentSize) establishes min/max but
-        // doesn't clamp the restored saved frame — without this, a previously
-        // resized-large window stays large even after content shrinks.
-        //
-        // Clamp to window.contentMinSize because ScrollView's fittingSize
-        // collapses below the inner frame's minWidth — without the clamp the
-        // window ends up narrower than the declared minimum.
-        DispatchQueue.main.async {
-            guard let content = window.contentView else { return }
-            var fit = content.fittingSize
-            guard fit.width > 0, fit.height > 0 else { return }
-            let minSize = window.contentMinSize
-            fit.width  = max(fit.width,  minSize.width)
-            fit.height = max(fit.height, minSize.height)
-            window.setContentSize(fit)
+        // Disable SwiftUI's auto-generated frame autosave. SwiftUI derives
+        // the autosave name from the full view-modifier type signature, so
+        // any modifier tweak creates a new orphan UserDefaults key and AppKit
+        // restores a stale (often screen-sized) frame under the current
+        // signature — which defeats .windowResizability(.contentSize).
+        // ContentView now has a FIXED .frame(width:), so .contentSize will
+        // pin the window to the content width without any restoration race.
+        window.setFrameAutosaveName("")
+
+        // Sweep out orphan "NSWindow Frame SwiftUI.ModifiedContent<…>" keys
+        // accumulated from previous view-modifier shapes. Scoped strictly to
+        // the "NSWindow Frame " prefix so AppStorage-backed state
+        // (lastDeviceID, autoConnectDeviceIDs, hideWindowAtStartup, etc.)
+        // is never touched.
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix("NSWindow Frame ") {
+            defaults.removeObject(forKey: key)
         }
+
+        // Explicitly pin the initial content size. .contentMinSize leaves the
+        // initial size up to SwiftUI, which — given ContentView's maxWidth:
+        // .infinity — yields a screen-wide window. Set it before the window
+        // becomes visible so the user never sees the wrong size.
+        let collapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed")
+        window.setContentSize(NSSize(width: collapsed ? 300 : 520, height: 620))
 
         guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
@@ -249,9 +263,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 let popWin = pop.contentViewController?.view.window
                 popWin?.makeKey()
                 popWin?.makeFirstResponder(nil)
-                // Fully hide every non-popover window so macOS has nothing to
-                // surface as the next key window when the popover closes.
-                NSApp.windows.filter { $0 !== popWin }.forEach { $0.orderOut(nil) }
+                // Previously we orderOut'd every other window to stop the main
+                // window from taking over on popover dismiss, but that hid the
+                // main window whenever the user clicked the menu-bar icon —
+                // unwanted. Leave other windows alone.
             }
         }
     }
@@ -451,10 +466,22 @@ struct MenuBarRemoteView: View {
 /// burning through the retry budget on every successful connect.
 @MainActor
 final class AutoReconnector: ObservableObject {
+    /// True while an auto-reconnect cycle is in flight (between EOF and either
+    /// a successful `.connected` or exhaustion of the retry budget). Consumed
+    /// by `RemoteControlView` so it can keep the remote buttons on screen and
+    /// only surface "Reconnecting…" in the status bar instead of flashing back
+    /// to the connect prompt.
+    @Published var isReconnecting: Bool = false
+
     private var cancellable: AnyCancellable?
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0
     private let maxRetries  = 3
+    /// Only start surfacing the "reconnecting" UI after we've been connected
+    /// at least once. Otherwise the transient `.disconnected` inside the very
+    /// first `wakeAndConnect` call flips `isReconnecting` true and hides the
+    /// Connecting spinner / initial error behind the remote layout.
+    private var hasEverConnected = false
     // Short debounce — the ATV drops idle Companion sockets at ~30 s, and a
     // pair-verify reconnect only takes ~70 ms. Waiting 5 s here was the main
     // source of the user-visible "blip" on every idle-close cycle.
@@ -473,6 +500,8 @@ final class AutoReconnector: ObservableObject {
                     self.retryCount = 0
                     self.retryTask?.cancel()
                     self.retryTask = nil
+                    self.isReconnecting = false
+                    self.hasEverConnected = true
                 case .connecting, .waking, .awaitingPairingPin:
                     // Mid-handshake — cancel any pending retry so the transient
                     // `.disconnected` that happened before this doesn't count
@@ -489,10 +518,17 @@ final class AutoReconnector: ObservableObject {
                         self.retryCount = 0
                         self.retryTask?.cancel()
                         self.retryTask = nil
+                        self.isReconnecting = false
+                        self.hasEverConnected = false
                         return
                     }
                     // If a retry is already pending, let the debounce finish.
                     if let task = self.retryTask, !task.isCancelled { return }
+                    // Only surface the "reconnecting" UI once we've actually
+                    // been connected at least once — otherwise the transient
+                    // `.disconnected` inside the initial wakeAndConnect would
+                    // hide the Connecting spinner / first-attempt error.
+                    if self.hasEverConnected { self.isReconnecting = true }
                     self.scheduleRetry(device: device, connection: connection, discovery: discovery)
                 }
             }
@@ -514,6 +550,7 @@ final class AutoReconnector: ObservableObject {
                 Log.companion.fail("AutoReconnector: max retries reached, giving up")
                 self.retryCount = 0
                 self.retryTask = nil
+                self.isReconnecting = false
                 return
             }
             self.retryCount += 1
@@ -522,6 +559,7 @@ final class AutoReconnector: ObservableObject {
             guard target.host != nil else {
                 Log.companion.report("AutoReconnector: device not yet resolved, skipping retry \(attempt)")
                 self.retryTask = nil
+                self.isReconnecting = false
                 return
             }
             Log.companion.report("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries))")

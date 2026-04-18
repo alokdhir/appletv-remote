@@ -6,6 +6,7 @@ struct RemoteControlView: View {
     let device: AppleTVDevice
     @ObservedObject var connection: CompanionConnection
     @EnvironmentObject var discovery: DeviceDiscovery
+    @EnvironmentObject var reconnector: AutoReconnector
     @State private var pairingPin = ""
     @State private var cancelEnabled = false
     @FocusState private var pinFocused: Bool
@@ -17,30 +18,39 @@ struct RemoteControlView: View {
 
             Divider()
 
-            switch connection.state {
-            case .disconnected:
-                connectPrompt
-            case .waking:
-                wakingView
-            case .connecting:
-                VStack(spacing: 16) {
-                    ProgressView("Connecting…")
-                    Button("Cancel") { connection.disconnect() }
-                        .buttonStyle(.bordered)
-                        .disabled(!cancelEnabled)
-                        .opacity(cancelEnabled ? 1 : 0)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onAppear {
-                    cancelEnabled = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { cancelEnabled = true }
-                }
-            case .awaitingPairingPin:
-                pairingView
-            case .connected:
+            // While AutoReconnector is cycling, keep the remote buttons on
+            // screen — the transient `.disconnected`/`.connecting`/`.error`
+            // would otherwise flash the connect prompt for ~350 ms on every
+            // idle-socket reconnect. The status bar shows "Reconnecting…" so
+            // the user still knows what's happening.
+            if reconnector.isReconnecting, connection.state != .awaitingPairingPin {
                 remoteLayout
-            case .error(let msg):
-                errorView(msg)
+            } else {
+                switch connection.state {
+                case .disconnected:
+                    connectPrompt
+                case .waking:
+                    wakingView
+                case .connecting:
+                    VStack(spacing: 16) {
+                        ProgressView("Connecting…")
+                        Button("Cancel") { connection.disconnect() }
+                            .buttonStyle(.bordered)
+                            .disabled(!cancelEnabled)
+                            .opacity(cancelEnabled ? 1 : 0)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear {
+                        cancelEnabled = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { cancelEnabled = true }
+                    }
+                case .awaitingPairingPin:
+                    pairingView
+                case .connected:
+                    remoteLayout
+                case .error(let msg):
+                    errorView(msg)
+                }
             }
         }
     }
@@ -50,9 +60,9 @@ struct RemoteControlView: View {
     private var statusBar: some View {
         HStack {
             Circle()
-                .fill(statusColor)
+                .fill(reconnector.isReconnecting ? .yellow : statusColor)
                 .frame(width: 8, height: 8)
-            Text(connection.state.displayText)
+            Text(reconnector.isReconnecting ? "Reconnecting…" : connection.state.displayText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

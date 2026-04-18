@@ -35,7 +35,17 @@ struct ContentView: View {
                     .frame(minWidth: 300)
             }
         }
-        .frame(minWidth: effectivelyCollapsed ? 300 : 520, minHeight: 480)
+        // idealWidth/idealHeight — .windowResizability(.contentSize) uses
+        // ideal sizes to pin the initial window size to the content, while
+        // keeping the window resizable (min…max range) so edge-hover resize
+        // cursors still work. A plain minWidth with no maxWidth would let
+        // the HStack expand to full screen width on open.
+        .frame(minWidth: effectivelyCollapsed ? 300 : 520,
+               idealWidth: effectivelyCollapsed ? 300 : 520,
+               maxWidth: .infinity,
+               minHeight: 480,
+               idealHeight: 620,
+               maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.22), value: effectivelyCollapsed)
         .onAppear {
             discovery.startDiscovery()
@@ -55,6 +65,22 @@ struct ContentView: View {
         .onChange(of: discovery.devices) { devices in
             if selectedDevice == nil, !lastDeviceID.isEmpty {
                 selectedDevice = devices.first { $0.id == lastDeviceID }
+            }
+        }
+        .onChange(of: effectivelyCollapsed) { collapsed in
+            // .windowResizability(.contentMinSize) doesn't auto-shrink the
+            // window when the sidebar hides, because content has maxWidth:
+            // .infinity — the current larger frame stays valid. Drive it
+            // explicitly so hiding the sidebar snaps the window narrower.
+            guard let window = MenuBarController.shared.mainWindow else { return }
+            let newWidth: CGFloat = collapsed ? 300 : 520
+            let currentHeight = window.contentLayoutRect.height
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.allowsImplicitAnimation = true
+                window.animator().setContentSize(
+                    NSSize(width: newWidth, height: currentHeight)
+                )
             }
         }
     }
