@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import AppleTVIPC
+import AppleTVProtocol
 
 // `atv` — command-line companion to the AppleTVRemote.app, connecting to its
 // IPC Unix-domain socket. Commands mirror the app's remote UI; when the app
@@ -433,9 +434,66 @@ func cmdPair(_ conn: IPCConnection, device: String) throws {
     expectOk(final)
 }
 
+// MARK: - Standalone dispatch
+
+/// Dispatches a command in --standalone mode — no IPC, no app required.
+/// Only supports the subset of commands that make sense without a live session.
+func runStandalone(args: [String], device: String?) throws {
+    let cmd = args.first ?? ""
+    switch cmd {
+    case "list":
+        try standaloneList()
+    case "l":          try standaloneSendKey(deviceName: device, command: .left)
+    case "r":          try standaloneSendKey(deviceName: device, command: .right)
+    case "u":          try standaloneSendKey(deviceName: device, command: .up)
+    case "d":          try standaloneSendKey(deviceName: device, command: .down)
+    case "select-btn": try standaloneSendKey(deviceName: device, command: .select)
+    case "pp":         try standaloneSendKey(deviceName: device, command: .playPause)
+    case "menu":       try standaloneSendKey(deviceName: device, command: .menu)
+    case "home":       try standaloneSendKey(deviceName: device, command: .home)
+    case "vol+":       try standaloneSendKey(deviceName: device, command: .volumeUp)
+    case "vol-":       try standaloneSendKey(deviceName: device, command: .volumeDown)
+    case "power":
+        // Without a live session we don't know the ATV's power state, so
+        // "power" always sends wake. (The app-backed path can toggle.)
+        try standaloneSendKey(deviceName: device, command: .wake)
+    case "status", "select", "pair", "ping", "disconnect":
+        die("--standalone does not support '\(cmd)' — run AppleTVRemote.app for that")
+    default:
+        die("unknown command: \(cmd)")
+    }
+}
+
 // MARK: - Arg parsing
 
-let args = Array(CommandLine.arguments.dropFirst())
+// Extract and strip flags before subcommand dispatch. We support:
+//   --standalone          skip the app+socket entirely; run discovery + one-shot
+//                         pair-verify + HID locally in this process
+//   --device <name>       select target device for standalone mode (otherwise
+//                         the single discovered device; error if multiple)
+var rawArgs = Array(CommandLine.arguments.dropFirst())
+var useStandalone = false
+var standaloneDevice: String?
+
+do {
+    var filtered: [String] = []
+    var i = 0
+    while i < rawArgs.count {
+        let a = rawArgs[i]
+        if a == "--standalone" {
+            useStandalone = true
+        } else if a == "--device" {
+            guard i + 1 < rawArgs.count else { die("--device requires a value") }
+            standaloneDevice = rawArgs[i + 1]
+            i += 1
+        } else {
+            filtered.append(a)
+        }
+        i += 1
+    }
+    rawArgs = filtered
+}
+let args = rawArgs
 
 func usage() -> Never {
     let text = """
@@ -456,6 +514,14 @@ func usage() -> Never {
       atv disconnect               Drop the connection
       atv ping                     Round-trip ping to the app
       atv completion <bash|zsh>    Emit shell completion script to stdout
+
+    Standalone mode (no app required, single-shot):
+      atv --standalone list                    Discover over Bonjour directly
+      atv --standalone [--device <name>] <cmd> Send one HID command
+        Supported cmds: list, l, r, u, d, select-btn, pp, menu, home,
+                        vol+, vol-, power (always wakes)
+        Requires credentials from a previous pair-setup via the app.
+        Auto-falls-back to standalone when run over SSH without a GUI session.
 
     Install completions:
       zsh   eval "$(atv completion zsh)"
@@ -489,6 +555,27 @@ do {
         let r = try conn.request(.ping)
         expectOk(r)
         print(green("pong"))
+        exit(0)
+    }
+
+    // --standalone: skip the app/socket entirely. Only a subset of commands
+    // works without a live app session — see Standalone.swift for the list.
+    if useStandalone {
+        try runStandalone(args: args, device: standaloneDevice)
+        exit(0)
+    }
+
+    // Auto-fallback to standalone when the app isn't installed / can't launch
+    // (typical over SSH without an Aqua session). Only fall back for commands
+    // that actually work standalone — status / select / pair need the app.
+    let standaloneCapable: Set<String> = [
+        "list", "l", "r", "u", "d", "select-btn", "pp", "menu", "home",
+        "vol+", "vol-", "power",
+    ]
+    if isHeadlessSession(), standaloneCapable.contains(args[0]),
+       IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 1) == nil {
+        fputs(dim("(headless session — falling back to --standalone)\n"), stderr)
+        try runStandalone(args: args, device: standaloneDevice)
         exit(0)
     }
 

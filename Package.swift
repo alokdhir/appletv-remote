@@ -46,7 +46,9 @@ let package = Package(
         .executableTarget(
             name: "atv",
             dependencies: [
-                "AppleTVIPC"
+                "AppleTVIPC",
+                "AppleTVProtocol",
+                "AppleTVLogging"
             ],
             path: "Sources/atv"
         ),
