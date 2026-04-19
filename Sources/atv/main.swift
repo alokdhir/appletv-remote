@@ -346,17 +346,31 @@ func cmdStatus(_ conn: IPCConnection) throws {
     let state = colorForState(s.connectionState)
     print("\(name)\(host)  \(state)")
     if let np = s.nowPlaying {
+        // Transport-state glyph: ▶ playing, ⏸ paused, ⏵ unknown/other.
+        // Derived from playbackRate where possible (0 = paused, 1 = playing).
+        let (glyph, label): (String, String?) = {
+            switch np.playbackRate {
+            case .some(0):          return (red("⏸"), "paused")
+            case .some(let r) where r == 1: return (green("▶"), "playing")
+            case .some(let r):      return (cyan("▶"), "×\(r)")
+            case .none:             return (dim("⏵"), nil)
+            }
+        }()
         let bits = [np.title, np.artist, np.album].compactMap { $0 }.filter { !$0.isEmpty }
         if !bits.isEmpty {
-            print("  \(dim("▶")) \(bits.joined(separator: " — "))")
+            print("  \(glyph) \(bits.joined(separator: " — "))")
+        } else if let label {
+            // No track metadata but we do know the transport state — still
+            // worth surfacing so `atv status` tells you whether ATV is paused.
+            print("  \(glyph) \(dim(label))")
         }
         if let app = np.app, !app.isEmpty {
-            print("  \(dim("app:")) \(app)")
+            print("  \(dim("app: "))\(app)")
         }
         if let elapsed = np.elapsedTime {
             let total = np.duration.map { "/\(fmtTime($0))" } ?? ""
-            let rate  = np.playbackRate.map { $0 == 0 ? " (paused)" : ($0 == 1 ? "" : " (×\($0))") } ?? ""
-            print("  \(dim("time:")) \(fmtTime(elapsed))\(total)\(rate)")
+            let rateSuffix = label.map { " (\($0))" } ?? ""
+            print("  \(dim("time:")) \(fmtTime(elapsed))\(total)\(rateSuffix)")
         }
     }
 }
@@ -382,8 +396,19 @@ func colorForState(_ text: String) -> String {
 }
 
 func cmdKey(_ conn: IPCConnection, key: IPCKey, longPress: Bool = false) throws {
-    let r = try conn.request(longPress ? .longPress : .key, args: ["key": key.rawValue])
-    expectOk(r)
+    // If the app is mid-auto-reconnect we'll briefly see "not connected" —
+    // retry silently at 200 ms intervals for up to ~2 s before surfacing the
+    // error. This swallows the window between EOF and the reconnect landing.
+    let maxAttempts = 10
+    for attempt in 1...maxAttempts {
+        let r = try conn.request(longPress ? .longPress : .key, args: ["key": key.rawValue])
+        if r.ok { return }
+        if r.error == "not connected", attempt < maxAttempts {
+            usleep(200_000)
+            continue
+        }
+        die(r.error ?? "unknown error")
+    }
 }
 
 func cmdSelect(_ conn: IPCConnection, device: String) throws {
@@ -434,12 +459,40 @@ func cmdPair(_ conn: IPCConnection, device: String) throws {
     expectOk(final)
 }
 
+// MARK: - Command abbreviation
+
+/// Canonical list of top-level subcommands. Used by `resolveCommand` to expand
+/// unique prefixes (e.g. `m` → `menu`, `se` → `select`). Keep in sync with the
+/// dispatch switch, standalone dispatch, and usage().
+let knownCommands: [String] = [
+    "list", "status", "select", "pair",
+    "l", "r", "u", "d",
+    "click", "pp", "home", "menu",
+    "vol+", "vol-",
+    "power", "disconnect", "ping", "completion",
+    "help",
+]
+
+/// Expand an abbreviated command to its canonical form, or return `input`
+/// unchanged if nothing matches. Exact matches always win over prefix matches,
+/// so `l` still means "left" even though `list` also starts with `l`.
+/// Ambiguous prefixes (e.g. `p` — pair/pp/power/ping) die with a helpful list.
+func resolveCommand(_ input: String) -> String {
+    if knownCommands.contains(input) { return input }
+    let matches = knownCommands.filter { $0.hasPrefix(input) }
+    switch matches.count {
+    case 0:  return input                       // let dispatch produce the usual "unknown command"
+    case 1:  return matches[0]
+    default: die("ambiguous command '\(input)' — matches: \(matches.joined(separator: ", "))")
+    }
+}
+
 // MARK: - Standalone dispatch
 
 /// Dispatches a command in --standalone mode — no IPC, no app required.
 /// Only supports the subset of commands that make sense without a live session.
 func runStandalone(args: [String], device: String?) throws {
-    let cmd = args.first ?? ""
+    let cmd = resolveCommand(args.first ?? "")
     switch cmd {
     case "list":
         try standaloneList()
@@ -496,53 +549,116 @@ do {
 let args = rawArgs
 
 func usage() -> Never {
-    let text = """
-    atv — control Apple TV from the command line
+    // Fixed left-column width so descriptions always line up, regardless of
+    // whether the command string is short ("pp") or long ("select <name>").
+    // Colors are applied after padding so ANSI escape sequences don't inflate
+    // the visible column width.
+    func row(_ cmd: String, _ desc: String) -> String {
+        let width = 34
+        // If cmd is longer than our column, don't truncate — break onto the
+        // next line with the description indented to match the column.
+        if cmd.count >= width {
+            let indent = String(repeating: " ", count: width + 2)
+            return "  \(yellow(cmd))\n\(indent)\(desc)"
+        }
+        let padded = cmd.padding(toLength: width, withPad: " ", startingAt: 0)
+        return "  \(yellow(padded))\(desc)"
+    }
 
-    Usage:
-      atv list                     List discovered Apple TVs
-      atv status                   Default device + connection state
-      atv select <name>            Set default device (enables auto-connect)
-      atv pair <name>              Pair with an Apple TV (prompts for PIN)
-      atv l | r | u | d            D-pad left / right / up / down
-      atv click               Click (D-pad centre)
-      atv pp                       Play / Pause
-      atv home [--long]            Home button (long-press opens Control Center)
-      atv menu                     Menu / Back
-      atv vol+ | vol-              Volume up / down
-      atv power                    Toggle (wake if asleep, sleep if on)
-      atv disconnect               Drop the connection
-      atv ping                     Round-trip ping to the app
-      atv completion <bash|zsh>    Emit shell completion script to stdout
-
-    Standalone mode (no app required, single-shot):
-      atv --standalone list                    Discover over Bonjour directly
-      atv --standalone [--device <name>] <cmd> Send one HID command
-        Supported cmds: list, l, r, u, d, click, pp, menu, home,
-                        vol+, vol-, power (always wakes)
-        Requires credentials from a previous pair-setup via the app.
-        Auto-falls-back to standalone when run over SSH without a GUI session.
-
-    Install completions:
-      zsh   eval "$(atv completion zsh)"
-      bash  eval "$(atv completion bash)"
-
-    Colors honor NO_COLOR and are auto-disabled on non-TTY stdout.
-    """
-    print(text)
+    let header = cyan("atv") + " — control Apple TV from the command line"
+    print(header)
+    print("")
+    print(cyan("Usage:"))
+    print(row("list",                    "List discovered Apple TVs"))
+    print(row("status",                  "Default device + connection state"))
+    print(row("select <name>",           "Set default device (enables auto-connect)"))
+    print(row("pair <name>",             "Pair with an Apple TV (prompts for PIN)"))
+    print(row("l | r | u | d",           "D-pad left / right / up / down"))
+    print(row("click",                   "Click (D-pad centre)"))
+    print(row("pp",                      "Play / Pause"))
+    print(row("home [--long]",           "Home button (long-press opens Control Center)"))
+    print(row("menu",                    "Menu / Back"))
+    print(row("vol+ | vol-",             "Volume up / down"))
+    print(row("power",                   "Toggle (wake if asleep, sleep if on)"))
+    print(row("disconnect",              "Drop the connection"))
+    print(row("ping",                    "Round-trip ping to the app"))
+    print(row("completion <bash|zsh>",   "Emit shell completion script to stdout"))
+    print("")
+    print(cyan("Standalone mode") + " (no app required, single-shot):")
+    print(row("--standalone list",                    "Discover over Bonjour directly"))
+    print(row("--standalone [--device <n>] <cmd>",    "Send one HID command"))
+    print(dim("""
+      Supported cmds: list, l, r, u, d, click, pp, menu, home,
+                      vol+, vol-, power (always wakes)
+      Requires credentials from a previous pair-setup via the app.
+      Auto-falls-back to standalone when run over SSH without a GUI session.
+    """))
+    print("")
+    print(cyan("Install completions:"))
+    print(row("zsh",  #"eval "$(atv completion zsh)""#))
+    print(row("bash", #"eval "$(atv completion bash)""#))
+    print("")
+    print(dim("Colors honor NO_COLOR and are auto-disabled on non-TTY stdout."))
     exit(args.isEmpty ? 0 : 2)
 }
 
 guard !args.isEmpty else { usage() }
 
+// MARK: - Command chaining
+//
+// Two supported shapes (both tokenised at this point — flags already stripped):
+//   atv r u d u      → four separate key presses, in order
+//   atv 5 r          → five rights
+//   atv 3 r u        → rightup rightup rightup  (count applies to the sequence)
+//
+// Only "fire-and-forget" commands chain — device-selecting / long-running ones
+// (select, pair, status, list, ping, completion, disconnect, power) still run
+// solo. If args don't match a chainable shape, we fall through to the normal
+// single-command dispatch path below.
+
+let chainable: Set<String> = [
+    "l", "r", "u", "d", "click", "pp", "menu", "home", "vol+", "vol-",
+]
+
+/// Expand a chain of args into the final sequence of commands to run, or nil
+/// if the input isn't a valid chain. Expects args to have at least 2 tokens
+/// (a single token goes through normal dispatch).
+func expandChain(_ tokens: [String]) -> [String]? {
+    guard tokens.count >= 2 else { return nil }
+    // Leading positive integer? Repeat the rest N times.
+    var rest = tokens
+    var count = 1
+    if let n = Int(tokens[0]), n > 0 {
+        count = n
+        rest = Array(tokens.dropFirst())
+        guard !rest.isEmpty else { return nil }
+    }
+    // Every remaining token must resolve to a chainable command.
+    let resolved = rest.map(resolveCommand)
+    guard resolved.allSatisfy(chainable.contains) else { return nil }
+    return Array(repeating: resolved, count: count).flatMap { $0 }
+}
+
+// Expand abbreviations up-front — `atv m` → menu, `atv se foo` → select foo,
+// etc. Ambiguous prefixes die here; unknown strings pass through so dispatch
+// produces the normal "unknown command" error.
+let resolvedCommand = resolveCommand(args[0])
+var dispatchArgs = args
+dispatchArgs[0] = resolvedCommand
+
+// Detect a chain before picking the dispatch path. We only run chains against
+// the IPC path (app / standalone connection), so detection happens here and
+// execution lives below once we've decided which connection to use.
+let chain = expandChain(args)
+
 do {
     // Help / usage — handle before anything that could auto-launch the app.
-    if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+    if resolvedCommand == "help" || args[0] == "-h" || args[0] == "--help" {
         usage()
     }
 
     // completion doesn't touch the socket at all — just dumps the script.
-    if args[0] == "completion" {
+    if resolvedCommand == "completion" {
         guard args.count >= 2 else { die("completion requires a shell: bash | zsh") }
         switch args[1] {
         case "zsh":  print(zshCompletion)
@@ -553,7 +669,7 @@ do {
     }
 
     // ping doesn't need auto-launch — if the app isn't running, say so.
-    if args[0] == "ping" {
+    if resolvedCommand == "ping" {
         guard let conn = IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 2) else {
             die("AppleTVRemote.app is not running (no socket at \(IPCSocket.path))")
         }
@@ -566,7 +682,13 @@ do {
     // --standalone: skip the app/socket entirely. Only a subset of commands
     // works without a live app session — see Standalone.swift for the list.
     if useStandalone {
-        try runStandalone(args: args, device: standaloneDevice)
+        if let chain {
+            for cmd in chain {
+                try runStandalone(args: [cmd], device: standaloneDevice)
+            }
+        } else {
+            try runStandalone(args: dispatchArgs, device: standaloneDevice)
+        }
         exit(0)
     }
 
@@ -577,16 +699,49 @@ do {
         "list", "l", "r", "u", "d", "click", "pp", "menu", "home",
         "vol+", "vol-", "power",
     ]
-    if isHeadlessSession(), standaloneCapable.contains(args[0]),
+    // Either a regular single-command run fits standalone, or every command
+    // in the chain does (chains are all keys, so by construction they do).
+    let firstIsStandaloneCapable = chain != nil || standaloneCapable.contains(resolvedCommand)
+    if isHeadlessSession(), firstIsStandaloneCapable,
        IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 1) == nil {
         fputs(dim("(headless session — falling back to --standalone)\n"), stderr)
-        try runStandalone(args: args, device: standaloneDevice)
+        if let chain {
+            for cmd in chain {
+                try runStandalone(args: [cmd], device: standaloneDevice)
+            }
+        } else {
+            try runStandalone(args: dispatchArgs, device: standaloneDevice)
+        }
         exit(0)
     }
 
     let conn = connectOrLaunch()
 
-    switch args[0] {
+    // Run a chain over the one established IPC connection, then exit.
+    if let chain {
+        for cmd in chain {
+            let key: IPCKey? = {
+                switch cmd {
+                case "l":    return .left
+                case "r":    return .right
+                case "u":    return .up
+                case "d":    return .down
+                case "click":return .select
+                case "pp":   return .playPause
+                case "menu": return .menu
+                case "home": return .home
+                case "vol+": return .volumeUp
+                case "vol-": return .volumeDown
+                default:     return nil
+                }
+            }()
+            guard let k = key else { die("chain: unsupported command \(cmd)") }
+            try cmdKey(conn, key: k)
+        }
+        exit(0)
+    }
+
+    switch resolvedCommand {
     case "list":        try cmdList(conn, namesOnly: args.contains("--names"))
     case "status":      try cmdStatus(conn)
     case "select":
@@ -613,7 +768,7 @@ do {
         expectOk(r)
         print(green("✓ disconnected"))
     default:
-        die("unknown command: \(args[0])")
+        die("unknown command: \(args[0])")   // show original, not the no-op pass-through
     }
 } catch {
     die(error.localizedDescription)

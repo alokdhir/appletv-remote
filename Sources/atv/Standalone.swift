@@ -28,80 +28,108 @@ import AppleTVProtocol
 enum StandaloneDiscovery {
     /// Discover + resolve Apple TVs on the LAN. Returns once at least one
     /// device is fully resolved (host + port) or `timeout` elapses.
+    ///
+    /// Implementation detail: we use NWBrowser to find services and then
+    /// NWConnection to resolve each endpoint to an (IP, port) pair. NWConnection
+    /// does the resolution on its own internal queue, so we don't need to pump
+    /// a run loop or own one like NetService requires. That was the hang bug
+    /// in an earlier draft — NetService was scheduled on RunLoop.main but
+    /// delegate callbacks never fired because this CLI tool doesn't run the
+    /// main loop by default.
     static func discover(timeout: TimeInterval = 3.0) -> [AppleTVDevice] {
         let queue = DispatchQueue(label: "atv.standalone.discovery")
         let lock  = NSLock()
         var found: [String: AppleTVDevice] = [:]
-        var resolvers: [String: StandaloneResolver] = [:]
+        var seenNames: Set<String> = []
+        var resolvers: [NWConnection] = []
 
-        let params = NWParameters()
+        let params = NWParameters.tcp
         params.includePeerToPeer = false
         let descriptor = NWBrowser.Descriptor.bonjour(type: "_companion-link._tcp", domain: nil)
         let browser = NWBrowser(for: descriptor, using: params)
 
         browser.browseResultsChangedHandler = { results, _ in
             for result in results {
-                guard case .service(let name, let type, let domain, _) = result.endpoint else { continue }
-                // Filter to Apple TVs (mirrors DeviceDiscovery.handleBrowseResults).
+                guard case .service(let name, _, _, _) = result.endpoint else { continue }
+
+                // Deduplicate — the browser fires again when TXT records update.
+                lock.lock()
+                let isNew = seenNames.insert(name).inserted
+                lock.unlock()
+                if !isNew { continue }
+
+                // Filter at browse time where possible. Apple TVs advertise
+                // rpMd like "AppleTV14,1". HomePods and Macs also appear on
+                // _companion-link._tcp; we drop them here if the TXT is present.
                 if case .bonjour(let txt) = result.metadata {
                     let model = txt.dictionary["rpMd"] ?? ""
                     if !model.isEmpty && !model.hasPrefix("AppleTV") { continue }
-                    if model.isEmpty {
-                        let rpflRaw = txt.dictionary["rpFl"] ?? txt.dictionary["rpfl"] ?? ""
-                        if !rpflRaw.isEmpty,
-                           let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16),
-                           (rpfl & 0x4000) == 0 { continue }
+                }
+
+                // Resolve via UDP NWConnection — we want only the IP, not a
+                // real connection. UDP avoids a TCP handshake to the companion
+                // port, which would confuse the ATV's pairing state machine.
+                // IPv4-only: StandaloneSession uses AF_INET + inet_pton.
+                let udpParams = NWParameters.udp
+                if let ipOpts = udpParams.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+                    ipOpts.version = .v4
+                }
+                let conn = NWConnection(to: result.endpoint, using: udpParams)
+                lock.lock(); resolvers.append(conn); lock.unlock()
+
+                conn.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready, .preparing:
+                        if case .hostPort(let host, let port) = conn.currentPath?.remoteEndpoint ?? .hostPort(host: "0.0.0.0", port: 0) {
+                            let h: String = {
+                                switch host {
+                                case .ipv4(let a): return "\(a)"
+                                case .ipv6(let a): return "\(a)"
+                                case .name(let n, _): return n
+                                @unknown default: return ""
+                                }
+                            }()
+                            if !h.isEmpty, h != "0.0.0.0" {
+                                lock.lock()
+                                var dev = AppleTVDevice(id: name, name: name, endpoint: result.endpoint)
+                                dev.host = h.split(separator: "%").first.map(String.init) ?? h
+                                dev.port = port.rawValue
+                                found[name] = dev
+                                lock.unlock()
+                                conn.cancel()
+                            }
+                        }
+                    case .failed, .cancelled:
+                        break
+                    default:
+                        break
                     }
                 }
-
-                lock.lock()
-                let already = resolvers[name] != nil
-                lock.unlock()
-                if already { continue }
-
-                let resolver = StandaloneResolver(name: name,
-                                               type: type,
-                                               domain: domain.isEmpty ? "local." : domain)
-                lock.lock(); resolvers[name] = resolver; lock.unlock()
-
-                resolver.resolve { host, port, txt in
-                    // Double-check at resolve time (browse-time TXT may omit rpMd).
-                    if let model = txt["rpMd"], !model.hasPrefix("AppleTV") { return }
-                    lock.lock()
-                    var dev = AppleTVDevice(id: name, name: name, endpoint: result.endpoint)
-                    dev.host = host
-                    dev.port = UInt16(port)
-                    found[name] = dev
-                    lock.unlock()
-                }
+                conn.start(queue: queue)
             }
         }
 
         browser.start(queue: queue)
 
-        // Wait until timeout, or until we have at least one resolved device.
-        // We must pump the main runloop — StandaloneResolver schedules its
-        // NetService on RunLoop.main, and without runloop ticks its delegate
-        // callbacks never fire (resolution silently hangs).
+        // Simple blocking wait — all callbacks run on the browser's queue so
+        // there's no run-loop to pump. Poll every 50 ms.
         let deadline = Date().addingTimeInterval(timeout)
         var graceUntil: Date?
         while Date() < deadline {
-            // Run the runloop for up to 100 ms at a time — returns early when
-            // any source fires, so resolved callbacks unblock us promptly.
-            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
+            Thread.sleep(forTimeInterval: 0.05)
             lock.lock()
-            let anyResolved = found.values.contains { $0.host != nil }
+            let anyResolved = !found.isEmpty
             lock.unlock()
             if anyResolved && graceUntil == nil {
-                // Give late resolutions 300 ms of additional grace.
                 graceUntil = Date().addingTimeInterval(0.3)
             }
             if let g = graceUntil, Date() >= g { break }
         }
         browser.cancel()
+        for r in resolvers { r.cancel() }
 
         lock.lock()
-        let devices = Array(found.values).filter { $0.host != nil }.sorted { $0.name < $1.name }
+        let devices = Array(found.values).sorted { $0.name < $1.name }
         lock.unlock()
         return devices
     }
@@ -186,15 +214,17 @@ final class StandaloneSession {
 
     func pairVerify() throws {
         let verify = CompanionPairVerify(credentials: creds)
-        // M1
-        try writeFrame(.pvStart, payload: verify.m1Payload())
-        // M2
-        let m2 = try readFrame(expected: .pvNext)
+        // M1 — must be OPACK-wrapped with {"_pd": tlv8, "_auTy": 4}
+        try writeFrame(.pvStart, payload: OPACK.wrapPvStartData(verify.m1Payload()))
+        // M2 — ATV sends OPACK dict; extract raw TLV8 before processing
+        let m2Raw = try readFrame(expected: .pvNext)
+        let m2 = OPACK.extractPairingData(from: m2Raw) ?? m2Raw
         let m3 = try verify.processM2(m2)
-        // M3
-        try writeFrame(.pvNext, payload: m3)
-        // M4
-        let m4 = try readFrame(expected: .pvNext)
+        // M3 — wrap raw TLV8 in {"_pd": ...}
+        try writeFrame(.pvNext, payload: OPACK.wrapPairingData(m3))
+        // M4 — extract TLV8 then verify
+        let m4Raw = try readFrame(expected: .pvNext)
+        let m4 = OPACK.extractPairingData(from: m4Raw) ?? m4Raw
         try verify.verifyM4(m4)
         // Derive session keys
         guard let enc = verify.sessionEncryptKey, let dec = verify.sessionDecryptKey else {
@@ -327,7 +357,7 @@ func pickStandaloneDevice(nameOrNil: String?, discovered: [AppleTVDevice]) throw
 }
 
 func standaloneSendKey(deviceName: String?, command: RemoteCommand) throws {
-    let devices = StandaloneDiscovery.discover(timeout: 3.0)
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
     let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)
     let store = CredentialStore()
     guard store.hasCredentials(for: device.id), let creds = store.load(deviceID: device.id) else {
@@ -341,7 +371,7 @@ func standaloneSendKey(deviceName: String?, command: RemoteCommand) throws {
 }
 
 func standaloneList() throws {
-    let devices = StandaloneDiscovery.discover(timeout: 3.0)
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
     if devices.isEmpty {
         print(yellow("No Apple TVs discovered."))
         return
@@ -367,63 +397,3 @@ func isHeadlessSession() -> Bool {
     ProcessInfo.processInfo.environment["SECURITYSESSIONID"] == nil
 }
 
-// MARK: - Minimal NetService resolver (self-contained)
-
-/// Compact Bonjour resolver for standalone mode. Mirrors the app's
-/// ServiceResolver but lives inside the atv target — the app's version is
-/// coupled to main-actor logging and we don't want to pull it along.
-final class StandaloneResolver: NSObject, NetServiceDelegate {
-    private let service: NetService
-    private var completion: ((String, Int, [String: String]) -> Void)?
-
-    init(name: String, type: String, domain: String) {
-        let t = type.hasSuffix(".") ? String(type.dropLast()) : type
-        let d = domain.hasSuffix(".") ? String(domain.dropLast()) : domain
-        service = NetService(domain: d, type: t, name: name)
-        super.init()
-        service.delegate = self
-    }
-
-    func resolve(completion: @escaping (String, Int, [String: String]) -> Void) {
-        self.completion = completion
-        // NetService insists on running on a run-loop; schedule on main so the
-        // background DispatchQueue the browser runs on doesn't ignore it.
-        DispatchQueue.main.async {
-            self.service.schedule(in: RunLoop.main, forMode: .default)
-            self.service.resolve(withTimeout: 5.0)
-        }
-    }
-
-    func netServiceDidResolveAddress(_ sender: NetService) {
-        guard let addresses = sender.addresses else { return }
-        var txt: [String: String] = [:]
-        if let txtData = sender.txtRecordData() {
-            let raw = NetService.dictionary(fromTXTRecord: txtData)
-            txt = raw.compactMapValues { String(data: $0, encoding: .utf8) }
-        }
-        // Prefer IPv4 (AF_INET). On BSD: byte 1 of sockaddr = sa_family.
-        let sorted = addresses.sorted { a, _ in
-            a.withUnsafeBytes { $0.load(fromByteOffset: 1, as: UInt8.self) == 2 }
-        }
-        for addressData in sorted {
-            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let ok = addressData.withUnsafeBytes { rawPtr -> Bool in
-                let sa = rawPtr.baseAddress!.assumingMemoryBound(to: sockaddr.self)
-                return getnameinfo(sa, socklen_t(addressData.count),
-                                   &hostname, socklen_t(NI_MAXHOST),
-                                   nil, 0, NI_NUMERICHOST) == 0
-            }
-            if ok {
-                let nullIdx = hostname.firstIndex(of: 0) ?? hostname.endIndex
-                let ip = String(decoding: hostname[..<nullIdx].map { UInt8(bitPattern: $0) }, as: UTF8.self)
-                completion?(ip, sender.port, txt)
-                completion = nil
-                return
-            }
-        }
-    }
-
-    func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
-        completion = nil
-    }
-}
