@@ -202,10 +202,17 @@ func expectOk(_ r: IPCResponse) {
 
 // MARK: - Commands
 
-func cmdList(_ conn: IPCConnection) throws {
+func cmdList(_ conn: IPCConnection, namesOnly: Bool = false) throws {
     let r = try conn.request(.list)
     expectOk(r)
     let devices = r.devices ?? []
+    // --names: plain one-name-per-line output, used by shell completion
+    // scripts. Kept silent even when zero devices are discovered — completion
+    // just gets no candidates, no yellow warning text to confuse the user.
+    if namesOnly {
+        for d in devices { print(d.name) }
+        return
+    }
     if devices.isEmpty {
         print(yellow("No Apple TVs discovered yet — the app may still be scanning."))
         return
@@ -223,6 +230,111 @@ func cmdList(_ conn: IPCConnection) throws {
         print("\(marker) \(name)  \(host)  \(flags.joined(separator: " "))")
     }
 }
+
+// MARK: - Shell completion scripts
+
+let zshCompletion = #"""
+#compdef atv
+# zsh completion for atv — install via: eval "$(atv completion zsh)"
+# or save to a file in $fpath (e.g. ~/.zsh/completions/_atv).
+
+_atv() {
+    local -a subcommands
+    subcommands=(
+        'list:List discovered Apple TVs'
+        'status:Default device + connection state'
+        'select:Set default device (enables auto-connect)'
+        'pair:Pair with an Apple TV (prompts for PIN)'
+        'l:D-pad left'
+        'r:D-pad right'
+        'u:D-pad up'
+        'd:D-pad down'
+        'select-btn:Click (D-pad centre)'
+        'pp:Play / Pause'
+        'home:Home button'
+        'menu:Menu / Back'
+        'vol+:Volume up'
+        'vol-:Volume down'
+        'power:Toggle (wake if asleep, sleep if on)'
+        'disconnect:Drop the connection'
+        'ping:Round-trip ping to the app'
+        'completion:Emit shell completion script'
+    )
+    if (( CURRENT == 2 )); then
+        _describe 'command' subcommands
+        return
+    fi
+    case "$words[2]" in
+        select|pair)
+            if (( CURRENT == 3 )); then
+                local -a devices
+                # newline-split so device names with spaces survive intact
+                devices=("${(@f)$(atv list --names 2>/dev/null)}")
+                _describe 'device' devices
+            fi
+            ;;
+        home)
+            if (( CURRENT == 3 )); then
+                _describe 'flag' '(--long:long-press\ \(Control\ Center\))'
+            fi
+            ;;
+        completion)
+            if (( CURRENT == 3 )); then
+                _describe 'shell' 'bash zsh'
+            fi
+            ;;
+    esac
+}
+
+_atv "$@"
+"""#
+
+let bashCompletion = #"""
+# bash completion for atv — install via: eval "$(atv completion bash)"
+# or save to /usr/local/etc/bash_completion.d/atv (or /etc/bash_completion.d/).
+
+_atv() {
+    local cur prev words cword
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    cword=$COMP_CWORD
+    local subcmds="list status select pair l r u d select-btn pp home menu vol+ vol- power disconnect ping completion"
+
+    if [[ $cword -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
+        return
+    fi
+
+    case "${COMP_WORDS[1]}" in
+        select|pair)
+            if [[ $cword -eq 2 ]]; then
+                # Read one name per line so names with spaces stay intact.
+                local -a names
+                while IFS= read -r line; do names+=("$line"); done \
+                    < <(atv list --names 2>/dev/null)
+                local n
+                for n in "${names[@]}"; do
+                    if [[ "$n" == "$cur"* ]]; then
+                        COMPREPLY+=("$n")
+                    fi
+                done
+            fi
+            ;;
+        home)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "--long" -- "$cur") )
+            fi
+            ;;
+        completion)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+            fi
+            ;;
+    esac
+}
+
+complete -F _atv atv
+"""#
 
 func cmdStatus(_ conn: IPCConnection) throws {
     let r = try conn.request(.status)
@@ -319,6 +431,11 @@ func usage() -> Never {
       atv power                    Toggle (wake if asleep, sleep if on)
       atv disconnect               Drop the connection
       atv ping                     Round-trip ping to the app
+      atv completion <bash|zsh>    Emit shell completion script to stdout
+
+    Install completions:
+      zsh   eval "$(atv completion zsh)"
+      bash  eval "$(atv completion bash)"
 
     Colors honor NO_COLOR and are auto-disabled on non-TTY stdout.
     """
@@ -329,6 +446,17 @@ func usage() -> Never {
 guard !args.isEmpty else { usage() }
 
 do {
+    // completion doesn't touch the socket at all — just dumps the script.
+    if args[0] == "completion" {
+        guard args.count >= 2 else { die("completion requires a shell: bash | zsh") }
+        switch args[1] {
+        case "zsh":  print(zshCompletion)
+        case "bash": print(bashCompletion)
+        default:     die("unknown shell: \(args[1]) (supported: bash, zsh)")
+        }
+        exit(0)
+    }
+
     // ping doesn't need auto-launch — if the app isn't running, say so.
     if args[0] == "ping" {
         guard let conn = IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 2) else {
@@ -343,7 +471,7 @@ do {
     let conn = connectOrLaunch()
 
     switch args[0] {
-    case "list":        try cmdList(conn)
+    case "list":        try cmdList(conn, namesOnly: args.contains("--names"))
     case "status":      try cmdStatus(conn)
     case "select":
         guard args.count >= 2 else { die("select requires a device name") }
