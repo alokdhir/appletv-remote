@@ -12,6 +12,7 @@ struct AppleTVRemoteApp: App {
     @StateObject private var connection  = CompanionConnection()
     @StateObject private var autoConnect = AutoConnectStore()
     @StateObject private var reconnector = AutoReconnector()
+    @State       private var ipcServer:  IPCServer?
 
     var body: some Scene {
         WindowGroup {
@@ -27,6 +28,13 @@ struct AppleTVRemoteApp: App {
                 .onAppear {
                     MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
                     reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
+                    if ipcServer == nil {
+                        let server = IPCServer(connection: connection,
+                                               discovery: discovery,
+                                               autoConnect: autoConnect)
+                        server.start()
+                        ipcServer = server
+                    }
                 }
                 .onChange(of: discovery.devices) { devices in
                     guard connection.state == .disconnected else { return }
