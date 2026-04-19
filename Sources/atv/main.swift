@@ -250,7 +250,7 @@ _atv() {
         'r:D-pad right'
         'u:D-pad up'
         'd:D-pad down'
-        'select-btn:Click (D-pad centre)'
+        'click:Click (D-pad centre)'
         'pp:Play / Pause'
         'home:Home button'
         'menu:Menu / Back'
@@ -299,7 +299,7 @@ _atv() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     cword=$COMP_CWORD
-    local subcmds="list status select pair l r u d select-btn pp home menu vol+ vol- power disconnect ping completion"
+    local subcmds="list status select pair l r u d click pp home menu vol+ vol- power disconnect ping completion"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -447,7 +447,7 @@ func runStandalone(args: [String], device: String?) throws {
     case "r":          try standaloneSendKey(deviceName: device, command: .right)
     case "u":          try standaloneSendKey(deviceName: device, command: .up)
     case "d":          try standaloneSendKey(deviceName: device, command: .down)
-    case "select-btn": try standaloneSendKey(deviceName: device, command: .select)
+    case "click": try standaloneSendKey(deviceName: device, command: .select)
     case "pp":         try standaloneSendKey(deviceName: device, command: .playPause)
     case "menu":       try standaloneSendKey(deviceName: device, command: .menu)
     case "home":       try standaloneSendKey(deviceName: device, command: .home)
@@ -505,7 +505,7 @@ func usage() -> Never {
       atv select <name>            Set default device (enables auto-connect)
       atv pair <name>              Pair with an Apple TV (prompts for PIN)
       atv l | r | u | d            D-pad left / right / up / down
-      atv select-btn               Click (D-pad centre)
+      atv click               Click (D-pad centre)
       atv pp                       Play / Pause
       atv home [--long]            Home button (long-press opens Control Center)
       atv menu                     Menu / Back
@@ -518,7 +518,7 @@ func usage() -> Never {
     Standalone mode (no app required, single-shot):
       atv --standalone list                    Discover over Bonjour directly
       atv --standalone [--device <name>] <cmd> Send one HID command
-        Supported cmds: list, l, r, u, d, select-btn, pp, menu, home,
+        Supported cmds: list, l, r, u, d, click, pp, menu, home,
                         vol+, vol-, power (always wakes)
         Requires credentials from a previous pair-setup via the app.
         Auto-falls-back to standalone when run over SSH without a GUI session.
@@ -569,7 +569,7 @@ do {
     // (typical over SSH without an Aqua session). Only fall back for commands
     // that actually work standalone — status / select / pair need the app.
     let standaloneCapable: Set<String> = [
-        "list", "l", "r", "u", "d", "select-btn", "pp", "menu", "home",
+        "list", "l", "r", "u", "d", "click", "pp", "menu", "home",
         "vol+", "vol-", "power",
     ]
     if isHeadlessSession(), standaloneCapable.contains(args[0]),
@@ -594,7 +594,7 @@ do {
     case "r":           try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)
     case "d":           try cmdKey(conn, key: .down)
-    case "select-btn":  try cmdKey(conn, key: .select)
+    case "click":  try cmdKey(conn, key: .select)
     case "pp":          try cmdKey(conn, key: .playPause)
     case "menu":        try cmdKey(conn, key: .menu)
     case "home":
