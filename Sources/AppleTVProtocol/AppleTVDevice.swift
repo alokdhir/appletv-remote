@@ -97,3 +97,19 @@ public enum RemoteCommand {
         }
     }
 }
+
+/// Trackpad swipe direction for `CompanionConnection.sendSwipe(_:)`.
+/// Coordinates are in the 1000×1000 space declared by `_touchStart`.
+public enum SwipeDirection: CaseIterable, Sendable {
+    case up, down, left, right
+
+    /// (start, end) touch coordinates for this swipe direction.
+    public var coordinates: (start: (x: Double, y: Double), end: (x: Double, y: Double)) {
+        switch self {
+        case .up:    return (start: (500, 750), end: (500, 250))
+        case .down:  return (start: (500, 250), end: (500, 750))
+        case .left:  return (start: (750, 500), end: (250, 500))
+        case .right: return (start: (250, 500), end: (750, 500))
+        }
+    }
+}

@@ -184,6 +184,40 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode a `_hidT` touch event — one frame in a swipe gesture sequence.
+    ///
+    /// Coordinates are in the 1000×1000 space declared by `_touchStart`.
+    /// - `phase`: 0 = press (begin), 1 = hold (move), 2 = release (end)
+    /// - `nanoseconds`: monotonically-increasing timestamp; use the output of
+    ///   `DispatchTime.now().uptimeNanoseconds`.
+    ///
+    /// Matches pyatv's `hid_event()` in companion/api.py.
+    public static func encodeTouchEvent(x: Double, y: Double, phase: Int,
+                                        txn: UInt32, nanoseconds: UInt64) -> Data {
+        pack([
+            "_i": "_hidT",
+            "_t": 2,
+            "_x": txn,
+            "_c": [
+                "_cx":  x,
+                "_cy":  y,
+                "_tPh": phase,
+                "_tFg": 1,
+                "_ns":  nanoseconds,
+            ] as [String: Any],
+        ] as [String: Any])
+    }
+
+    /// Encode a `_hidT` touch stop frame — closes the touch session.
+    public static func encodeTouchStop(txn: UInt32) -> Data {
+        pack([
+            "_i": "_hidT",
+            "_t": 2,
+            "_x": txn,
+            "_c": ["_i": 1] as [String: Any],
+        ] as [String: Any])
+    }
+
     /// Encode `_tiStart` (text input start) request — sent between
     /// `_sessionStart` and `_interest`. Empty content payload.
     /// Matches pyatv's CompanionAPI._text_input_start (api.py:385).

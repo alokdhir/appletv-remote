@@ -56,6 +56,19 @@ public enum IPCKey: String, Codable, Sendable, CaseIterable {
     case playPause = "play-pause"
     case volumeUp  = "vol-up"
     case volumeDown = "vol-down"
+    // Trackpad swipe gestures — implemented as touch events, not HID buttons.
+    case swipeUp    = "swipe-up"
+    case swipeDown  = "swipe-down"
+    case swipeLeft  = "swipe-left"
+    case swipeRight = "swipe-right"
+
+    /// True if this key is a touch-based swipe gesture rather than a HID button.
+    public var isSwipe: Bool {
+        switch self {
+        case .swipeUp, .swipeDown, .swipeLeft, .swipeRight: return true
+        default: return false
+        }
+    }
 }
 
 // MARK: - Request

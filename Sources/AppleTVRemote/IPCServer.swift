@@ -345,13 +345,29 @@ final class IPCServer {
         guard connection.state == .connected else {
             throw IPCError.notConnected
         }
-        let cmd = remoteCommand(for: key)
-        if longPress {
-            connection.sendLongPress(cmd)
+        if key.isSwipe {
+            if let dir = swipeDirection(for: key) {
+                connection.sendSwipe(dir)
+            }
         } else {
-            connection.send(cmd)
+            let cmd = remoteCommand(for: key)
+            if longPress {
+                connection.sendLongPress(cmd)
+            } else {
+                connection.send(cmd)
+            }
         }
         client.send(.response(.ok(id)))
+    }
+
+    private func swipeDirection(for key: IPCKey) -> SwipeDirection? {
+        switch key {
+        case .swipeUp:    return .up
+        case .swipeDown:  return .down
+        case .swipeLeft:  return .left
+        case .swipeRight: return .right
+        default: return nil
+        }
     }
 
     private func handlePower(id: String, client: IPCClient) {
@@ -385,6 +401,9 @@ final class IPCServer {
         case .playPause:  return .playPause
         case .volumeUp:   return .volumeUp
         case .volumeDown: return .volumeDown
+        case .swipeUp, .swipeDown, .swipeLeft, .swipeRight:
+            // Swipe keys are handled before this path via swipeDirection(for:).
+            return .up
         }
     }
 }

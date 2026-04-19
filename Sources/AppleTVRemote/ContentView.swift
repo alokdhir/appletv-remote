@@ -74,7 +74,12 @@ struct ContentView: View {
             // explicitly so hiding the sidebar snaps the window narrower.
             guard let window = MenuBarController.shared.mainWindow else { return }
             let newWidth: CGFloat = collapsed ? 300 : 520
-            let currentHeight = window.contentLayoutRect.height
+            // Use contentView.frame.height — this is the actual content height
+            // setContentSize controls. contentLayoutRect.height is smaller (it
+            // excludes toolbar area), so using it causes height to shrink on
+            // every toggle.
+            let currentHeight = window.contentView?.frame.size.height
+                             ?? window.contentRect(forFrameRect: window.frame).height
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.22
                 ctx.allowsImplicitAnimation = true

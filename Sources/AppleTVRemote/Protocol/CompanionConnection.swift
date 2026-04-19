@@ -401,6 +401,40 @@ final class CompanionConnection: ObservableObject {
         }
     }
 
+    /// Send a trackpad swipe gesture in the given direction.
+    /// Uses `_hidT` touch events (press → hold × N → release) across the
+    /// 1000×1000 coordinate space declared in `_touchStart`.
+    func sendSwipe(_ direction: SwipeDirection) {
+        guard state == .connected else { return }
+        Task { @MainActor in
+            guard self.state == .connected else { return }
+            let (start, end) = direction.coordinates
+            let steps = 8
+            let nsBase = DispatchTime.now().uptimeNanoseconds
+            let nsStep: UInt64 = 16_000_000   // ~16 ms per step (≈ 60 fps)
+            // Press
+            let t0 = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
+                                                      txn: t0, nanoseconds: nsBase))
+            // Hold / move
+            for i in 1...steps {
+                let f = Double(i) / Double(steps)
+                let x = start.x + (end.x - start.x) * f
+                let y = start.y + (end.y - start.y) * f
+                let tN = self.txnCounter; self.txnCounter &+= 1
+                let ns = nsBase + UInt64(i) * nsStep
+                self.sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
+                                                          txn: tN, nanoseconds: ns))
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            // Release
+            let tEnd = self.txnCounter; self.txnCounter &+= 1
+            let nsEnd = nsBase + UInt64(steps + 1) * nsStep
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
+                                                      txn: tEnd, nanoseconds: nsEnd))
+        }
+    }
+
     // MARK: - Session Init
 
     private func startCompanionSession() {

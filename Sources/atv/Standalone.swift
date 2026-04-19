@@ -268,6 +268,33 @@ final class StandaloneSession {
         Thread.sleep(forTimeInterval: 0.1)
     }
 
+    /// Send a trackpad swipe gesture (series of _hidT touch events).
+    func sendSwipe(_ direction: SwipeDirection) throws {
+        let (start, end) = direction.coordinates
+        let steps = 8
+        var nsBase = DispatchTime.now().uptimeNanoseconds
+        let nsStep: UInt64 = 16_000_000   // 16 ms between events ≈ 60 fps
+
+        // Press
+        try sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
+                                                  txn: nextTxn(), nanoseconds: nsBase))
+        // Hold / move
+        for i in 1...steps {
+            let f = Double(i) / Double(steps)
+            let x = start.x + (end.x - start.x) * f
+            let y = start.y + (end.y - start.y) * f
+            nsBase &+= nsStep
+            try sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
+                                                      txn: nextTxn(), nanoseconds: nsBase))
+            Thread.sleep(forTimeInterval: 0.016)
+        }
+        // Release
+        nsBase &+= nsStep
+        try sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
+                                                  txn: nextTxn(), nanoseconds: nsBase))
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+
     private func hidOPACK(state: Int, keycode: UInt8) -> Data {
         let t = nextTxn()
         return OPACK.pack([
@@ -368,6 +395,20 @@ func standaloneSendKey(deviceName: String?, command: RemoteCommand) throws {
     try session.pairVerify()
     try session.startSession()
     try session.sendHID(command)
+}
+
+func standaloneSwipe(deviceName: String?, direction: SwipeDirection) throws {
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
+    let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)
+    let store = CredentialStore()
+    guard store.hasCredentials(for: device.id), let creds = store.load(deviceID: device.id) else {
+        throw StandaloneError.noCredentials(device.name)
+    }
+    let session = StandaloneSession(device: device, credentials: creds)
+    try session.open()
+    try session.pairVerify()
+    try session.startSession()
+    try session.sendSwipe(direction)
 }
 
 func standaloneList() throws {

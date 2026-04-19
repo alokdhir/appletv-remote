@@ -250,6 +250,10 @@ _atv() {
         'r:D-pad right'
         'u:D-pad up'
         'd:D-pad down'
+        'sl:Trackpad swipe left'
+        'sr:Trackpad swipe right'
+        'su:Trackpad swipe up'
+        'sd:Trackpad swipe down'
         'click:Click (D-pad centre)'
         'pp:Play / Pause'
         'home:Home button'
@@ -299,7 +303,7 @@ _atv() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     cword=$COMP_CWORD
-    local subcmds="list status select pair l r u d click pp home menu vol+ vol- power disconnect ping completion"
+    local subcmds="list status select pair l r u d sl sr su sd click pp home menu vol+ vol- power disconnect ping completion"
 
     if [[ $cword -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
@@ -467,6 +471,7 @@ func cmdPair(_ conn: IPCConnection, device: String) throws {
 let knownCommands: [String] = [
     "list", "status", "select", "pair",
     "l", "r", "u", "d",
+    "sl", "sr", "su", "sd",    // trackpad swipe left/right/up/down
     "click", "pp", "home", "menu",
     "vol+", "vol-",
     "power", "disconnect", "ping", "completion",
@@ -500,6 +505,10 @@ func runStandalone(args: [String], device: String?) throws {
     case "r":          try standaloneSendKey(deviceName: device, command: .right)
     case "u":          try standaloneSendKey(deviceName: device, command: .up)
     case "d":          try standaloneSendKey(deviceName: device, command: .down)
+    case "sl":         try standaloneSwipe(deviceName: device, direction: .left)
+    case "sr":         try standaloneSwipe(deviceName: device, direction: .right)
+    case "su":         try standaloneSwipe(deviceName: device, direction: .up)
+    case "sd":         try standaloneSwipe(deviceName: device, direction: .down)
     case "click":      try standaloneSendKey(deviceName: device, command: .select)
     case "pp":         try standaloneSendKey(deviceName: device, command: .playPause)
     case "menu":       try standaloneSendKey(deviceName: device, command: .menu)
@@ -574,6 +583,7 @@ func usage() -> Never {
     print(row("select <name>",           "Set default device (enables auto-connect)"))
     print(row("pair <name>",             "Pair with an Apple TV (prompts for PIN)"))
     print(row("l | r | u | d",           "D-pad left / right / up / down"))
+    print(row("sl | sr | su | sd",       "Trackpad swipe left / right / up / down"))
     print(row("click",                   "Click (D-pad centre)"))
     print(row("pp",                      "Play / Pause"))
     print(row("home [--long]",           "Home button (long-press opens Control Center)"))
@@ -617,7 +627,8 @@ guard !args.isEmpty else { usage() }
 // single-command dispatch path below.
 
 let chainable: Set<String> = [
-    "l", "r", "u", "d", "click", "pp", "menu", "home", "vol+", "vol-",
+    "l", "r", "u", "d", "sl", "sr", "su", "sd",
+    "click", "pp", "menu", "home", "vol+", "vol-",
 ]
 
 /// Expand a chain of args into the final sequence of commands to run, or nil
@@ -696,8 +707,8 @@ do {
     // (typical over SSH without an Aqua session). Only fall back for commands
     // that actually work standalone — status / select / pair need the app.
     let standaloneCapable: Set<String> = [
-        "list", "l", "r", "u", "d", "click", "pp", "menu", "home",
-        "vol+", "vol-", "power",
+        "list", "l", "r", "u", "d", "sl", "sr", "su", "sd",
+        "click", "pp", "menu", "home", "vol+", "vol-", "power",
     ]
     // Either a regular single-command run fits standalone, or every command
     // in the chain does (chains are all keys, so by construction they do).
@@ -726,6 +737,10 @@ do {
                 case "r":    return .right
                 case "u":    return .up
                 case "d":    return .down
+                case "sl":   return .swipeLeft
+                case "sr":   return .swipeRight
+                case "su":   return .swipeUp
+                case "sd":   return .swipeDown
                 case "click":return .select
                 case "pp":   return .playPause
                 case "menu": return .menu
@@ -754,6 +769,10 @@ do {
     case "r":           try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)
     case "d":           try cmdKey(conn, key: .down)
+    case "sl":          try cmdKey(conn, key: .swipeLeft)
+    case "sr":          try cmdKey(conn, key: .swipeRight)
+    case "su":          try cmdKey(conn, key: .swipeUp)
+    case "sd":          try cmdKey(conn, key: .swipeDown)
     case "click":  try cmdKey(conn, key: .select)
     case "pp":          try cmdKey(conn, key: .playPause)
     case "menu":        try cmdKey(conn, key: .menu)
