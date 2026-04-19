@@ -31,7 +31,8 @@ struct AppleTVRemoteApp: App {
                     if ipcServer == nil {
                         let server = IPCServer(connection: connection,
                                                discovery: discovery,
-                                               autoConnect: autoConnect)
+                                               autoConnect: autoConnect,
+                                               reconnector: reconnector)
                         server.start()
                         ipcServer = server
                     }

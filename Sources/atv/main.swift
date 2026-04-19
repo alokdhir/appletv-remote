@@ -447,7 +447,7 @@ func runStandalone(args: [String], device: String?) throws {
     case "r":          try standaloneSendKey(deviceName: device, command: .right)
     case "u":          try standaloneSendKey(deviceName: device, command: .up)
     case "d":          try standaloneSendKey(deviceName: device, command: .down)
-    case "click": try standaloneSendKey(deviceName: device, command: .select)
+    case "click":      try standaloneSendKey(deviceName: device, command: .select)
     case "pp":         try standaloneSendKey(deviceName: device, command: .playPause)
     case "menu":       try standaloneSendKey(deviceName: device, command: .menu)
     case "home":       try standaloneSendKey(deviceName: device, command: .home)
@@ -536,6 +536,11 @@ func usage() -> Never {
 guard !args.isEmpty else { usage() }
 
 do {
+    // Help / usage — handle before anything that could auto-launch the app.
+    if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+        usage()
+    }
+
     // completion doesn't touch the socket at all — just dumps the script.
     if args[0] == "completion" {
         guard args.count >= 2 else { die("completion requires a shell: bash | zsh") }
@@ -607,8 +612,6 @@ do {
         let r = try conn.request(.disconnect)
         expectOk(r)
         print(green("✓ disconnected"))
-    case "-h", "--help", "help":
-        usage()
     default:
         die("unknown command: \(args[0])")
     }

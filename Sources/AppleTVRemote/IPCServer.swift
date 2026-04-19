@@ -22,6 +22,7 @@ final class IPCServer {
     private let connection:  CompanionConnection
     private let discovery:   DeviceDiscovery
     private let autoConnect: AutoConnectStore
+    private let reconnector: AutoReconnector
 
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -38,10 +39,12 @@ final class IPCServer {
 
     init(connection: CompanionConnection,
          discovery: DeviceDiscovery,
-         autoConnect: AutoConnectStore) {
+         autoConnect: AutoConnectStore,
+         reconnector: AutoReconnector) {
         self.connection  = connection
         self.discovery   = discovery
         self.autoConnect = autoConnect
+        self.reconnector = reconnector
     }
 
     // MARK: - Lifecycle
@@ -289,7 +292,7 @@ final class IPCServer {
                          deviceName: connection.currentDevice?.name,
                          host: connection.currentDevice?.host,
                          connectionState: connection.state.displayText,
-                         isReconnecting: false,  // filled by AutoReconnector observer in follow-up
+                         isReconnecting: reconnector.isReconnecting,
                          nowPlaying: np)
     }
 
