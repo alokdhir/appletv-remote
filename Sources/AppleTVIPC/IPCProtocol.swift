@@ -95,20 +95,44 @@ public struct IPCDevice: Codable, Sendable {
     }
 }
 
+public struct IPCNowPlaying: Codable, Sendable {
+    public let title: String?
+    public let artist: String?
+    public let album: String?
+    public let app: String?
+    public let elapsedTime: Double?
+    public let duration: Double?
+    public let playbackRate: Double?
+
+    public init(title: String?, artist: String?, album: String?, app: String?,
+                elapsedTime: Double?, duration: Double?, playbackRate: Double?) {
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.app = app
+        self.elapsedTime = elapsedTime
+        self.duration = duration
+        self.playbackRate = playbackRate
+    }
+}
+
 public struct IPCStatus: Codable, Sendable {
     public let deviceID: String?
     public let deviceName: String?
     public let host: String?
     public let connectionState: String     // matches ConnectionState.displayText
     public let isReconnecting: Bool
+    public let nowPlaying: IPCNowPlaying?
 
     public init(deviceID: String?, deviceName: String?, host: String?,
-                connectionState: String, isReconnecting: Bool) {
+                connectionState: String, isReconnecting: Bool,
+                nowPlaying: IPCNowPlaying? = nil) {
         self.deviceID = deviceID
         self.deviceName = deviceName
         self.host = host
         self.connectionState = connectionState
         self.isReconnecting = isReconnecting
+        self.nowPlaying = nowPlaying
     }
 }
 

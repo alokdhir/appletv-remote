@@ -344,6 +344,30 @@ func cmdStatus(_ conn: IPCConnection) throws {
     let host = s.host.map { dim(" · \($0)") } ?? ""
     let state = colorForState(s.connectionState)
     print("\(name)\(host)  \(state)")
+    if let np = s.nowPlaying {
+        let bits = [np.title, np.artist, np.album].compactMap { $0 }.filter { !$0.isEmpty }
+        if !bits.isEmpty {
+            print("  \(dim("▶")) \(bits.joined(separator: " — "))")
+        }
+        if let app = np.app, !app.isEmpty {
+            print("  \(dim("app:")) \(app)")
+        }
+        if let elapsed = np.elapsedTime {
+            let total = np.duration.map { "/\(fmtTime($0))" } ?? ""
+            let rate  = np.playbackRate.map { $0 == 0 ? " (paused)" : ($0 == 1 ? "" : " (×\($0))") } ?? ""
+            print("  \(dim("time:")) \(fmtTime(elapsed))\(total)\(rate)")
+        }
+    }
+}
+
+private func fmtTime(_ seconds: Double) -> String {
+    let s = Int(seconds.rounded())
+    let h = s / 3600
+    let m = (s % 3600) / 60
+    let sec = s % 60
+    return h > 0
+        ? String(format: "%d:%02d:%02d", h, m, sec)
+        : String(format: "%d:%02d", m, sec)
 }
 
 func colorForState(_ text: String) -> String {

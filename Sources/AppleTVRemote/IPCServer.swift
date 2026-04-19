@@ -270,11 +270,21 @@ final class IPCServer {
     }
 
     private func currentStatus() -> IPCStatus {
-        IPCStatus(deviceID: connection.currentDevice?.id,
-                  deviceName: connection.currentDevice?.name,
-                  host: connection.currentDevice?.host,
-                  connectionState: connection.state.displayText,
-                  isReconnecting: false)  // filled by AutoReconnector observer in follow-up
+        let np = connection.nowPlaying.map {
+            IPCNowPlaying(title: $0.title,
+                          artist: $0.artist,
+                          album: $0.album,
+                          app: $0.app,
+                          elapsedTime: $0.elapsedTime,
+                          duration: $0.duration,
+                          playbackRate: $0.playbackRate)
+        }
+        return IPCStatus(deviceID: connection.currentDevice?.id,
+                         deviceName: connection.currentDevice?.name,
+                         host: connection.currentDevice?.host,
+                         connectionState: connection.state.displayText,
+                         isReconnecting: false,  // filled by AutoReconnector observer in follow-up
+                         nowPlaying: np)
     }
 
     private func resolveDevice(_ nameOrID: String) -> AppleTVDevice? {

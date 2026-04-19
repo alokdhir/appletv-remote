@@ -55,6 +55,11 @@ final class CompanionConnection: ObservableObject {
     /// network-driven drops/failures.
     @Published var userInitiatedDisconnect = false
 
+    /// Most recent Now Playing payload the ATV has volunteered via `_iMC`
+    /// event subscription. Nil until the ATV pushes its first update after
+    /// session start, or when the session tears down.
+    @Published var nowPlaying: NowPlayingInfo?
+
     // MARK: - Connect / Disconnect
 
     /// Smart connect: probes the device first (1 s TCP timeout).
@@ -633,6 +638,16 @@ final class CompanionConnection: ObservableObject {
             Log.companion.trace("Companion → _pong txn=\(txn) ✓")
         case "_pong":
             break
+        case "_iMC":
+            // Media-control event. The payload sits in the `_c` sub-dict;
+            // pyatv-equivalent field names we know about include title,
+            // artist, album, clientName (the app), elapsedTime, duration,
+            // and playbackRate. Apple's tvOS is inconsistent about which
+            // keys populate — we read defensively and keep any new keys
+            // in `raw` for the user to inspect.
+            let inner = (msg["_c"] as? [String: Any]) ?? msg
+            nowPlaying = NowPlayingInfo(from: inner)
+            Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
         default:
             break
         }
@@ -751,5 +766,57 @@ final class CompanionConnection: ObservableObject {
                 Log.companion.fail("Companion: unhandled frame 0x\(String(frame.type.rawValue, radix: 16))")
             }
         }
+    }
+}
+
+// MARK: - Now Playing
+
+/// Snapshot of the Apple TV's current media-playback state, as pushed via
+/// Companion `_iMC` event subscription. All fields are optional because tvOS
+/// is inconsistent about which keys populate for which apps — the `raw` map
+/// preserves everything we saw (stringified) so unknown keys stay inspectable.
+public struct NowPlayingInfo: Equatable, Sendable {
+    public var title: String?
+    public var artist: String?
+    public var album: String?
+    /// User-facing app name (e.g. "TV", "Music", "Netflix"). Usually under key
+    /// `clientName` or `displayName` — we check both.
+    public var app: String?
+    public var elapsedTime: Double?
+    public var duration: Double?
+    /// 0.0 = paused, 1.0 = playing at normal speed. Some apps report other rates.
+    public var playbackRate: Double?
+    /// Every key/value we saw, stringified. Useful for debugging and for any
+    /// field we haven't named above yet.
+    public var raw: [String: String]
+
+    public init(from dict: [String: Any]) {
+        func str(_ keys: String...) -> String? {
+            for k in keys {
+                if let v = dict[k] as? String, !v.isEmpty { return v }
+            }
+            return nil
+        }
+        func num(_ keys: String...) -> Double? {
+            for k in keys {
+                if let v = dict[k] as? Double { return v }
+                if let v = dict[k] as? Int    { return Double(v) }
+                if let v = dict[k] as? String, let d = Double(v) { return d }
+            }
+            return nil
+        }
+        self.title        = str("title", "kMRMediaRemoteNowPlayingInfoTitle")
+        self.artist       = str("artist", "kMRMediaRemoteNowPlayingInfoArtist")
+        self.album        = str("album", "kMRMediaRemoteNowPlayingInfoAlbum")
+        self.app          = str("clientName", "displayName", "bundleIdentifier")
+        self.elapsedTime  = num("elapsedTime", "kMRMediaRemoteNowPlayingInfoElapsedTime")
+        self.duration     = num("duration", "kMRMediaRemoteNowPlayingInfoDuration")
+        self.playbackRate = num("playbackRate", "kMRMediaRemoteNowPlayingInfoPlaybackRate")
+
+        var r: [String: String] = [:]
+        for (k, v) in dict {
+            r[k] = String(describing: v)
+        }
+        self.raw = r
     }
 }
