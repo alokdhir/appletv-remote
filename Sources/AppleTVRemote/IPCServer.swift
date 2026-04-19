@@ -125,14 +125,20 @@ final class IPCServer {
     }
 
     private func installAcceptLoop() {
-        let src = DispatchSource.makeReadSource(fileDescriptor: listenFD, queue: ioQueue)
+        // Run the accept loop on the main queue so `self` (a @MainActor class)
+        // can be touched directly without cross-isolation assertions. A
+        // DispatchSourceRead only fires when a connection is waiting, so
+        // accept() won't block and there's no main-thread starvation risk.
+        // We set O_NONBLOCK on the listen fd too so a spurious wake never
+        // hangs us (accept returns EAGAIN, we bail).
+        _ = Darwin.fcntl(listenFD, F_SETFL, O_NONBLOCK)
+        let src = DispatchSource.makeReadSource(fileDescriptor: listenFD, queue: .main)
         src.setEventHandler { [weak self] in
             guard let self else { return }
             let fd = Darwin.accept(self.listenFD, nil, nil)
             guard fd >= 0 else { return }
-            // Non-blocking so read handlers can drain without stalling.
             _ = Darwin.fcntl(fd, F_SETFL, O_NONBLOCK)
-            Task { @MainActor in self.registerClient(fd: fd) }
+            self.registerClient(fd: fd)
         }
         src.resume()
         acceptSource = src
