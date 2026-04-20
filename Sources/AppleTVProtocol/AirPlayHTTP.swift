@@ -44,9 +44,21 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private let host: String
     private let port: UInt16
     private let queue: DispatchQueue
+    private let bufferLock = NSLock()
     private var readBuffer = Data()
+    private let bufferCond = NSCondition()
+    private var receiveError: Error?
+    private var receiveClosed = false
     private var isReady = false
     private let readyGroup = DispatchGroup()
+
+    private func trace(_ msg: String) {
+        Log.pairing.report("AirPlayHTTP: \(msg)")
+        if verbose { FileHandle.standardError.write(Data("    [http] \(msg)\n".utf8)) }
+    }
+
+    /// When true, mirror every log line to stderr so CLI users can see it live.
+    public var verbose: Bool = false
 
     public init(host: String, port: UInt16) {
         self.host  = host
@@ -72,16 +84,22 @@ public final class AirPlayHTTP: @unchecked Sendable {
             case .ready:
                 if !self.isReady {
                     self.isReady = true
-                    Log.pairing.report("AirPlayHTTP: connected \(self.host):\(self.port)")
+                    self.trace("connected \(self.host):\(self.port)")
                     self.receiveLoop()
                     self.readyGroup.leave()
                 }
             case .failed(let err):
-                Log.pairing.fail("AirPlayHTTP: connection failed: \(err)")
+                self.trace("connection failed: \(err)")
                 if !self.isReady { self.isReady = true; self.readyGroup.leave() }
+            case .waiting(let err):
+                self.trace("waiting: \(err)")
             case .cancelled:
-                break
-            default:
+                self.trace("cancelled")
+            case .preparing:
+                self.trace("preparing")
+            case .setup:
+                self.trace("setup")
+            @unknown default:
                 break
             }
         }
@@ -115,6 +133,8 @@ public final class AirPlayHTTP: @unchecked Sendable {
         var frame = Data(req.utf8)
         frame.append(body)
 
+        self.trace("→ POST \(path) (\(body.count)B body)")
+
         let sendGroup = DispatchGroup()
         sendGroup.enter()
         var sendError: Error?
@@ -134,17 +154,36 @@ public final class AirPlayHTTP: @unchecked Sendable {
 
     /// Receive bytes in the background into `readBuffer`. `readResponse` peels
     /// a complete HTTP/1.1 message off of it.
+    ///
+    /// The NWConnection receive callback already fires on `self.queue`, so we
+    /// append directly — no extra dispatch hop. We signal `bufferCond` after
+    /// each append so `readResponse` can wake instead of busy-waiting.
     private func receiveLoop() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, err in
             guard let self else { return }
+            if let data, !data.isEmpty {
+                self.bufferCond.lock()
+                self.readBuffer.append(data)
+                self.bufferCond.broadcast()
+                self.bufferCond.unlock()
+                self.trace("rx \(data.count)B (buffered=\(self.readBuffer.count))")
+            }
             if let err {
-                Log.pairing.fail("AirPlayHTTP: receive error: \(err)")
+                self.trace("receive error: \(err)")
+                self.bufferCond.lock()
+                self.receiveError = err
+                self.receiveClosed = true
+                self.bufferCond.broadcast()
+                self.bufferCond.unlock()
                 return
             }
-            if let data, !data.isEmpty {
-                self.queue.async { self.readBuffer.append(data) }
+            if isComplete {
+                self.bufferCond.lock()
+                self.receiveClosed = true
+                self.bufferCond.broadcast()
+                self.bufferCond.unlock()
+                return
             }
-            if isComplete { return }
             self.receiveLoop()
         }
     }
@@ -153,12 +192,13 @@ public final class AirPlayHTTP: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         let headerSeparator = Data("\r\n\r\n".utf8)
 
-        while Date() < deadline {
-            var snapshot = Data()
-            queue.sync { snapshot = self.readBuffer }
+        bufferCond.lock()
+        defer { bufferCond.unlock() }
 
-            if let hdrEnd = snapshot.range(of: headerSeparator) {
-                let headerData = snapshot[..<hdrEnd.lowerBound]
+        while true {
+            // Try to parse a complete response out of the current buffer.
+            if let hdrEnd = readBuffer.range(of: headerSeparator) {
+                let headerData = readBuffer[..<hdrEnd.lowerBound]
                 let bodyStart  = hdrEnd.upperBound
                 guard let headerStr = String(data: headerData, encoding: .utf8) else {
                     throw HTTPError.malformedResponse("non-UTF8 headers")
@@ -166,7 +206,6 @@ public final class AirPlayHTTP: @unchecked Sendable {
                 var lines = headerStr.split(separator: "\r\n", omittingEmptySubsequences: false)
                 guard !lines.isEmpty else { throw HTTPError.malformedResponse("no status line") }
                 let statusLine = String(lines.removeFirst())
-                // HTTP/1.1 200 OK
                 let parts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
                 guard parts.count >= 2, let status = Int(parts[1]) else {
                     throw HTTPError.malformedResponse("bad status line: \(statusLine)")
@@ -179,20 +218,60 @@ public final class AirPlayHTTP: @unchecked Sendable {
                         headers[k.lowercased()] = v
                     }
                 }
-                let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
-                let available = snapshot.count - bodyStart
-                if available >= contentLength {
-                    let body = snapshot[bodyStart..<(bodyStart + contentLength)]
-                    let consumed = bodyStart + contentLength
-                    queue.sync {
-                        self.readBuffer.removeFirst(consumed)
+                if verbose {
+                    trace("← \(statusLine)")
+                    for (k, v) in headers.sorted(by: { $0.key < $1.key }) {
+                        trace("    \(k): \(v)")
                     }
-                    return Response(status: status, headers: headers, body: Data(body))
+                }
+                if headers["transfer-encoding"]?.lowercased().contains("chunked") == true {
+                    throw HTTPError.malformedResponse("chunked transfer-encoding not supported")
+                }
+                // IMPORTANT: Data.range(of:) and subscripts use ABSOLUTE
+                // indices relative to the buffer's startIndex (which may be
+                // non-zero after previous removeFirst). So use endIndex-based
+                // math, not count, and never use removeFirst on readBuffer.
+                let available = readBuffer.endIndex - bodyStart
+                if verbose {
+                    trace("    (bodyStart=\(bodyStart) available=\(available) buffered=\(readBuffer.count) startIdx=\(readBuffer.startIndex) endIdx=\(readBuffer.endIndex))")
+                }
+                if let clStr = headers["content-length"], let contentLength = Int(clStr) {
+                    if available >= contentLength {
+                        let bodyEnd = bodyStart + contentLength
+                        let body    = Data(readBuffer[bodyStart..<bodyEnd])
+                        // Normalize startIndex to 0 by rebuilding Data from the tail.
+                        readBuffer = Data(readBuffer[bodyEnd...])
+                        let result = Response(status: status, headers: headers, body: body)
+                        trace("← \(status) (\(contentLength)B body)")
+                        if verbose {
+                            let hex = body.prefix(64).map { String(format: "%02x", $0) }.joined(separator: " ")
+                            trace("    body[0..\(min(64, contentLength))]: \(hex)")
+                        }
+                        return result
+                    }
+                } else {
+                    // No Content-Length. Treat as empty body (AirPlay's
+                    // /pair-pin-start typically responds with just headers).
+                    let result = Response(status: status, headers: headers, body: Data())
+                    readBuffer = Data(readBuffer[bodyStart...])
+                    trace("← \(status) (no content-length, treating as empty)")
+                    return result
                 }
             }
-            // Yield so receiveLoop can append more bytes.
-            Thread.sleep(forTimeInterval: 0.02)
+
+            if let err = receiveError {
+                throw HTTPError.connectionFailed("receive: \(err)")
+            }
+            if receiveClosed && readBuffer.isEmpty {
+                throw HTTPError.connectionFailed("connection closed before response")
+            }
+
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 {
+                throw HTTPError.timeout
+            }
+            // Wait for receiveLoop to broadcast more bytes, or timeout.
+            _ = bufferCond.wait(until: Date().addingTimeInterval(remaining))
         }
-        throw HTTPError.timeout
     }
 }

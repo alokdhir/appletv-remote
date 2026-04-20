@@ -105,8 +105,12 @@ public final class AirPlayPairSetup {
 
     /// Shared headers that AirPlay servers expect. `X-Apple-HKP: 3` selects
     /// the HAP-with-PIN flow (value 4 would be transient, value 6 is M-FI).
+    /// pyatv uses this exact UA (`AirPlay/320.20`). Some tvOS builds gate the
+    /// HAP TLV8 pair-setup path on this UA — with a custom UA the server
+    /// silently falls back to a legacy binary-plist response. Do not change
+    /// this string without testing against a modern Apple TV.
     static let headers: [String: String] = [
-        "User-Agent":   "AppleTVRemote/1.0",
+        "User-Agent":   "AirPlay/320.20",
         "Connection":   "keep-alive",
         "X-Apple-HKP":  "3",
         "Content-Type": "application/octet-stream",
