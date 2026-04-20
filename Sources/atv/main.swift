@@ -42,6 +42,25 @@ func die(_ message: String, code: Int32 = 1) -> Never {
     exit(code)
 }
 
+// MARK: - Version
+
+/// Prints "1.0-YYYYMMDDHHMM" where the suffix is the binary's mtime in the
+/// local timezone. No build-system hooks needed — relinking updates it.
+func printVersion() {
+    let exePath = CommandLine.arguments.first.flatMap {
+        $0.hasPrefix("/") ? $0 : nil
+    } ?? Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments[0]
+    let stamp: String = {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: exePath),
+              let mtime = attrs[.modificationDate] as? Date else { return "unknown" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMddHHmm"
+        fmt.timeZone = TimeZone.current
+        return fmt.string(from: mtime)
+    }()
+    print("1.0-\(stamp)")
+}
+
 // MARK: - IPC client (blocking, single-connection)
 
 final class IPCConnection {
@@ -353,12 +372,14 @@ func cmdStatus(_ conn: IPCConnection) throws {
     // _iMC events only fire on state *changes* — if media started before
     // this session connected, run a command (pp) to trigger the first push.
     if s.nowPlaying == nil, let attn = s.attentionState {
+        // _iMC only pushes on state *changes*. If media started before we
+        // connected, no push has arrived yet — suggest `atv pp` to trigger one.
         let hint: String
         switch attn {
         case 1: hint = dim("screensaver / idle")
-        case 2: hint = cyan("app active")
-        case 3: hint = cyan("media active — run 'atv pp' to sync now-playing")
-        default: hint = dim("state \(attn)")
+        case 2: hint = cyan("app active — run 'atv pp' twice to sync now-playing")
+        case 3: hint = cyan("media active — run 'atv pp' twice to sync now-playing")
+        default: hint = dim("attention state \(attn) — try 'atv pp' twice to sync now-playing")
         }
         print("  \(dim("·")) \(hint)")
     }
@@ -488,7 +509,7 @@ let knownCommands: [String] = [
     "click", "pp", "home", "menu",
     "vol+", "vol-",
     "power", "disconnect", "ping", "completion",
-    "help",
+    "version", "help",
 ]
 
 /// Expand an abbreviated command to its canonical form, or return `input`
@@ -605,6 +626,7 @@ func usage() -> Never {
     print(row("power",                   "Toggle (wake if asleep, sleep if on)"))
     print(row("disconnect",              "Drop the connection"))
     print(row("ping",                    "Round-trip ping to the app"))
+    print(row("version",                 "Print atv version (1.0-<build timestamp>)"))
     print(row("completion <bash|zsh>",   "Emit shell completion script to stdout"))
     print("")
     print(cyan("Standalone mode") + " (no app required, single-shot):")
@@ -679,6 +701,12 @@ do {
     // Help / usage — handle before anything that could auto-launch the app.
     if resolvedCommand == "help" || args[0] == "-h" || args[0] == "--help" {
         usage()
+    }
+
+    // version prints "1.0-<build timestamp>" derived from the binary's mtime,
+    // so every fresh `swift build` bumps it automatically.
+    if resolvedCommand == "version" || args[0] == "-v" || args[0] == "--version" {
+        printVersion(); exit(0)
     }
 
     // completion doesn't touch the socket at all — just dumps the script.
