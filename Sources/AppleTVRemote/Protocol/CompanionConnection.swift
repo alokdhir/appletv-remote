@@ -467,6 +467,10 @@ final class CompanionConnection: ObservableObject {
             let txn = txnCounter; txnCounter &+= 1
             sendEncrypted(OPACK.encodeInterest(events: [event], txn: txn))
         }
+
+        // `_interest` for _iMC causes the ATV to push the current now-playing
+        // state immediately if something is playing, plus future changes.
+        // (FetchNowPlayingInfo returns "No request handler" — not a valid RPC.)
     }
 
     /// Send a `FetchAttentionState` Request every 25 s. The ATV drops idle
@@ -653,14 +657,19 @@ final class CompanionConnection: ObservableObject {
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
 
         // Log every message so we can see what the ATV sends
-        let kvDesc = msg.keys.sorted().map { k -> String in
-            switch msg[k] {
-            case let s as String: return "\(k)=\"\(s)\""
-            case let i as Int:    return "\(k)=\(i)"
-            case let d as Data:   return "\(k)=<\(d.count)B>"
-            default:              return "\(k)=?"
+        func describeValue(_ v: Any?) -> String {
+            switch v {
+            case let s as String:        return "\"\(s)\""
+            case let i as Int:           return "\(i)"
+            case let f as Double:        return "\(f)"
+            case let d as Data:          return "<\(d.count)B>"
+            case let dict as [String: Any]:
+                let inner = dict.keys.sorted().map { "\($0)=\(describeValue(dict[$0]))" }.joined(separator: ",")
+                return "{\(inner)}"
+            default:                     return "?"
             }
-        }.joined(separator: " ")
+        }
+        let kvDesc = msg.keys.sorted().map { k in "\(k)=\(describeValue(msg[k]))" }.joined(separator: " ")
         Log.companion.report("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
 
         switch identifier {
@@ -673,18 +682,18 @@ final class CompanionConnection: ObservableObject {
         case "_pong":
             break
         case "_iMC":
-            // Media-control event. The payload sits in the `_c` sub-dict;
-            // pyatv-equivalent field names we know about include title,
-            // artist, album, clientName (the app), elapsedTime, duration,
-            // and playbackRate. Apple's tvOS is inconsistent about which
-            // keys populate — we read defensively and keep any new keys
-            // in `raw` for the user to inspect.
-            let inner = (msg["_c"] as? [String: Any]) ?? msg
-            nowPlaying = NowPlayingInfo(from: inner)
-            Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
+            // Media-control push event. Payload is in `_c`.
+            updateNowPlaying(from: msg)
         default:
             break
         }
+    }
+
+    private func updateNowPlaying(from msg: [String: Any]) {
+        // Media-control data lives in `_c`; some responses put it top-level.
+        let inner = (msg["_c"] as? [String: Any]) ?? msg
+        nowPlaying = NowPlayingInfo(from: inner)
+        Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
     }
 
     private func sendEncrypted(_ opackData: Data) {
