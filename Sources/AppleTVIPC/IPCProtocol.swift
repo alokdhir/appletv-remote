@@ -136,16 +136,21 @@ public struct IPCStatus: Codable, Sendable {
     public let connectionState: String     // matches ConnectionState.displayText
     public let isReconnecting: Bool
     public let nowPlaying: IPCNowPlaying?
+    /// Companion FetchAttentionState result. 1 = idle/screensaver, 2 = app focused.
+    /// Nil until the first keepalive fires (25 s after connect).
+    public let attentionState: Int?
 
     public init(deviceID: String?, deviceName: String?, host: String?,
                 connectionState: String, isReconnecting: Bool,
-                nowPlaying: IPCNowPlaying? = nil) {
+                nowPlaying: IPCNowPlaying? = nil,
+                attentionState: Int? = nil) {
         self.deviceID = deviceID
         self.deviceName = deviceName
         self.host = host
         self.connectionState = connectionState
         self.isReconnecting = isReconnecting
         self.nowPlaying = nowPlaying
+        self.attentionState = attentionState
     }
 }
 

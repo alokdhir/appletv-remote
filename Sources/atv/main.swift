@@ -349,6 +349,19 @@ func cmdStatus(_ conn: IPCConnection) throws {
     let host = s.host.map { dim(" · \($0)") } ?? ""
     let state = colorForState(s.connectionState)
     print("\(name)\(host)  \(state)")
+    // Show attention state when no _iMC media info has arrived yet.
+    // _iMC events only fire on state *changes* — if media started before
+    // this session connected, run a command (pp) to trigger the first push.
+    if s.nowPlaying == nil, let attn = s.attentionState {
+        let hint: String
+        switch attn {
+        case 1: hint = dim("screensaver / idle")
+        case 2: hint = cyan("app active")
+        case 3: hint = cyan("media active — run 'atv pp' to sync now-playing")
+        default: hint = dim("state \(attn)")
+        }
+        print("  \(dim("·")) \(hint)")
+    }
     if let np = s.nowPlaying {
         // Transport-state glyph: ▶ playing, ⏸ paused, ⏵ unknown/other.
         // Derived from playbackRate where possible (0 = paused, 1 = playing).

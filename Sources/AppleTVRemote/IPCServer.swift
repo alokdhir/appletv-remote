@@ -310,7 +310,8 @@ final class IPCServer {
                          host: connection.currentDevice?.host,
                          connectionState: connection.state.displayText,
                          isReconnecting: reconnector.isReconnecting,
-                         nowPlaying: np)
+                         nowPlaying: np,
+                         attentionState: connection.attentionState)
     }
 
     private func resolveDevice(_ nameOrID: String) -> AppleTVDevice? {

@@ -40,6 +40,12 @@ final class CompanionConnection: ObservableObject {
     private var recvNonce: UInt64 = 0
     private var txnCounter: UInt32 = 0
 
+    // Transaction ID of the _sessionStart request. Once the ATV responds to
+    // this txn, we know the session is fully established and safe to subscribe
+    // to _iMC events. Sending _interest before this causes the ATV to ignore
+    // the subscription (it hasn't finished setting up the session yet).
+    private var sessionStartTxn: UInt32?
+
     // Heartbeat — the ATV closes idle Companion sockets at ~38 s.
     // FetchAttentionState is a real Request the ATV actually replies to,
     // so the reply traffic refreshes its idle timer. _systemInfo is ignored
@@ -57,8 +63,13 @@ final class CompanionConnection: ObservableObject {
 
     /// Most recent Now Playing payload the ATV has volunteered via `_iMC`
     /// event subscription. Nil until the ATV pushes its first update after
-    /// session start, or when the session tears down.
+    /// a media-state change occurs while connected.
     @Published var nowPlaying: NowPlayingInfo?
+
+    /// Most recent attention state reported by `FetchAttentionState`.
+    /// 1 = screensaver/idle, 2 = app in foreground, 3 = some apps use other values.
+    /// Nil until first keepalive response.
+    @Published var attentionState: Int?
 
     // MARK: - Connect / Disconnect
 
@@ -350,6 +361,8 @@ final class CompanionConnection: ObservableObject {
         encryptKey = nil
         decryptKey = nil
         sendWakeOnConnect = false
+        sessionStartTxn = nil
+        attentionState = nil
     }
 
     // MARK: - Remote Commands (post-session)
@@ -454,23 +467,15 @@ final class CompanionConnection: ObservableObject {
 
         let txn3 = txnCounter; txnCounter &+= 1
         let localSID = UInt32.random(in: 0..<UInt32.max)
+        sessionStartTxn = txn3
         sendEncrypted(OPACK.encodeSessionStart(txn: txn3, localSID: localSID))
 
         let txn4 = txnCounter; txnCounter &+= 1
         sendEncrypted(OPACK.encodeTextInputStart(txn: txn4))
 
-        // Subscribe to event streams — the ATV pushes state changes over these
-        // channels. On an idle ATV those pushes are rare, so on their own they
-        // don't prevent the ~38 s idle close; see startKeepalive() for the real
-        // heartbeat. `_interest` is an Event (_t:1), fire-and-forget.
-        for event in ["_iMC", "SystemStatus", "TVSystemStatus"] {
-            let txn = txnCounter; txnCounter &+= 1
-            sendEncrypted(OPACK.encodeInterest(events: [event], txn: txn))
-        }
-
-        // `_interest` for _iMC causes the ATV to push the current now-playing
-        // state immediately if something is playing, plus future changes.
-        // (FetchNowPlayingInfo returns "No request handler" — not a valid RPC.)
+        // _interest subscriptions are sent from handleOPACKMessage once we
+        // receive the ATV's _sessionStart response — sending them before that
+        // causes the ATV to silently ignore them (session not yet ready).
     }
 
     /// Send a `FetchAttentionState` Request every 25 s. The ATV drops idle
@@ -605,6 +610,7 @@ final class CompanionConnection: ObservableObject {
                 decryptKey = pairVerify?.sessionDecryptKey
                 state = .connected
                 startCompanionSession()
+                startKeepalive()
                 if sendWakeOnConnect {
                     sendWakeOnConnect = false
                     // Small delay to let the session handshake complete before
@@ -684,8 +690,30 @@ final class CompanionConnection: ObservableObject {
         case "_iMC":
             // Media-control push event. Payload is in `_c`.
             updateNowPlaying(from: msg)
+        case "FetchAttentionState":
+            // Some ATV firmwares include _i in the response; handle here too.
+            if let inner = msg["_c"] as? [String: Any],
+               let st = inner["state"] as? Int {
+                attentionState = st
+                Log.companion.report("Companion: attentionState=\(st)")
+            }
         default:
-            break
+            let msgType = msg["_t"] as? Int ?? 0
+            // Detect _sessionStart response (has no _i, matched by txn).
+            if let sst = sessionStartTxn, txn == sst, msgType == 3 {
+                sessionStartTxn = nil
+                Log.companion.report("Companion: session confirmed, subscribing to events")
+                let t = txnCounter; txnCounter &+= 1
+                sendEncrypted(OPACK.encodeInterest(
+                    events: ["_iMC", "SystemStatus", "TVSystemStatus"], txn: t))
+            }
+            // Detect FetchAttentionState response (no _i, has _c.state).
+            if msgType == 3,
+               let inner = msg["_c"] as? [String: Any],
+               let st = inner["state"] as? Int {
+                attentionState = st
+                Log.companion.report("Companion: attentionState=\(st)")
+            }
         }
     }
 

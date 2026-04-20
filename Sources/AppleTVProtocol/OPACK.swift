@@ -268,7 +268,7 @@ public enum OPACK {
     public static func encodeInterest(events: [String], txn: UInt32) -> Data {
         pack([
             "_i": "_interest",
-            "_t": 1,
+            "_t": 1,    // Event (fire-and-forget) — ATV silently ignores _t:2 for _interest
             "_x": txn,
             "_c": [
                 "_regEvents": events as [Any],
