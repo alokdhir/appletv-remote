@@ -460,6 +460,104 @@ func cmdPower(_ conn: IPCConnection) throws {
     expectOk(r)
 }
 
+// MARK: - AirPlay pair / verify (Phase 1 probe)
+
+/// Runs AirPlay pair-setup against a TV directly — no IPC/app involvement.
+/// Asks the app for the device list only to resolve a name → (host, id).
+/// On success writes <id>.airplay.json to Application Support.
+func cmdPairAirPlay(_ conn: IPCConnection, device: String) throws {
+    let listResp = try conn.request(.list)
+    guard let devices = listResp.devices else { die("no device list from server") }
+    guard let tv = devices.first(where: { $0.name == device || $0.id == device }) else {
+        die("device '\(device)' not found — run 'atv list' to see known TVs")
+    }
+    guard let host = tv.host else {
+        die("device '\(device)' has no resolved host yet — try 'atv list' first")
+    }
+    try runAirPlayPair(host: host, deviceID: tv.id, displayName: tv.name)
+}
+
+/// Shared AirPlay pair flow used by both IPC-backed and --standalone paths.
+func runAirPlayPair(host: String, deviceID: String, displayName: String) throws {
+    let http = AirPlayHTTP(host: host, port: 7000)
+    print(cyan("AirPlay: connecting to \(displayName) (\(host):7000)…"))
+    do {
+        try http.connect(timeoutSeconds: 5)
+    } catch {
+        die("AirPlay: TCP connect failed: \(error)")
+    }
+    defer { http.close() }
+
+    let setup = AirPlayPairSetup(http: http)
+    do {
+        try setup.beginPairing()
+    } catch {
+        die("AirPlay pair-setup M1/M2 failed: \(error)")
+    }
+
+    fputs(cyan("Enter PIN shown on \(displayName): "), stdout); fflush(stdout)
+    guard let pin = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespaces),
+          !pin.isEmpty else {
+        die("no PIN supplied")
+    }
+
+    let creds: AirPlayCredentials
+    do {
+        creds = try setup.completePairing(pin: pin)
+    } catch {
+        die("AirPlay pair-setup M3-M6 failed: \(error)")
+    }
+
+    CredentialStore().saveAirPlay(creds, for: deviceID)
+    print(green("✓ AirPlay paired with \(displayName)"))
+    print(dim("  atvID:    \(String(data: creds.atvID, encoding: .utf8) ?? creds.atvID.map { String(format: "%02x", $0) }.joined())"))
+    print(dim("  clientID: \(String(data: creds.clientID, encoding: .utf8) ?? "?")"))
+    print(dim("  pyatv-format credentials:"))
+    print(dim("  \(creds.pyatvString)"))
+
+    // Immediately try pair-verify to confirm the credentials actually work
+    // before the user moves on. This is the Phase 1 end-to-end gate.
+    print(cyan("AirPlay: verifying credentials…"))
+    // Need a fresh connection — pair-verify is a separate TCP session.
+    let http2 = AirPlayHTTP(host: host, port: 7000)
+    do { try http2.connect(timeoutSeconds: 5) } catch {
+        die("AirPlay verify: TCP connect failed: \(error)")
+    }
+    defer { http2.close() }
+    do {
+        let keys = try AirPlayPairVerify(http: http2, credentials: creds).verify()
+        print(green("✓ AirPlay pair-verify succeeded"))
+        print(dim("  writeKey: \(keys.writeKey.prefix(8).map{String(format:"%02x",$0)}.joined())…"))
+        print(dim("  readKey:  \(keys.readKey.prefix(8).map{String(format:"%02x",$0)}.joined())…"))
+    } catch {
+        die("AirPlay pair-verify failed: \(error)")
+    }
+}
+
+/// Re-runs pair-verify using previously saved credentials. Useful for
+/// debugging after the initial pair, and serves as the Phase 1 gate when
+/// chained with `pair-airplay`.
+func cmdAirPlayVerify(_ conn: IPCConnection, device: String) throws {
+    let listResp = try conn.request(.list)
+    guard let devices = listResp.devices else { die("no device list from server") }
+    guard let tv = devices.first(where: { $0.name == device || $0.id == device }) else {
+        die("device '\(device)' not found")
+    }
+    guard let host = tv.host else {
+        die("device '\(device)' has no resolved host")
+    }
+    guard let creds = CredentialStore().loadAirPlay(deviceID: tv.id) else {
+        die("no AirPlay credentials for \(tv.name) — run 'atv pair-airplay \(device)' first")
+    }
+    let http = AirPlayHTTP(host: host, port: 7000)
+    try http.connect(timeoutSeconds: 5)
+    defer { http.close() }
+    let keys = try AirPlayPairVerify(http: http, credentials: creds).verify()
+    print(green("✓ AirPlay pair-verify succeeded against \(tv.name)"))
+    print(dim("  writeKey: \(keys.writeKey.prefix(8).map{String(format:"%02x",$0)}.joined())…"))
+    print(dim("  readKey:  \(keys.readKey.prefix(8).map{String(format:"%02x",$0)}.joined())…"))
+}
+
 func cmdPair(_ conn: IPCConnection, device: String) throws {
     // Start pairing — server responds to the original pair-start request
     // only after pairing completes (or fails). PIN is requested via event.
@@ -509,6 +607,7 @@ let knownCommands: [String] = [
     "click", "pp", "home", "menu",
     "vol+", "vol-",
     "power", "disconnect", "ping", "completion",
+    "pair-airplay", "airplay-verify",
     "version", "help",
 ]
 
@@ -616,6 +715,8 @@ func usage() -> Never {
     print(row("status",                  "Default device + connection state"))
     print(row("select <name>",           "Set default device (enables auto-connect)"))
     print(row("pair <name>",             "Pair with an Apple TV (prompts for PIN)"))
+    print(row("pair-airplay <name>",     "Pair for now-playing info (AirPlay; prompts for PIN)"))
+    print(row("airplay-verify <name>",   "Test stored AirPlay credentials"))
     print(row("l | r | u | d",           "D-pad left / right / up / down"))
     print(row("sl | sr | su | sd",       "Trackpad swipe left / right / up / down"))
     print(row("click",                   "Click (D-pad centre)"))
@@ -806,6 +907,12 @@ do {
     case "pair":
         guard args.count >= 2 else { die("pair requires a device name") }
         try cmdPair(conn, device: args[1])
+    case "pair-airplay":
+        guard args.count >= 2 else { die("pair-airplay requires a device name") }
+        try cmdPairAirPlay(conn, device: args[1])
+    case "airplay-verify":
+        guard args.count >= 2 else { die("airplay-verify requires a device name") }
+        try cmdAirPlayVerify(conn, device: args[1])
     case "l":           try cmdKey(conn, key: .left)
     case "r":           try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)
