@@ -480,7 +480,6 @@ func cmdPairAirPlay(_ conn: IPCConnection, device: String) throws {
 /// Shared AirPlay pair flow used by both IPC-backed and --standalone paths.
 func runAirPlayPair(host: String, deviceID: String, displayName: String) throws {
     let http = AirPlayHTTP(host: host, port: 7000)
-    http.verbose = true
     print(cyan("AirPlay: connecting to \(displayName) (\(host):7000)…"))
     do {
         try http.connect(timeoutSeconds: 5)
@@ -521,7 +520,6 @@ func runAirPlayPair(host: String, deviceID: String, displayName: String) throws 
     print(cyan("AirPlay: verifying credentials…"))
     // Need a fresh connection — pair-verify is a separate TCP session.
     let http2 = AirPlayHTTP(host: host, port: 7000)
-    http2.verbose = true
     do { try http2.connect(timeoutSeconds: 5) } catch {
         die("AirPlay verify: TCP connect failed: \(error)")
     }
