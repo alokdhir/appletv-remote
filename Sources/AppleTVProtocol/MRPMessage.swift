@@ -13,11 +13,34 @@ public enum MRPMessage {
 
     // MARK: - Message type IDs
 
+    // MARK: - Message type IDs and extension field numbers
+    //
+    // In MRP's ProtocolMessage protobuf the inner message is carried as an
+    // extension field. The extension field NUMBER is NOT the same as the
+    // ProtocolMessage.Type enum value — they are independently assigned.
+    // Using the wrong field number causes the ATV to silently ignore the
+    // message (no now-playing push, etc).
+    //
+    // Source: pyatv protobuf/XXXMessage_pb2.py .number attributes.
+
     private enum MessageType: Int32 {
-        case deviceInfo         = 15  // DEVICE_INFO_MESSAGE
-        case clientUpdates      = 16  // CLIENT_UPDATES_CONFIG_MESSAGE
-        case sendHIDEvent       = 8   // SEND_HID_EVENT_MESSAGE (key up/down)
-        case setConnectionState = 38  // SET_CONNECTION_STATE_MESSAGE
+        case deviceInfo         = 15  // DEVICE_INFO_MESSAGE (ext field 20)
+        case clientUpdates      = 16  // CLIENT_UPDATES_CONFIG_MESSAGE (ext field 21)
+        case sendHIDEvent       = 8   // SEND_HID_EVENT_MESSAGE (ext field 13)
+        case setConnectionState = 38  // SET_CONNECTION_STATE_MESSAGE (ext field 42)
+        case getKeyboardSession = 24  // GET_KEYBOARD_SESSION_MESSAGE (ext field 29)
+
+        /// The protobuf extension field number that carries this message's
+        /// inner payload. This differs from the Type enum rawValue.
+        var extensionField: Int {
+            switch self {
+            case .deviceInfo:         return 20
+            case .clientUpdates:      return 21
+            case .sendHIDEvent:       return 13
+            case .setConnectionState: return 42
+            case .getKeyboardSession: return 29
+            }
+        }
     }
 
     // MARK: - HID usages for SendCommandMessage
@@ -45,66 +68,65 @@ public enum MRPMessage {
         inner.appendStringField(fieldNumber: 1, value: uniqueIdentifier)
         inner.appendStringField(fieldNumber: 2, value: "Mac Remote")
         inner.appendStringField(fieldNumber: 3, value: "iPhone")                // localizedModelName
+        inner.appendStringField(fieldNumber: 4, value: "18G82")                 // systemBuildVersion
         inner.appendStringField(fieldNumber: 5, value: "com.apple.TVRemote")    // applicationBundleIdentifier
         inner.appendStringField(fieldNumber: 6, value: "344.28")                // applicationBundleVersion
         inner.appendVarintField(fieldNumber: 7, value: 1)                       // protocolVersion
         inner.appendVarintField(fieldNumber: 8, value: 108)                     // lastSupportedMessageType
-        inner.appendBoolField(fieldNumber: 9, value: true)                      // supportsSystemPairing
-        inner.appendBoolField(fieldNumber: 10, value: true)                     // allowsPairing
+        inner.appendBoolField(fieldNumber: 9, value: true)   // supportsSystemPairing
+        inner.appendBoolField(fieldNumber: 10, value: true)  // allowsPairing
+        inner.appendStringField(fieldNumber: 12, value: "com.apple.TVMusic")    // systemMediaApplication
         inner.appendBoolField(fieldNumber: 13, value: true)                     // supportsACL
         inner.appendBoolField(fieldNumber: 14, value: true)                     // supportsSharedQueue
+        inner.appendBoolField(fieldNumber: 15, value: true)                     // supportsExtendedMotion
         inner.appendVarintField(fieldNumber: 17, value: 2)                      // sharedQueueVersion
+        inner.appendVarintField(fieldNumber: 21, value: 1)                      // deviceClass = iPhone
+        inner.appendVarintField(fieldNumber: 22, value: 1)                      // logicalDeviceCount
 
-        var outer = Data()
-        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.deviceInfo.rawValue))
-        outer.appendBytesField(fieldNumber: Int(MessageType.deviceInfo.rawValue), value: inner)
-        return frameLengthPrefixed(outer)
+        return makeMessage(type: .deviceInfo, inner: inner)
     }
 
     /// SET_CONNECTION_STATE_MESSAGE — tells the ATV we are "Connected" (state=1).
     public static func setConnectionState() -> Data {
         var inner = Data()
-        inner.appendVarintField(fieldNumber: 1, value: 1)   // state = Connected
-
-        var outer = Data()
-        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.setConnectionState.rawValue))
-        outer.appendBytesField(fieldNumber: Int(MessageType.setConnectionState.rawValue), value: inner)
-        return frameLengthPrefixed(outer)
+        inner.appendVarintField(fieldNumber: 1, value: 2)   // state = Connected (enum value 2)
+        return makeMessage(type: .setConnectionState, inner: inner)
     }
 
     /// CLIENT_UPDATES_CONFIG_MESSAGE — subscribe to now-playing + volume pushes.
     public static func clientUpdatesConfig() -> Data {
         var inner = Data()
         inner.appendBoolField(fieldNumber: 1, value: true)   // artworkUpdates
-        inner.appendBoolField(fieldNumber: 2, value: true)   // nowPlayingUpdates
+        inner.appendBoolField(fieldNumber: 2, value: false)  // nowPlayingUpdates (pyatv default)
         inner.appendBoolField(fieldNumber: 3, value: true)   // volumeUpdates
-        inner.appendBoolField(fieldNumber: 4, value: false)  // keyboardUpdates
-
-        var outer = Data()
-        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.clientUpdates.rawValue))
-        outer.appendBytesField(fieldNumber: Int(MessageType.clientUpdates.rawValue), value: inner)
-        return frameLengthPrefixed(outer)
+        inner.appendBoolField(fieldNumber: 4, value: true)   // keyboardUpdates
+        inner.appendBoolField(fieldNumber: 5, value: true)   // outputDeviceUpdates
+        return makeMessage(type: .clientUpdates, inner: inner)
     }
 
-    /// SEND_COMMAND_MESSAGE — encodes key-down + key-up for a HID usage.
-    public static func remoteCommand(_ command: AppleTVRemoteCommand) -> Data? {
-        guard let usage = hidUsage(for: command) else { return nil }
-        var result = Data()
-        result.append(keyEvent(usage: usage, down: true))
-        result.append(keyEvent(usage: usage, down: false))
-        return result
+    /// GET_KEYBOARD_SESSION_MESSAGE — sent after CLIENT_UPDATES_CONFIG to complete
+    /// the pyatv-standard init sequence; triggers the ATV to push now-playing state.
+    public static func getKeyboardSession() -> Data {
+        return makeMessage(type: .getKeyboardSession, inner: Data())
     }
 
-    // MARK: - Private helpers
-
-    private static func keyEvent(usage: HIDUsage, down: Bool) -> Data {
-        var inner = Data()
-        inner.appendVarintField(fieldNumber: 1, value: Int64(usage.rawValue))
-        inner.appendBoolField(fieldNumber: 2, value: down)
-
+    /// Wrap an inner message in a ProtocolMessage envelope with the required
+    /// errorCode (field 4 = 0) and uniqueIdentifier (field 85 = UUID) fields
+    /// that pyatv always includes. The ATV appears to silently ignore messages
+    /// that lack these fields.
+    ///
+    /// Field 2 (`identifier`) is set to a new UUID so the ATV can correlate
+    /// its response to this specific request — pyatv's `send_and_receive` always
+    /// sets this field and the ATV appears to require it to trigger state pushes.
+    private static func makeMessage(type: MessageType, inner: Data) -> Data {
         var outer = Data()
-        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.sendHIDEvent.rawValue))
-        outer.appendBytesField(fieldNumber: Int(MessageType.sendHIDEvent.rawValue), value: inner)
+        outer.appendVarintField(fieldNumber: 1, value: Int64(type.rawValue))    // type enum
+        outer.appendStringField(fieldNumber: 2, value: UUID().uuidString.uppercased()) // identifier
+        outer.appendVarintField(fieldNumber: 4, value: 0)                       // errorCode
+        outer.appendStringField(fieldNumber: 85, value: UUID().uuidString.uppercased()) // uniqueIdentifier
+        if !inner.isEmpty {
+            outer.appendBytesField(fieldNumber: type.extensionField, value: inner) // inner (extension field)
+        }
         return frameLengthPrefixed(outer)
     }
 

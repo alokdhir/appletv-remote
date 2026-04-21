@@ -49,9 +49,10 @@ public enum AirPlayTunnel {
         public let rtsp:      EncryptedAirPlayRTSP
         /// The MRP data channel — ready to receive now-playing pushes.
         public let mrp:       MRPDataChannel
-        /// Event channel TCP connection — not used for data, kept alive so
-        /// tvOS doesn't tear down the RTSP control session.
-        public let eventConn: NWConnection
+        /// Event channel — HAP-encrypted RTSP channel used by the ATV to push
+        /// device capabilities. Must be kept alive (and responded to) so the
+        /// ATV sends MRP now-playing pushes on the data channel.
+        public let event: AirPlayEventChannel
     }
 
     // MARK: - Open (control only, for pair-verify gate)
@@ -73,6 +74,8 @@ public enum AirPlayTunnel {
     /// (DEVICE_INFO → SET_CONNECTION_STATE → CLIENT_UPDATES_CONFIG) has been sent.
     public static func open(host: String,
                             credentials: AirPlayCredentials,
+                            mrpClientID: String? = nil,
+                            onMessage: ((Data) -> Void)? = nil,
                             connectTimeout: TimeInterval = 5) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
@@ -117,16 +120,21 @@ public enum AirPlayTunnel {
         // carries no useful data for our use-case (remote-control only),
         // but the TCP connection must exist. Keys are derived the same way
         // as pair-verify but with fixed "Events-Salt" salt.
-        let evOutKey = HKDF<SHA512>.deriveKey(
-            inputKeyMaterial: SymmetricKey(data: sharedSecret),
-            salt:             Data("Events-Salt".utf8),
-            info:             Data("Events-Write-Encryption-Key".utf8),
-            outputByteCount:  32
-        )
-        let evInKey = HKDF<SHA512>.deriveKey(
+        // pyatv verify2(salt, output_info="Events-Read-Encryption-Key",
+        //                     input_info="Events-Write-Encryption-Key"):
+        //   output_key (encrypt outgoing, client→ATV) = hkdf(info="Events-Read-Encryption-Key")
+        //   input_key  (decrypt incoming, ATV→client) = hkdf(info="Events-Write-Encryption-Key")
+        // So our HAPSession writeKey = Read-info, readKey = Write-info.
+        let evWriteKey = HKDF<SHA512>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: sharedSecret),
             salt:             Data("Events-Salt".utf8),
             info:             Data("Events-Read-Encryption-Key".utf8),
+            outputByteCount:  32
+        )
+        let evReadKey = HKDF<SHA512>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: sharedSecret),
+            salt:             Data("Events-Salt".utf8),
+            info:             Data("Events-Write-Encryption-Key".utf8),
             outputByteCount:  32
         )
         let eventEndpoint = NWEndpoint.hostPort(
@@ -152,12 +160,12 @@ public enum AirPlayTunnel {
             throw OpenError.setup("event channel TCP connect to \(host):\(eventPort) failed")
         }
         Log.pairing.report("AirPlayTunnel: event channel TCP connected (\(host):\(eventPort))")
-        // Hold the event connection and its HAP session alive for the tunnel lifetime.
         let evSession = HAPSession(
-            writeKey: evOutKey.withUnsafeBytes { Data($0) },
-            readKey:  evInKey.withUnsafeBytes  { Data($0) }
+            writeKey: evWriteKey.withUnsafeBytes { Data($0) },
+            readKey:  evReadKey.withUnsafeBytes  { Data($0) }
         )
-        _ = evSession  // retained by tunnel below
+        let eventChannel = AirPlayEventChannel(connection: eventConn, session: evSession)
+        eventChannel.start()
 
         // RECORD.
         let rRecord = try rtsp.request(method: "RECORD", uri: rtspURI)
@@ -239,11 +247,20 @@ public enum AirPlayTunnel {
             readKey:  inKey.withUnsafeBytes  { Data($0) }
         )
         let mrp = MRPDataChannel(connection: dataConn, session: dataSession)
+        // Install the message callback BEFORE starting the receive loop and
+        // sending init messages — the ATV may send its DEVICE_INFO response
+        // and now-playing burst immediately after receiving our DEVICE_INFO,
+        // which would arrive while open() is still executing (before the caller
+        // can set onMessage on the returned Tunnel).
+        mrp.onMessage = onMessage
         mrp.start()
         Log.pairing.report("AirPlayTunnel: MRP data channel up")
 
-        // MRP init sequence.
-        let uid = UUID().uuidString
+        // MRP init sequence. Use the Companion client ID if provided — the ATV
+        // recognizes it from prior Companion pairing and immediately pushes
+        // now-playing state. Without it the ATV silently accepts our messages
+        // but does not push state (confirmed by comparing with pyatv's wire trace).
+        let uid = mrpClientID ?? UUID().uuidString.uppercased()
         do {
             try mrp.send(MRPMessage.deviceInfo(uniqueIdentifier: uid))
             Log.pairing.report("AirPlayTunnel: sent DEVICE_INFO")
@@ -251,11 +268,13 @@ public enum AirPlayTunnel {
             Log.pairing.report("AirPlayTunnel: sent SET_CONNECTION_STATE")
             try mrp.send(MRPMessage.clientUpdatesConfig())
             Log.pairing.report("AirPlayTunnel: sent CLIENT_UPDATES_CONFIG")
+            try mrp.send(MRPMessage.getKeyboardSession())
+            Log.pairing.report("AirPlayTunnel: sent GET_KEYBOARD_SESSION")
         } catch {
             throw OpenError.mrpInit("\(error)")
         }
 
-        return Tunnel(rtsp: rtsp, mrp: mrp, eventConn: eventConn)
+        return Tunnel(rtsp: rtsp, mrp: mrp, event: eventChannel)
     }
 
     // MARK: - Shared HTTP setup (pair-verify + HAP session)

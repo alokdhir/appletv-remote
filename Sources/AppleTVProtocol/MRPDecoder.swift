@@ -2,24 +2,21 @@ import Foundation
 
 /// Decodes inbound MRP ProtocolMessage payloads into typed Swift values.
 ///
-/// Relevant message types (from pyatv protobuf defs):
+/// Wire structure (all lengths/types verified against pyatv protobuf defs):
 ///
-///   Type 30  SET_STATE_MESSAGE
-///     Extension field 30 → SetStateMessage
-///       field 1  playbackState : int32   (1=playing, 2=paused, 3=stopped, 5=seeking)
+///   SET_STATE_MESSAGE (type=4, ext field=9 → SetStateMessage)
+///     SetStateMessage
+///       field 3: PlaybackQueue
+///         field 2 (repeated): ContentItem
+///           field 2: ContentItemMetadata
+///             field  1: title            : string
+///             field  6: albumName        : string
+///             field  7: trackArtistName  : string
+///             field 14: duration         : double
+///             field 35: elapsedTime      : double
+///       field 6: playbackState   : enum  (1=playing, 2=paused, 3=stopped, 5=seeking)
+///       field 11: playbackStateTimestamp : double
 ///
-///   Type 40  NOW_PLAYING_INFO_MESSAGE
-///   Type 45  CONTENT_ITEM_UPDATE_MESSAGE
-///     Extension field 40/45 → ContentItemMessage
-///       field 1 (repeated) ContentItem
-///         field 5 metadata : ContentItemMetadata
-///           field 1  title        : string
-///           field 4  artist       : string
-///           field 7  albumTitle   : string
-///
-/// References:
-///   pyatv/protocols/mrp/protobuf/SetStateMessage.proto
-///   pyatv/protocols/mrp/protobuf/ContentItemMessage.proto
 public enum MRPDecoder {
 
     // MARK: - Public entry point
@@ -29,9 +26,8 @@ public enum MRPDecoder {
     public static func decodeNowPlaying(from data: Data) -> MRPNowPlayingUpdate? {
         guard let msgType = data.protobufVarintField(fieldNumber: 1) else { return nil }
         switch msgType {
-        case 30:      return decodeSetState(data)
-        case 40, 45:  return decodeContentItem(data)
-        default:      return nil
+        case 4:  return decodeSetState(data)
+        default: return nil
         }
     }
 
@@ -40,80 +36,36 @@ public enum MRPDecoder {
         data.protobufVarintField(fieldNumber: 1)
     }
 
-    // MARK: - SET_STATE_MESSAGE (type 30)
+    // MARK: - SET_STATE_MESSAGE (type 4, ext field 9)
 
-    private static func decodeSetState(_ data: Data) -> MRPNowPlayingUpdate? {
-        guard let inner = data.protobufBytesField(fieldNumber: 30) else { return nil }
-        guard let stateInt = inner.protobufVarintField(fieldNumber: 1) else { return nil }
-
-        let rate: Double
-        switch stateInt {
-        case 1:  rate = 1.0
-        case 2:  rate = 0.0
-        case 3:  rate = 0.0
-        case 5:  rate = 1.0
-        default: rate = 0.0
-        }
+    private static func decodeSetState(_ outer: Data) -> MRPNowPlayingUpdate? {
+        // Extension field 9 carries SetStateMessage bytes.
+        guard let ssm = outer.protobufBytesField(fieldNumber: 9) else { return nil }
 
         var u = MRPNowPlayingUpdate()
-        u.playbackRate = rate
-        return u
-    }
 
-    // MARK: - CONTENT_ITEM_UPDATE_MESSAGE (type 40 / 45)
-
-    private static func decodeContentItem(_ data: Data) -> MRPNowPlayingUpdate? {
-        let inner = data.protobufBytesField(fieldNumber: 45)
-                 ?? data.protobufBytesField(fieldNumber: 40)
-        guard let inner else { return nil }
-
-        var offset = 0
-        while offset < inner.count {
-            guard let tag = inner.readVarintFrom(offset: &offset) else { break }
-            let wireType = Int(tag & 0x7)
-            let field    = Int(tag >> 3)
-
-            switch wireType {
-            case 2:
-                guard let len = inner.readVarintFrom(offset: &offset) else { return nil }
-                let end = offset + Int(len)
-                if field == 1, end <= inner.count {
-                    let itemData = Data(inner[inner.index(inner.startIndex, offsetBy: offset)..<inner.index(inner.startIndex, offsetBy: end)])
-                    if let update = decodeContentItemEntry(itemData) { return update }
-                }
-                offset = end
-            case 0:
-                guard inner.readVarintFrom(offset: &offset) != nil else { return nil }
-            default:
-                return nil
-            }
+        // playbackState (field 6): 1=playing, 2=paused, 3=stopped, 5=seeking
+        if let st = ssm.protobufVarintField(fieldNumber: 6) {
+            u.playbackRate = (st == 1 || st == 5) ? 1.0 : 0.0
+            u.playbackState = Int(st)
         }
-        return nil
-    }
 
-    private static func decodeContentItemEntry(_ data: Data) -> MRPNowPlayingUpdate? {
-        guard let meta = data.protobufBytesField(fieldNumber: 5) else { return nil }
-
-        var u = MRPNowPlayingUpdate()
-        var offset = 0
-        while offset < meta.count {
-            guard let tag = meta.readVarintFrom(offset: &offset) else { break }
-            let wireType = Int(tag & 0x7)
-            let field    = Int(tag >> 3)
-
-            switch (wireType, field) {
-            case (2, 1):  u.title  = meta.readStringField(at: &offset)
-            case (2, 4):  u.artist = meta.readStringField(at: &offset)
-            case (2, 7):  u.album  = meta.readStringField(at: &offset)
-            case (0, _):
-                guard meta.readVarintFrom(offset: &offset) != nil else { return u }
-            case (2, _):
-                guard let len = meta.readVarintFrom(offset: &offset) else { return u }
-                offset += Int(len)
-            default:
-                return u
-            }
+        // playbackStateTimestamp (field 11)
+        if let ts = ssm.protobufDoubleField(fieldNumber: 11) {
+            u.playbackStateTimestamp = ts
         }
+
+        // playbackQueue (field 3) → first ContentItem → ContentItemMetadata
+        if let pq = ssm.protobufBytesField(fieldNumber: 3),
+           let ci = pq.protobufBytesField(fieldNumber: 2),   // first ContentItem
+           let meta = ci.protobufBytesField(fieldNumber: 2) { // ContentItemMetadata
+            u.title    = meta.protobufStringField(fieldNumber: 1)
+            u.album    = meta.protobufStringField(fieldNumber: 6)
+            u.artist   = meta.protobufStringField(fieldNumber: 7)
+            if let d = meta.protobufDoubleField(fieldNumber: 14) { u.duration    = d }
+            if let e = meta.protobufDoubleField(fieldNumber: 35) { u.elapsedTime = e }
+        }
+
         return u.isEmpty ? nil : u
     }
 }
@@ -126,10 +78,59 @@ public struct MRPNowPlayingUpdate: Sendable {
     public var artist: String?
     public var album: String?
     public var playbackRate: Double?
+    public var playbackState: Int?
+    public var duration: Double?
+    public var elapsedTime: Double?
+    public var playbackStateTimestamp: Double?
 
     public var isEmpty: Bool {
-        title == nil && artist == nil && album == nil && playbackRate == nil
+        title == nil && artist == nil && album == nil &&
+        playbackRate == nil && duration == nil && elapsedTime == nil
     }
 
     public init() {}
+}
+
+// MARK: - Additional protobuf decode helpers (string + double)
+
+public extension Data {
+    func protobufStringField(fieldNumber: Int) -> String? {
+        guard let d = protobufBytesField(fieldNumber: fieldNumber),
+              let s = String(data: d, encoding: .utf8), !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Read an IEEE-754 double (wire type 1, 64-bit little-endian) field.
+    func protobufDoubleField(fieldNumber: Int) -> Double? {
+        var offset = 0
+        while offset < count {
+            guard let tag = readVarintFrom(offset: &offset) else { return nil }
+            let wt = Int(tag & 0x7)
+            let fn = Int(tag >> 3)
+            switch wt {
+            case 0:
+                guard readVarintFrom(offset: &offset) != nil else { return nil }
+            case 1:
+                guard offset + 8 <= count else { return nil }
+                let start = index(startIndex, offsetBy: offset)
+                let end   = index(startIndex, offsetBy: offset + 8)
+                offset += 8
+                if fn == fieldNumber {
+                    var v: Double = 0
+                    _ = Swift.withUnsafeMutableBytes(of: &v) { dst in
+                        self[start..<end].copyBytes(to: dst)
+                    }
+                    return v
+                }
+            case 2:
+                guard let len = readVarintFrom(offset: &offset) else { return nil }
+                offset += Int(len)
+            case 5:
+                offset += 4
+            default:
+                return nil
+            }
+        }
+        return nil
+    }
 }

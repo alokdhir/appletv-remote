@@ -643,22 +643,25 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
     guard let creds = CredentialStore().loadAirPlay(deviceID: tv.id) else {
         die("no AirPlay credentials for \(tv.name) — run 'atv pair-airplay \(device)' first")
     }
+    let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
 
     print(cyan("AirPlay MRP tunnel: opening to \(tv.name) (\(host))…"))
-    let tunnel: AirPlayTunnel.Tunnel
-    do { tunnel = try AirPlayTunnel.open(host: host, credentials: creds) }
-    catch { die("tunnel open failed: \(error)") }
-    defer { tunnel.rtsp.close(); tunnel.mrp.close() }
-    print(green("✓ MRP data channel up — waiting for messages (10s)…"))
-
     let lock = NSCondition()
     var received: [Data] = []
-    tunnel.mrp.onMessage = { msg in
+    let msgCallback: (Data) -> Void = { msg in
         lock.lock()
         received.append(msg)
         lock.broadcast()
         lock.unlock()
     }
+
+    let tunnel: AirPlayTunnel.Tunnel
+    do { tunnel = try AirPlayTunnel.open(host: host, credentials: creds,
+                                         mrpClientID: airPlayClientID,
+                                         onMessage: msgCallback) }
+    catch { die("tunnel open failed: \(error)") }
+    defer { tunnel.rtsp.close(); tunnel.mrp.close() }
+    print(green("✓ MRP data channel up — waiting for messages (10s)…"))
 
     // Wait up to 15 seconds collecting all messages.
     // The ATV typically sends a burst: SET_CONNECTION_STATE then
@@ -684,15 +687,36 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
         return
     }
 
-    print(green("✓ received \(msgs.count) MRP message(s)"))
-    for (i, msg) in msgs.enumerated() {
-        let msgType = MRPDecoder.messageType(from: msg) ?? 0
-        print(dim("  [\(i)] type=\(msgType) (\(msg.count)B)"))
-        if let np = MRPDecoder.decodeNowPlaying(from: msg) {
-            let parts = [np.title, np.artist, np.album].compactMap { $0 }
-            if !parts.isEmpty { print(green("    now-playing: \(parts.joined(separator: " — "))")) }
-            if let r = np.playbackRate { print(dim("    rate: \(r)")) }
-        }
+    // Merge all SET_STATE messages into a single now-playing picture.
+    var merged = MRPNowPlayingUpdate()
+    for msg in msgs {
+        guard let np = MRPDecoder.decodeNowPlaying(from: msg) else { continue }
+        if let v = np.title    { merged.title    = v }
+        if let v = np.artist   { merged.artist   = v }
+        if let v = np.album    { merged.album    = v }
+        if let v = np.playbackRate { merged.playbackRate = v }
+        if let v = np.playbackState { merged.playbackState = v }
+        if let v = np.duration     { merged.duration = v }
+        if let v = np.elapsedTime  { merged.elapsedTime = v }
+        if let v = np.playbackStateTimestamp { merged.playbackStateTimestamp = v }
+    }
+
+    let stateName: String
+    switch merged.playbackState {
+    case 1: stateName = "Playing"
+    case 2: stateName = "Paused"
+    case 3: stateName = "Stopped"
+    default: stateName = "Unknown"
+    }
+
+    print(green("✓ Now playing:"))
+    if let t = merged.title  { print("       Title: \(t)") }
+    if let a = merged.artist { print("      Artist: \(a)") }
+    if let a = merged.album  { print("       Album: \(a)") }
+    print("       State: \(stateName)")
+    if let pos = merged.elapsedTime, let dur = merged.duration, dur > 0 {
+        let pct = Int(pos / dur * 100)
+        print("    Position: \(Int(pos))/\(Int(dur))s (\(pct)%)")
     }
     print(cyan("Phase 2 gate passed — MRP tunnel works end-to-end."))
 }

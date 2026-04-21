@@ -151,6 +151,7 @@ public final class MRPDataChannel: @unchecked Sendable {
     /// Send one or more varint-framed MRP protobuf messages wrapped in a
     /// DataStreamMessage → binary plist → HAP-encrypted TCP frame.
     public func send(_ mrpFrames: Data, timeoutSeconds: TimeInterval = 10) throws {
+        let hex = mrpFrames.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
         let payload = encodePlist(mrpFrames: mrpFrames)
         sendSeqno += 1
         var hdr = Data()
@@ -187,7 +188,10 @@ public final class MRPDataChannel: @unchecked Sendable {
             if let data, !data.isEmpty {
                 do {
                     let plain = try self.session.feed(data)
-                    if !plain.isEmpty { self.processPlaintext(plain) }
+                    if !plain.isEmpty {
+                        let hex = plain.prefix(64).map { String(format: "%02x", $0) }.joined(separator: " ")
+                        self.processPlaintext(plain)
+                    }
                 } catch {
                     Log.pairing.fail("MRPDataChannel: decrypt error: \(error)")
                     self.bufferCond.lock()
@@ -243,7 +247,11 @@ public final class MRPDataChannel: @unchecked Sendable {
         }
 
         // Decode the plist wrapper to extract MRP protobuf bytes.
-        guard let mrpFrames = decodePlist(payload) else { return }
+        let typStr = String(bytes: [hdr.messageType.0,hdr.messageType.1,hdr.messageType.2,hdr.messageType.3].filter { $0 != 0 }, encoding: .utf8) ?? "?"
+        guard let mrpFrames = decodePlist(payload) else {
+            let hex = payload.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
+            return
+        }
         // Each varint-framed MRP message in mrpFrames.
         var offset = 0
         while offset < mrpFrames.count {
