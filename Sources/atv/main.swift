@@ -237,17 +237,19 @@ func cmdList(_ conn: IPCConnection, namesOnly: Bool = false) throws {
         print(yellow("No Apple TVs discovered yet — the app may still be scanning."))
         return
     }
-    // Columns: marker, name, host/status, flags
+    // Columns: marker, name, host (fixed width), flags
     let nameWidth = max(12, devices.map { $0.name.count }.max() ?? 12)
+    let hostWidth = max(15, devices.compactMap { $0.host?.count }.max() ?? 15)
     for d in devices {
         let marker = d.isDefault ? green("●") : " "
         var flags: [String] = []
         if d.paired     { flags.append(green("paired")) }
         if d.autoConnect { flags.append(cyan("auto")) }
         if !d.resolved  { flags.append(yellow("resolving")) }
-        let host = d.host.map { dim($0) } ?? dim("—")
+        let hostRaw = d.host ?? "—"
+        let hostPadded = hostRaw.padding(toLength: hostWidth, withPad: " ", startingAt: 0)
         let name = d.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0)
-        print("\(marker) \(name)  \(host)  \(flags.joined(separator: " "))")
+        print("\(marker) \(name)  \(dim(hostPadded))  \(flags.joined(separator: " "))")
     }
 }
 
@@ -766,6 +768,7 @@ let knownCommands: [String] = [
     "l", "r", "u", "d",
     "sl", "sr", "su", "sd",    // trackpad swipe left/right/up/down
     "click", "pp", "home", "menu",
+    "ff", "rew",               // aliases: ff = r (right), rew = l (left)
     "vol+", "vol-",
     "power", "disconnect", "ping", "completion",
     "pair-airplay", "airplay-verify", "airplay-tunnel", "airplay-mrp",
@@ -795,8 +798,8 @@ func runStandalone(args: [String], device: String?) throws {
     switch cmd {
     case "list":
         try standaloneList()
-    case "l":          try standaloneSendKey(deviceName: device, command: .left)
-    case "r":          try standaloneSendKey(deviceName: device, command: .right)
+    case "l", "rew": try standaloneSendKey(deviceName: device, command: .left)
+    case "r", "ff":  try standaloneSendKey(deviceName: device, command: .right)
     case "u":          try standaloneSendKey(deviceName: device, command: .up)
     case "d":          try standaloneSendKey(deviceName: device, command: .down)
     case "sl":         try standaloneSwipe(deviceName: device, direction: .left)
@@ -1012,6 +1015,7 @@ do {
     // that actually work standalone — status / select / pair need the app.
     let standaloneCapable: Set<String> = [
         "list", "l", "r", "u", "d", "sl", "sr", "su", "sd",
+        "ff", "rew",
         "click", "pp", "menu", "home", "vol+", "vol-", "power",
     ]
     // Either a regular single-command run fits standalone, or every command
@@ -1037,8 +1041,8 @@ do {
         for cmd in chain {
             let key: IPCKey? = {
                 switch cmd {
-                case "l":    return .left
-                case "r":    return .right
+                case "l", "rew": return .left
+                case "r", "ff":  return .right
                 case "u":    return .up
                 case "d":    return .down
                 case "sl":   return .swipeLeft
@@ -1081,8 +1085,8 @@ do {
     case "airplay-mrp":
         guard args.count >= 2 else { die("airplay-mrp requires a device name") }
         try cmdAirPlayMRP(conn, device: args[1])
-    case "l":           try cmdKey(conn, key: .left)
-    case "r":           try cmdKey(conn, key: .right)
+    case "l", "rew":  try cmdKey(conn, key: .left)
+    case "r", "ff":   try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)
     case "d":           try cmdKey(conn, key: .down)
     case "sl":          try cmdKey(conn, key: .swipeLeft)

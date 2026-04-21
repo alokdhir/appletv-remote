@@ -428,28 +428,37 @@ final class CompanionConnection: ObservableObject {
             guard self.state == .connected else { return }
             let (start, end) = direction.coordinates
             let steps = 8
-            let nsBase = DispatchTime.now().uptimeNanoseconds
-            let nsStep: UInt64 = 16_000_000   // ~16 ms per step (≈ 60 fps)
-            // Press
+
+            // Re-send _touchStart before each swipe; use timestamps relative
+            // to that moment — matches pyatv's _base_timestamp pattern.
             let t0 = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeTouchStart(txn: t0))
+            try? await Task.sleep(for: .milliseconds(20))
+            let baseNs = DispatchTime.now().uptimeNanoseconds
+
+            // Press
+            let tPress = self.txnCounter; self.txnCounter &+= 1
             self.sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
-                                                      txn: t0, nanoseconds: nsBase))
+                                                      txn: tPress, nanoseconds: 0))
             // Hold / move
             for i in 1...steps {
                 let f = Double(i) / Double(steps)
                 let x = start.x + (end.x - start.x) * f
                 let y = start.y + (end.y - start.y) * f
+                let relNs = DispatchTime.now().uptimeNanoseconds - baseNs
                 let tN = self.txnCounter; self.txnCounter &+= 1
-                let ns = nsBase + UInt64(i) * nsStep
                 self.sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
-                                                          txn: tN, nanoseconds: ns))
+                                                          txn: tN, nanoseconds: relNs))
                 try? await Task.sleep(for: .milliseconds(16))
             }
             // Release
+            let relNsEnd = DispatchTime.now().uptimeNanoseconds - baseNs
             let tEnd = self.txnCounter; self.txnCounter &+= 1
-            let nsEnd = nsBase + UInt64(steps + 1) * nsStep
             self.sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
-                                                      txn: tEnd, nanoseconds: nsEnd))
+                                                      txn: tEnd, nanoseconds: relNsEnd))
+            try? await Task.sleep(for: .milliseconds(50))
+            let tStop = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeTouchStop(txn: tStop))
         }
     }
 

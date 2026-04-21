@@ -272,26 +272,32 @@ final class StandaloneSession {
     func sendSwipe(_ direction: SwipeDirection) throws {
         let (start, end) = direction.coordinates
         let steps = 8
-        var nsBase = DispatchTime.now().uptimeNanoseconds
-        let nsStep: UInt64 = 16_000_000   // 16 ms between events ≈ 60 fps
+
+        // Re-send _touchStart before each swipe; use timestamps relative to
+        // that moment — matches pyatv's _base_timestamp pattern.
+        try sendEncrypted(OPACK.encodeTouchStart(txn: nextTxn()))
+        Thread.sleep(forTimeInterval: 0.02)
+        let baseNs = DispatchTime.now().uptimeNanoseconds
 
         // Press
         try sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
-                                                  txn: nextTxn(), nanoseconds: nsBase))
+                                                  txn: nextTxn(), nanoseconds: 0))
         // Hold / move
         for i in 1...steps {
             let f = Double(i) / Double(steps)
             let x = start.x + (end.x - start.x) * f
             let y = start.y + (end.y - start.y) * f
-            nsBase &+= nsStep
+            let relNs = DispatchTime.now().uptimeNanoseconds - baseNs
             try sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
-                                                      txn: nextTxn(), nanoseconds: nsBase))
+                                                      txn: nextTxn(), nanoseconds: relNs))
             Thread.sleep(forTimeInterval: 0.016)
         }
         // Release
-        nsBase &+= nsStep
+        let relNsEnd = DispatchTime.now().uptimeNanoseconds - baseNs
         try sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
-                                                  txn: nextTxn(), nanoseconds: nsBase))
+                                                  txn: nextTxn(), nanoseconds: relNsEnd))
+        Thread.sleep(forTimeInterval: 0.05)
+        try sendEncrypted(OPACK.encodeTouchStop(txn: nextTxn()))
         Thread.sleep(forTimeInterval: 0.1)
     }
 
