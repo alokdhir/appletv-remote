@@ -394,19 +394,19 @@ func cmdStatus(_ conn: IPCConnection) throws {
         }()
         let bits = [np.title, np.artist, np.album].compactMap { $0 }.filter { !$0.isEmpty }
         if !bits.isEmpty {
-            print("  \(glyph) \(bits.joined(separator: " — "))")
+            let titleYellow = bits[0...0].map { yellow($0) }
+            let rest = bits.dropFirst().map { $0 }
+            print("  \(glyph) \((titleYellow + rest).joined(separator: " — "))")
         } else if let label {
-            // No track metadata but we do know the transport state — still
-            // worth surfacing so `atv status` tells you whether ATV is paused.
             print("  \(glyph) \(dim(label))")
         }
         if let app = np.app, !app.isEmpty {
             print("  \(dim("app: "))\(app)")
         }
         if let elapsed = np.elapsedTime {
+            let pct = np.duration.map { d in d > 0 ? " \(Int(elapsed / d * 100))%" : "" } ?? ""
             let total = np.duration.map { "/\(fmtTime($0))" } ?? ""
-            let rateSuffix = label.map { " (\($0))" } ?? ""
-            print("  \(dim("time:")) \(fmtTime(elapsed))\(total)\(rateSuffix)")
+            print("  \(dim("time:")) \(fmtTime(elapsed))\(total)\(pct)")
         }
     }
 }
