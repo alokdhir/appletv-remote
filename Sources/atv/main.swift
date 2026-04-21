@@ -161,6 +161,7 @@ enum IPCClientError: Error, LocalizedError {
 
 /// Braille spinner frame glyphs — single-width, renders nicely in any terminal.
 let spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+var didJustLaunchApp = false
 
 func connectOrLaunch() -> IPCConnection {
     // Fast path: app is running, answer in <50ms.
@@ -191,6 +192,7 @@ func connectOrLaunch() -> IPCConnection {
                 fflush(stdout)
             }
             print(cyan("✓ started"))
+            didJustLaunchApp = true
             return c
         }
         if showSpinner {
@@ -363,6 +365,17 @@ complete -F _atv atv
 """#
 
 func cmdStatus(_ conn: IPCConnection) throws {
+    // If we just launched the app, wait up to 8s for it to connect to a device
+    // before reporting status — otherwise we'd always show "Disconnected" on
+    // first launch even when an auto-connect device is configured.
+    if didJustLaunchApp {
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            let r = try conn.request(.status)
+            if let s = r.status, s.connectionState != "Disconnected" { break }
+            usleep(300_000)
+        }
+    }
     let r = try conn.request(.status)
     expectOk(r)
     guard let s = r.status else { die("server returned no status") }
