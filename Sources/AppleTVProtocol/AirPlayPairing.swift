@@ -67,8 +67,11 @@ public struct AirPlayCredentials: Codable, Sendable {
 /// Session keys derived after a successful pair-verify. These keys are used
 /// to encrypt all subsequent traffic on the same TCP connection.
 public struct AirPlaySessionKeys: Sendable {
-    public let readKey:  Data   // "Control-Read-Encryption-Key"  — decrypt ATV→us
-    public let writeKey: Data   // "Control-Write-Encryption-Key" — encrypt us→ATV
+    public let readKey:      Data   // "Control-Read-Encryption-Key"  — decrypt ATV→us
+    public let writeKey:     Data   // "Control-Write-Encryption-Key" — encrypt us→ATV
+    /// Raw ECDH shared secret (before HKDF). Kept so callers can derive
+    /// additional channel keys (e.g. DataStream) from the same material.
+    public let sharedSecret: Data
 }
 
 // MARK: - Pair Setup
@@ -397,8 +400,9 @@ public final class AirPlayPairVerify {
 
         Log.pairing.report("AirPlay pair-verify complete ✓ control channel keys derived")
         return AirPlaySessionKeys(
-            readKey:  readKey.withUnsafeBytes  { Data($0) },
-            writeKey: writeKey.withUnsafeBytes { Data($0) }
+            readKey:      readKey.withUnsafeBytes  { Data($0) },
+            writeKey:     writeKey.withUnsafeBytes { Data($0) },
+            sharedSecret: sharedData
         )
     }
 

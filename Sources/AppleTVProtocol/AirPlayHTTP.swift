@@ -51,6 +51,9 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private var receiveClosed = false
     private var isReady = false
     private let readyGroup = DispatchGroup()
+    /// Set by `detach()` — after this the receive loop stops re-registering
+    /// and the new owner of the NWConnection takes over.
+    private var detached = false
 
     private func trace(_ msg: String) {
         Log.pairing.report("AirPlayHTTP: \(msg)")
@@ -115,6 +118,20 @@ public final class AirPlayHTTP: @unchecked Sendable {
     /// Closes the TCP connection. Only call if Phase 2 is not taking it over.
     public func close() { connection.cancel() }
 
+    /// Hand the underlying NWConnection off to a post-pair-verify encrypted
+    /// transport. After this, the receive loop no longer re-registers and
+    /// any in-flight receive callback is a no-op, so the new owner can
+    /// register its own receive immediately.
+    ///
+    /// Caller must ensure no un-consumed response data is left in the buffer.
+    public func detach() -> NWConnection {
+        bufferCond.lock()
+        detached = true
+        readBuffer = Data()
+        bufferCond.unlock()
+        return connection
+    }
+
     // MARK: - Request
 
     /// POST raw bytes to `path` with the given headers. Returns status + body.
@@ -161,6 +178,7 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private func receiveLoop() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, err in
             guard let self else { return }
+            if self.detached { return }   // ownership handed off; drop.
             if let data, !data.isEmpty {
                 self.bufferCond.lock()
                 self.readBuffer.append(data)

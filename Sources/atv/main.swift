@@ -558,6 +558,135 @@ func cmdAirPlayVerify(_ conn: IPCConnection, device: String) throws {
     print(dim("  readKey:  \(keys.readKey.prefix(8).map{String(format:"%02x",$0)}.joined())…"))
 }
 
+/// Phase 2a gate: open the encrypted AirPlay tunnel control channel and do
+/// SETUP #1 (event channel). A successful decoded plist response containing
+/// `eventPort` proves HAP framing and RTSP parser work end-to-end.
+func cmdAirPlayTunnel(_ conn: IPCConnection, device: String) throws {
+    let listResp = try conn.request(.list)
+    guard let devices = listResp.devices else { die("no device list from server") }
+    guard let tv = devices.first(where: { $0.name == device || $0.id == device }) else {
+        die("device '\(device)' not found")
+    }
+    guard let host = tv.host else { die("device '\(device)' has no resolved host") }
+    guard let creds = CredentialStore().loadAirPlay(deviceID: tv.id) else {
+        die("no AirPlay credentials for \(tv.name) — run 'atv pair-airplay \(device)' first")
+    }
+
+    print(cyan("AirPlay tunnel: opening to \(tv.name) (\(host))…"))
+    let rtsp: EncryptedAirPlayRTSP
+    do { rtsp = try AirPlayTunnel.openControl(host: host, credentials: creds) }
+    catch { die("tunnel open failed: \(error)") }
+    defer { rtsp.close() }
+    print(green("✓ encrypted RTSP control channel established"))
+
+    let sessionUUID = UUID().uuidString.uppercased()
+    let setupBody: [String: Any] = [
+        "isRemoteControlOnly": true,
+        "osName":              "iPhone OS",
+        "sourceVersion":       "550.10",
+        "timingProtocol":      "None",
+        "model":               "iPhone10,6",
+        "deviceID":            "AA:BB:CC:DD:EE:FF",
+        "osVersion":           "15.0",
+        "osBuildVersion":      "19A5297e",
+        "macAddress":          "AA:BB:CC:DD:EE:FF",
+        "sessionUUID":         sessionUUID,
+        "name":                "AppleTVRemote",
+    ]
+    let bodyData: Data
+    do {
+        bodyData = try PropertyListSerialization.data(
+            fromPropertyList: setupBody, format: .binary, options: 0)
+    } catch { die("plist encode failed: \(error)") }
+
+    let resp: EncryptedAirPlayRTSP.Response
+    do {
+        resp = try rtsp.request(
+            method: "SETUP",
+            uri:    "rtsp://\(host)/\(sessionUUID)",
+            headers: ["Content-Type": "application/x-apple-binary-plist"],
+            body:    bodyData)
+    } catch { die("SETUP (event) failed: \(error)") }
+
+    print(green("✓ SETUP response: \(resp.status) \(resp.reason)"))
+    print(dim("  body: \(resp.body.count)B (\(resp.headers["content-type"] ?? "?"))"))
+
+    guard resp.status == 200 else {
+        die("SETUP returned \(resp.status); cannot continue")
+    }
+
+    let decoded: [String: Any]
+    do {
+        decoded = (try PropertyListSerialization.propertyList(
+            from: resp.body, options: [], format: nil) as? [String: Any]) ?? [:]
+    } catch { die("plist decode failed: \(error)") }
+
+    if let eventPort = decoded["eventPort"] {
+        print(green("✓ eventPort = \(eventPort)"))
+        print(cyan("Control-channel gate passed — use 'atv airplay-mrp' for full MRP tunnel."))
+    } else {
+        let keyList = decoded.keys.sorted().joined(separator: ", ")
+        print(dim("response keys: \(keyList)"))
+        die("response did not include eventPort")
+    }
+}
+
+/// Phase 2b gate: open the full AirPlay MRP tunnel (control + data channels).
+/// Waits up to 10s for at least one MRP message from the ATV, then prints it.
+func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
+    let listResp = try conn.request(.list)
+    guard let devices = listResp.devices else { die("no device list from server") }
+    guard let tv = devices.first(where: { $0.name == device || $0.id == device }) else {
+        die("device '\(device)' not found")
+    }
+    guard let host = tv.host else { die("device '\(device)' has no resolved host") }
+    guard let creds = CredentialStore().loadAirPlay(deviceID: tv.id) else {
+        die("no AirPlay credentials for \(tv.name) — run 'atv pair-airplay \(device)' first")
+    }
+
+    print(cyan("AirPlay MRP tunnel: opening to \(tv.name) (\(host))…"))
+    let tunnel: AirPlayTunnel.Tunnel
+    do { tunnel = try AirPlayTunnel.open(host: host, credentials: creds) }
+    catch { die("tunnel open failed: \(error)") }
+    defer { tunnel.rtsp.close(); tunnel.mrp.close() }
+    print(green("✓ MRP data channel up — waiting for messages (10s)…"))
+
+    let lock = NSCondition()
+    var received: [Data] = []
+    tunnel.mrp.onMessage = { msg in
+        lock.lock()
+        received.append(msg)
+        lock.broadcast()
+        lock.unlock()
+    }
+
+    // Wait up to 10 seconds for at least one message.
+    let deadline = Date().addingTimeInterval(10)
+    lock.lock()
+    while received.isEmpty && Date() < deadline {
+        lock.wait(until: deadline)
+    }
+    let msgs = received
+    lock.unlock()
+
+    if msgs.isEmpty {
+        print(yellow("No MRP messages received in 10s — ATV may need media playing."))
+        return
+    }
+
+    print(green("✓ received \(msgs.count) MRP message(s)"))
+    for (i, msg) in msgs.enumerated() {
+        let msgType = MRPDecoder.messageType(from: msg) ?? 0
+        print(dim("  [\(i)] type=\(msgType) (\(msg.count)B)"))
+        if let np = MRPDecoder.decodeNowPlaying(from: msg) {
+            let parts = [np.title, np.artist, np.album].compactMap { $0 }
+            if !parts.isEmpty { print(green("    now-playing: \(parts.joined(separator: " — "))")) }
+            if let r = np.playbackRate { print(dim("    rate: \(r)")) }
+        }
+    }
+    print(cyan("Phase 2 gate passed — MRP tunnel works end-to-end."))
+}
+
 func cmdPair(_ conn: IPCConnection, device: String) throws {
     // Start pairing — server responds to the original pair-start request
     // only after pairing completes (or fails). PIN is requested via event.
@@ -607,7 +736,7 @@ let knownCommands: [String] = [
     "click", "pp", "home", "menu",
     "vol+", "vol-",
     "power", "disconnect", "ping", "completion",
-    "pair-airplay", "airplay-verify",
+    "pair-airplay", "airplay-verify", "airplay-tunnel", "airplay-mrp",
     "version", "help",
 ]
 
@@ -717,6 +846,7 @@ func usage() -> Never {
     print(row("pair <name>",             "Pair with an Apple TV (prompts for PIN)"))
     print(row("pair-airplay <name>",     "Pair for now-playing info (AirPlay; prompts for PIN)"))
     print(row("airplay-verify <name>",   "Test stored AirPlay credentials"))
+    print(row("airplay-mrp <name>",       "Open full MRP tunnel (now-playing gate test)"))
     print(row("l | r | u | d",           "D-pad left / right / up / down"))
     print(row("sl | sr | su | sd",       "Trackpad swipe left / right / up / down"))
     print(row("click",                   "Click (D-pad centre)"))
@@ -913,6 +1043,12 @@ do {
     case "airplay-verify":
         guard args.count >= 2 else { die("airplay-verify requires a device name") }
         try cmdAirPlayVerify(conn, device: args[1])
+    case "airplay-tunnel":
+        guard args.count >= 2 else { die("airplay-tunnel requires a device name") }
+        try cmdAirPlayTunnel(conn, device: args[1])
+    case "airplay-mrp":
+        guard args.count >= 2 else { die("airplay-mrp requires a device name") }
+        try cmdAirPlayMRP(conn, device: args[1])
     case "l":           try cmdKey(conn, key: .left)
     case "r":           try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)
