@@ -145,13 +145,14 @@ public enum AirPlayTunnel {
         let eventGroup = DispatchGroup()
         eventGroup.enter()
         var eventReady = false
+        var eventLeft = false
         eventConn.stateUpdateHandler = { state in
             switch state {
             case .ready:
                 eventReady = true
-                eventGroup.leave()
+                if !eventLeft { eventLeft = true; eventGroup.leave() }
             case .failed, .cancelled, .waiting:
-                eventGroup.leave()
+                if !eventLeft { eventLeft = true; eventGroup.leave() }
             default: break
             }
         }
@@ -212,13 +213,14 @@ public enum AirPlayTunnel {
         let dataQueue = DispatchGroup()
         dataQueue.enter()
         var dataConnReady = false
+        var dataLeft = false
         dataConn.stateUpdateHandler = { state in
             switch state {
             case .ready:
                 dataConnReady = true
-                dataQueue.leave()
+                if !dataLeft { dataLeft = true; dataQueue.leave() }
             case .failed, .cancelled, .waiting:
-                dataQueue.leave()
+                if !dataLeft { dataLeft = true; dataQueue.leave() }
             default: break
             }
         }
