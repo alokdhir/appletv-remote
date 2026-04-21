@@ -15,7 +15,12 @@ struct AppleTVRemoteApp: App {
     @State       private var ipcServer:  IPCServer?
 
     var body: some Scene {
-        WindowGroup {
+        // Register setUp on the delegate here — body evaluates before
+        // applicationDidFinishLaunching fires on macOS, so this is guaranteed
+        // to be set in time for headless (`open -g`) launches.
+        let _ = { appDelegate.onFinishLaunching = setUp }()
+
+        return WindowGroup {
             ContentView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
@@ -26,16 +31,8 @@ struct AppleTVRemoteApp: App {
                                                    blendingMode: .behindWindow))
                 .background(MainWindowConfigurator())   // hide-on-close + translucency + no disconnect
                 .onAppear {
-                    MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
-                    reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
-                    if ipcServer == nil {
-                        let server = IPCServer(connection: connection,
-                                               discovery: discovery,
-                                               autoConnect: autoConnect,
-                                               reconnector: reconnector)
-                        server.start()
-                        ipcServer = server
-                    }
+                    // Fallback for Dock/normal launches where the window appears.
+                    setUp()
                 }
                 .onChange(of: discovery.devices) { devices in
                     guard connection.state == .disconnected else { return }
@@ -46,13 +43,26 @@ struct AppleTVRemoteApp: App {
                     }
                 }
         }
-        // .contentMinSize: window's minimum follows the content's minimum but
-        // the user can still resize larger — which means edge-hover resize
-        // cursors work. We explicitly call setContentSize in WindowSetupView
-        // to pin the initial size, since .contentMinSize doesn't by itself.
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
+        }
+    }
+
+    /// Called by AppDelegate.applicationDidFinishLaunching — fires regardless
+    /// of whether a window is visible (handles `open -g` headless launches).
+    /// Idempotent: safe to call again from .onAppear.
+    private func setUp() {
+        appDelegate.onFinishLaunching = nil  // clear after first real call
+        MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
+        reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
+        if ipcServer == nil {
+            let server = IPCServer(connection: connection,
+                                   discovery: discovery,
+                                   autoConnect: autoConnect,
+                                   reconnector: reconnector)
+            server.start()
+            ipcServer = server
         }
     }
 }
@@ -66,6 +76,13 @@ struct AppleTVRemoteApp: App {
 /// item is not a window, AppKit considers the app window-less and quits it.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set by AppleTVRemoteApp after SwiftUI initialises its @StateObjects.
+    var onFinishLaunching: (() -> Void)?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        onFinishLaunching?()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
