@@ -372,14 +372,12 @@ func cmdStatus(_ conn: IPCConnection) throws {
     // _iMC events only fire on state *changes* — if media started before
     // this session connected, run a command (pp) to trigger the first push.
     if s.nowPlaying == nil, let attn = s.attentionState {
-        // _iMC only pushes on state *changes*. If media started before we
-        // connected, no push has arrived yet — suggest `atv pp` to trigger one.
         let hint: String
         switch attn {
         case 1: hint = dim("screensaver / idle")
-        case 2: hint = cyan("app active — run 'atv pp' twice to sync now-playing")
-        case 3: hint = cyan("media active — run 'atv pp' twice to sync now-playing")
-        default: hint = dim("attention state \(attn) — try 'atv pp' twice to sync now-playing")
+        case 2: hint = dim("app active")
+        case 3: hint = dim("media active")
+        default: hint = dim("attention state \(attn)")
         }
         print("  \(dim("·")) \(hint)")
     }

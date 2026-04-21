@@ -231,14 +231,10 @@ final class IPCServer {
             case .list:
                 client.send(.response(IPCResponse(id: req.id, ok: true, devices: listDevices())))
             case .status:
-                // If now-playing isn't populated yet (common on fresh connect
-                // before the ATV pushes its first _iMC event), wait up to 1.5 s
-                // for it to arrive before replying. This keeps `atv status` fast
-                // in the normal case (already populated) and correct on first run.
                 if connection.nowPlaying == nil, connection.state == .connected {
                     Task { @MainActor [weak self, weak client] in
                         guard let self, let client else { return }
-                        let deadline = Date().addingTimeInterval(1.5)
+                        let deadline = Date().addingTimeInterval(4.0)
                         while Date() < deadline {
                             if self.connection.nowPlaying != nil { break }
                             try? await Task.sleep(for: .milliseconds(100))

@@ -71,6 +71,11 @@ final class CompanionConnection: ObservableObject {
     /// Nil until first keepalive response.
     @Published var attentionState: Int?
 
+    /// Live AirPlay MRP tunnel — opened after Companion session is established.
+    /// Provides real-time now-playing pushes (title, artist, position) that the
+    /// Companion `_iMC` channel only delivers reactively on state changes.
+    private var airPlayTunnel: AirPlayTunnel.Tunnel?
+
     // MARK: - Connect / Disconnect
 
     /// Smart connect: probes the device first (1 s TCP timeout).
@@ -450,6 +455,42 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Session Init
 
+    private func startAirPlayMRP() {
+        guard let device = currentDevice,
+              let host = device.host,
+              let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
+        let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
+        let writeQueue = self.writeQueue
+        writeQueue.async { [weak self] in
+            do {
+                let tunnel = try AirPlayTunnel.open(
+                    host: host,
+                    credentials: creds,
+                    mrpClientID: airPlayClientID,
+                    onMessage: { [weak self] msgData in
+                        guard let update = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
+                            var info = self.nowPlaying ?? NowPlayingInfo()
+                            if let v = update.title    { info.title        = v }
+                            if let v = update.artist   { info.artist       = v }
+                            if let v = update.album    { info.album        = v }
+                            if let v = update.duration { info.duration     = v }
+                            if let v = update.elapsedTime { info.elapsedTime = v }
+                            if let v = update.playbackRate { info.playbackRate = v }
+                            self.nowPlaying = info
+                        }
+                    }
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.airPlayTunnel = tunnel
+                }
+            } catch {
+                Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")
+            }
+        }
+    }
+
     private func startCompanionSession() {
         guard let clientID = credentialStore.load(deviceID: currentDevice?.id ?? "")?.clientID else {
             return
@@ -611,6 +652,7 @@ final class CompanionConnection: ObservableObject {
                 state = .connected
                 startCompanionSession()
                 startKeepalive()
+                startAirPlayMRP()
                 if sendWakeOnConnect {
                     sendWakeOnConnect = false
                     // Small delay to let the session handshake complete before
@@ -860,6 +902,12 @@ public struct NowPlayingInfo: Equatable, Sendable {
     /// Every key/value we saw, stringified. Useful for debugging and for any
     /// field we haven't named above yet.
     public var raw: [String: String]
+
+    public init() {
+        self.title = nil; self.artist = nil; self.album = nil; self.app = nil
+        self.elapsedTime = nil; self.duration = nil; self.playbackRate = nil
+        self.raw = [:]
+    }
 
     public init(from dict: [String: Any]) {
         func str(_ keys: String...) -> String? {
