@@ -14,10 +14,10 @@ public enum MRPMessage {
     // MARK: - Message type IDs
 
     private enum MessageType: Int32 {
-        case deviceInfo        = 1
-        case sendHIDEvent      = 9   // SEND_HID_EVENT_MESSAGE (key up/down)
-        case clientUpdates     = 21
-        case setConnectionState = 27
+        case deviceInfo         = 15  // DEVICE_INFO_MESSAGE
+        case clientUpdates      = 16  // CLIENT_UPDATES_CONFIG_MESSAGE
+        case sendHIDEvent       = 8   // SEND_HID_EVENT_MESSAGE (key up/down)
+        case setConnectionState = 38  // SET_CONNECTION_STATE_MESSAGE
     }
 
     // MARK: - HID usages for SendCommandMessage
@@ -44,9 +44,16 @@ public enum MRPMessage {
         var inner = Data()
         inner.appendStringField(fieldNumber: 1, value: uniqueIdentifier)
         inner.appendStringField(fieldNumber: 2, value: "Mac Remote")
-        inner.appendStringField(fieldNumber: 6, value: "com.apple.TVRemote")
-        inner.appendVarintField(fieldNumber: 10, value: 1)          // protocolVersion
-        inner.appendVarintField(fieldNumber: 14, value: 1)          // sharedQueueVersion
+        inner.appendStringField(fieldNumber: 3, value: "iPhone")                // localizedModelName
+        inner.appendStringField(fieldNumber: 5, value: "com.apple.TVRemote")    // applicationBundleIdentifier
+        inner.appendStringField(fieldNumber: 6, value: "344.28")                // applicationBundleVersion
+        inner.appendVarintField(fieldNumber: 7, value: 1)                       // protocolVersion
+        inner.appendVarintField(fieldNumber: 8, value: 108)                     // lastSupportedMessageType
+        inner.appendBoolField(fieldNumber: 9, value: true)                      // supportsSystemPairing
+        inner.appendBoolField(fieldNumber: 10, value: true)                     // allowsPairing
+        inner.appendBoolField(fieldNumber: 13, value: true)                     // supportsACL
+        inner.appendBoolField(fieldNumber: 14, value: true)                     // supportsSharedQueue
+        inner.appendVarintField(fieldNumber: 17, value: 2)                      // sharedQueueVersion
 
         var outer = Data()
         outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.deviceInfo.rawValue))

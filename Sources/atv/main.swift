@@ -660,11 +660,21 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
         lock.unlock()
     }
 
-    // Wait up to 10 seconds for at least one message.
-    let deadline = Date().addingTimeInterval(10)
+    // Wait up to 15 seconds collecting all messages.
+    // The ATV typically sends a burst: SET_CONNECTION_STATE then
+    // SET_STATE (type 30) + CONTENT_ITEM_UPDATE (40/45) with
+    // now-playing metadata, then goes quiet. We wait for the first
+    // message, then hold for 5 more seconds to catch the full burst.
+    let firstDeadline = Date().addingTimeInterval(15)
     lock.lock()
-    while received.isEmpty && Date() < deadline {
-        lock.wait(until: deadline)
+    while received.isEmpty && Date() < firstDeadline {
+        lock.wait(until: firstDeadline)
+    }
+    if !received.isEmpty {
+        let burstDeadline = Date().addingTimeInterval(5)
+        while Date() < burstDeadline {
+            lock.wait(until: burstDeadline)
+        }
     }
     let msgs = received
     lock.unlock()
