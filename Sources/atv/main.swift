@@ -883,6 +883,7 @@ func usage() -> Never {
     print(row("airplay-verify <name>",   "Test stored AirPlay credentials"))
     print(row("airplay-mrp <name>",       "Open full MRP tunnel (now-playing gate test)"))
     print(row("l | r | u | d",           "D-pad left / right / up / down"))
+    print(row("rew | ff",                "Aliases for l / r (rewind / fast-forward)"))
     print(row("sl | sr | su | sd",       "Trackpad swipe left / right / up / down"))
     print(row("click",                   "Click (D-pad centre)"))
     print(row("pp",                      "Play / Pause"))
