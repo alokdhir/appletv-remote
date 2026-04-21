@@ -51,7 +51,7 @@ public final class MRPDataChannel: @unchecked Sendable {
 
     // MARK: - DataStreamMessage header (32 bytes, all big-endian)
 
-    private struct DataStreamHeader {
+    internal struct DataStreamHeader {
         static let length = 32
         let totalSize:   UInt32   // header + payload
         let messageType: (UInt8, UInt8, UInt8, UInt8,
@@ -127,7 +127,10 @@ public final class MRPDataChannel: @unchecked Sendable {
     private var receiveError: Error?
     private var receiveClosed = false
 
-    private var sendSeqno: UInt64 = 0
+    /// Initial seqno matches pyatv's DataStreamChannel: a random 33-bit value
+    /// in `[0x1_0000_0000, 0x2_0000_0000)`. Some ATV firmware appears to reject
+    /// sync requests whose seqno starts at 0.
+    private var sendSeqno: UInt64 = UInt64.random(in: 0x1_0000_0000..<0x2_0000_0000)
 
     /// Called on the internal queue whenever a decoded MRP ProtocolMessage arrives.
     public var onMessage: ((Data) -> Void)?
@@ -233,8 +236,6 @@ public final class MRPDataChannel: @unchecked Sendable {
     private func handleIncoming(hdr: DataStreamHeader, payload: Data) {
         let typBytes = [hdr.messageType.0, hdr.messageType.1, hdr.messageType.2, hdr.messageType.3]
         let isSync   = typBytes == DataStreamHeader.syncType.prefix(4).map { $0 }
-        let isRply   = typBytes == DataStreamHeader.rplyType.prefix(4).map { $0 }
-        _ = isRply
 
         if isSync {
             // Send a reply to every sync from the ATV.
@@ -268,7 +269,11 @@ public final class MRPDataChannel: @unchecked Sendable {
         hdr.append(contentsOf: withUnsafeBytes(of: UInt32(0).bigEndian) { Array($0) })
 
         guard let encrypted = try? session.encrypt(hdr) else { return }
-        connection.send(content: encrypted, completion: .idempotent)
+        // Use .contentProcessed (not .idempotent) so the NW stack won't retry
+        // on transient error — reordering sync/rply seqnos would confuse the ATV.
+        connection.send(content: encrypted, completion: .contentProcessed { err in
+            if let err { Log.pairing.fail("MRPDataChannel: rply send failed: \(err)") }
+        })
     }
 
     // MARK: - Plist encode / decode

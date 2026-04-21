@@ -15,7 +15,7 @@ public enum MRPMessage {
 
     private enum MessageType: Int32 {
         case deviceInfo        = 1
-        case sendCommand       = 9
+        case sendHIDEvent      = 9   // SEND_HID_EVENT_MESSAGE (key up/down)
         case clientUpdates     = 21
         case setConnectionState = 27
     }
@@ -96,8 +96,8 @@ public enum MRPMessage {
         inner.appendBoolField(fieldNumber: 2, value: down)
 
         var outer = Data()
-        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.sendCommand.rawValue))
-        outer.appendBytesField(fieldNumber: Int(MessageType.sendCommand.rawValue), value: inner)
+        outer.appendVarintField(fieldNumber: 1, value: Int64(MessageType.sendHIDEvent.rawValue))
+        outer.appendBytesField(fieldNumber: Int(MessageType.sendHIDEvent.rawValue), value: inner)
         return frameLengthPrefixed(outer)
     }
 

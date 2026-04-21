@@ -51,9 +51,15 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private var receiveClosed = false
     private var isReady = false
     private let readyGroup = DispatchGroup()
-    /// Set by `detach()` — after this the receive loop stops re-registering
-    /// and the new owner of the NWConnection takes over.
+    /// Set by `detach()` — after this the receive loop forwards all inbound
+    /// bytes (and error/EOF signals) to `detachedSink` instead of buffering
+    /// them for `readResponse`. This matters because an in-flight
+    /// `connection.receive(...)` may already be queued on the NWConnection by
+    /// the time the caller hands ownership off; if we simply `return` from
+    /// that callback the bytes are silently dropped and the new owner's
+    /// receive callback (behind it in FIFO order) never fires.
     private var detached = false
+    private var detachedSink: ((Data?, Error?, Bool) -> Void)?
 
     private func trace(_ msg: String) {
         Log.pairing.report("AirPlayHTTP: \(msg)")
@@ -92,11 +98,13 @@ public final class AirPlayHTTP: @unchecked Sendable {
                     self.readyGroup.leave()
                 }
             case .failed(let err):
+                FileHandle.standardError.write(Data("    [http-state] FAILED: \(err)\n".utf8))
                 self.trace("connection failed: \(err)")
                 if !self.isReady { self.isReady = true; self.readyGroup.leave() }
             case .waiting(let err):
                 self.trace("waiting: \(err)")
             case .cancelled:
+                FileHandle.standardError.write(Data("    [http-state] CANCELLED\n".utf8))
                 self.trace("cancelled")
             case .preparing:
                 self.trace("preparing")
@@ -119,13 +127,14 @@ public final class AirPlayHTTP: @unchecked Sendable {
     public func close() { connection.cancel() }
 
     /// Hand the underlying NWConnection off to a post-pair-verify encrypted
-    /// transport. After this, the receive loop no longer re-registers and
-    /// any in-flight receive callback is a no-op, so the new owner can
-    /// register its own receive immediately.
+    /// transport. All subsequent inbound data, error, and EOF events are
+    /// forwarded to `sink` — the new owner MUST NOT call `connection.receive`
+    /// itself (that would race with our in-flight receive).
     ///
     /// Caller must ensure no un-consumed response data is left in the buffer.
-    public func detach() -> NWConnection {
+    public func detach(sink: @escaping (Data?, Error?, Bool) -> Void) -> NWConnection {
         bufferCond.lock()
+        detachedSink = sink
         detached = true
         readBuffer = Data()
         bufferCond.unlock()
@@ -178,7 +187,15 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private func receiveLoop() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, err in
             guard let self else { return }
-            if self.detached { return }   // ownership handed off; drop.
+            if self.detached {
+                // Ownership handed off — forward to the sink and keep the
+                // loop alive so subsequent bytes also reach the new owner.
+                let dataLen = data?.count ?? 0
+                FileHandle.standardError.write(Data("    [http-detached] data=\(dataLen)B err=\(err.map{"\($0)"} ?? "nil") eof=\(isComplete)\n".utf8))
+                self.detachedSink?(data, err, isComplete)
+                if err == nil && !isComplete { self.receiveLoop() }
+                return
+            }
             if let data, !data.isEmpty {
                 self.bufferCond.lock()
                 self.readBuffer.append(data)

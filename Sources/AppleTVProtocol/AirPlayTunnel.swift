@@ -46,9 +46,12 @@ public enum AirPlayTunnel {
     /// Result of a successful tunnel open.
     public struct Tunnel {
         /// The encrypted RTSP control channel (keep alive / send feedback).
-        public let rtsp: EncryptedAirPlayRTSP
+        public let rtsp:      EncryptedAirPlayRTSP
         /// The MRP data channel — ready to receive now-playing pushes.
-        public let mrp:  MRPDataChannel
+        public let mrp:       MRPDataChannel
+        /// Event channel TCP connection — not used for data, kept alive so
+        /// tvOS doesn't tear down the RTSP control session.
+        public let eventConn: NWConnection
     }
 
     // MARK: - Open (control only, for pair-verify gate)
@@ -74,9 +77,12 @@ public enum AirPlayTunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
 
-        // SETUP #1 — event channel.
-        let sessionUUID = UUID().uuidString.uppercased()
-        let rtspURI = "rtsp://\(host)/\(sessionUUID)"
+        // SETUP #1 — event channel. The RTSP URI format MUST be
+        // `rtsp://<client-ip>/<random-32bit-id>` (same as pyatv). tvOS 18
+        // silently drops requests whose URI has the server's IP or a UUID
+        // in the path — confirmed by diffing our wire trace against pyatv.
+        let sessionUUID = UUID().uuidString.uppercased()   // still used in body
+        let rtspURI = rtsp.rtspURI
         let setupBody1: [String: Any] = [
             "isRemoteControlOnly": true,
             "osName":              "iPhone OS",
@@ -102,6 +108,56 @@ public enum AirPlayTunnel {
             throw OpenError.setup("SETUP #1 response missing eventPort")
         }
         Log.pairing.report("AirPlayTunnel: SETUP #1 → eventPort=\(eventPort)")
+
+        // Connect to the event channel TCP socket before sending RECORD.
+        // pyatv does this in _setup_event_channel() before calling record().
+        // tvOS 18 apparently waits for the event channel connection before
+        // responding to RECORD — omitting this causes RECORD to time out
+        // (~10 s) before the ATV eventually responds. The event channel
+        // carries no useful data for our use-case (remote-control only),
+        // but the TCP connection must exist. Keys are derived the same way
+        // as pair-verify but with fixed "Events-Salt" salt.
+        let evOutKey = HKDF<SHA512>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: sharedSecret),
+            salt:             Data("Events-Salt".utf8),
+            info:             Data("Events-Write-Encryption-Key".utf8),
+            outputByteCount:  32
+        )
+        let evInKey = HKDF<SHA512>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: sharedSecret),
+            salt:             Data("Events-Salt".utf8),
+            info:             Data("Events-Read-Encryption-Key".utf8),
+            outputByteCount:  32
+        )
+        let eventEndpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: UInt16(eventPort))!
+        )
+        let eventConn = NWConnection(to: eventEndpoint, using: .tcp)
+        let eventGroup = DispatchGroup()
+        eventGroup.enter()
+        var eventReady = false
+        eventConn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                eventReady = true
+                eventGroup.leave()
+            case .failed, .cancelled, .waiting:
+                eventGroup.leave()
+            default: break
+            }
+        }
+        eventConn.start(queue: DispatchQueue(label: "AirPlayTunnel.event"))
+        guard eventGroup.wait(timeout: .now() + 10) == .success, eventReady else {
+            throw OpenError.setup("event channel TCP connect to \(host):\(eventPort) failed")
+        }
+        Log.pairing.report("AirPlayTunnel: event channel TCP connected (\(host):\(eventPort))")
+        // Hold the event connection and its HAP session alive for the tunnel lifetime.
+        let evSession = HAPSession(
+            writeKey: evOutKey.withUnsafeBytes { Data($0) },
+            readKey:  evInKey.withUnsafeBytes  { Data($0) }
+        )
+        _ = evSession  // retained by tunnel below
 
         // RECORD.
         let rRecord = try rtsp.request(method: "RECORD", uri: rtspURI)
@@ -199,7 +255,7 @@ public enum AirPlayTunnel {
             throw OpenError.mrpInit("\(error)")
         }
 
-        return Tunnel(rtsp: rtsp, mrp: mrp)
+        return Tunnel(rtsp: rtsp, mrp: mrp, eventConn: eventConn)
     }
 
     // MARK: - Shared HTTP setup (pair-verify + HAP session)
@@ -220,9 +276,23 @@ public enum AirPlayTunnel {
             throw OpenError.verify(error)
         }
 
-        let connection = http.detach()
         let session = HAPSession(writeKey: keys.writeKey, readKey: keys.readKey)
-        let rtsp = EncryptedAirPlayRTSP(connection: connection, session: session, host: host)
+        // `rtsp` must be referenced from the sink we pass to detach, but it
+        // needs the connection detach returns — break the cycle with a
+        // pre-declared var captured weakly by the sink.
+        var rtsp: EncryptedAirPlayRTSP!
+        let connection = http.detach { data, err, isComplete in
+            rtsp?.handle(data: data, err: err, isComplete: isComplete)
+        }
+        rtsp = EncryptedAirPlayRTSP(connection: connection, session: session, host: host)
+        // Keep the AirPlayHTTP alive — its receiveLoop is what actually reads
+        // bytes off the wire and forwards them to our sink. Without this the
+        // local `http` deallocates when `openHTTP` returns, its `[weak self]`
+        // receive callback fires with nil self when the SETUP response
+        // arrives, and the bytes are silently discarded (kernel ACKs, but
+        // userspace never processes). Four rounds of debugging, confirmed via
+        // tcpdump: ATV sends 309B response, we ACK it, then nothing.
+        rtsp.retainHTTP(http)
         rtsp.start()
         Log.pairing.report("AirPlayTunnel: control channel encrypted (\(host))")
         return (rtsp, keys.sharedSecret)

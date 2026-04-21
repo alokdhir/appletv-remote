@@ -50,13 +50,73 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
     private let queue:      DispatchQueue
     private let host:       String
 
+    /// Strong reference to the pre-pair-verify HTTP client. Its receive loop
+    /// is the one actually reading bytes off the wire (it was armed during
+    /// pair-verify and we detached into it via sink forwarding). If we don't
+    /// hold it here, `AirPlayHTTP` deallocates when `openHTTP` returns, its
+    /// `[weak self]` receive callback fires with nil self when data arrives,
+    /// and the sink never runs — the ATV's SETUP response was silently
+    /// dropped for this exact reason for four rounds of debugging.
+    private var httpKeepalive: AnyObject?
+    public func retainHTTP(_ http: AnyObject) { httpKeepalive = http }
+
+    /// Diagnostic override: when false, requests are sent plaintext and
+    /// inbound bytes are passed through un-decrypted. This exists because
+    /// pyatv's wire trace shows the RTSP control channel stays PLAINTEXT
+    /// after pair-verify — only the separate event/data channels use HAP
+    /// encryption. Flipping this to false confirms that hypothesis without
+    /// a full refactor.
+    public static var encryptionEnabled = true
+
+    /// When true, every send / receive / decrypt step is mirrored to stderr
+    /// so CLI debugging can see the wire activity that os_log hides.
+    public static var verbose = true
+
+    private func trace(_ s: @autoclosure () -> String) {
+        if Self.verbose {
+            FileHandle.standardError.write(Data("[rtsp \(host)] \(s())\n".utf8))
+        }
+    }
+
     // Plaintext receive buffer — `feed` appends, `readResponse` drains.
     private let bufferCond   = NSCondition()
     private var plainBuffer  = Data()
     private var receiveError: Error?
     private var receiveClosed = false
 
-    private var cseq = 0
+    /// First request uses CSeq=0 (matches pyatv); we post-increment.
+    private var cseq = -1
+
+    /// Per-session identifiers sent as RTSP headers. pyatv sends all three
+    /// on every request after pair-verify; some tvOS builds silently drop
+    /// requests missing them. Notably pyatv uses the SAME 16-char hex value
+    /// for DACP-ID and Client-Instance — using a UUID for Client-Instance
+    /// appears to be rejected by tvOS 18.
+    private let dacpID         = String(format: "%016llX", UInt64.random(in: 1..<UInt64.max))
+    private let activeRemote   = "\(UInt32.random(in: 1..<UInt32.max))"
+    private var clientInstance: String { dacpID }
+
+    /// Lazily-resolved local IP of the NWConnection. pyatv puts the CLIENT's
+    /// IP in the RTSP URI (`rtsp://<local-ip>/<id>`); tvOS 18 silently drops
+    /// requests whose URI uses the server's IP or a hostname/UUID path.
+    public private(set) lazy var localIP: String = {
+        if let endpoint = connection.currentPath?.localEndpoint,
+           case .hostPort(let host, _) = endpoint {
+            switch host {
+            case .ipv4(let addr): return "\(addr)"
+            case .ipv6(let addr): return "\(addr)"
+            case .name(let n, _): return n
+            @unknown default:     return "0.0.0.0"
+            }
+        }
+        return "0.0.0.0"
+    }()
+
+    /// Random 32-bit session ID — part of the RTSP URI, matches pyatv's format.
+    public let sessionID: UInt32 = UInt32.random(in: 1..<UInt32.max)
+
+    /// The fully-formed RTSP URI every request must use.
+    public var rtspURI: String { "rtsp://\(localIP)/\(sessionID)" }
 
     public init(connection: NWConnection, session: HAPSession, host: String) {
         self.connection = connection
@@ -65,12 +125,68 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
         self.queue      = DispatchQueue(label: "EncryptedAirPlayRTSP.\(host)")
     }
 
-    /// Start the receive loop. Must be called once before any `request(...)`.
-    public func start() {
-        receiveLoop()
-    }
+    /// No-op kept for source compatibility. Inbound bytes now arrive via
+    /// `handle(data:err:isComplete:)`, which `AirPlayHTTP.detach(sink:)`
+    /// installs as the forwarding sink. Calling `connection.receive` here
+    /// would race with the in-flight receive AirPlayHTTP already queued.
+    public func start() { /* intentionally empty */ }
 
     public func close() { connection.cancel() }
+
+    /// Called by the AirPlayHTTP detach sink for every receive callback after
+    /// pair-verify handoff. Decrypts inbound ciphertext into `plainBuffer`
+    /// and signals `bufferCond` so `readResponse` can wake.
+    public func handle(data: Data?, err: Error?, isComplete: Bool) {
+        if let data, !data.isEmpty {
+            trace("rx \(data.count)B from wire")
+            if Self.encryptionEnabled {
+                do {
+                    let plain = try session.feed(data)
+                    if !plain.isEmpty {
+                        trace("rx decrypted \(plain.count)B plaintext")
+                        bufferCond.lock()
+                        plainBuffer.append(plain)
+                        bufferCond.broadcast()
+                        bufferCond.unlock()
+                    } else {
+                        trace("rx decrypted 0B (partial frame, waiting for more)")
+                    }
+                } catch {
+                    trace("rx decrypt ERROR: \(error)")
+                    Log.pairing.fail("RTSP: decrypt error: \(error)")
+                    bufferCond.lock()
+                    receiveError = error
+                    receiveClosed = true
+                    bufferCond.broadcast()
+                    bufferCond.unlock()
+                    return
+                }
+            } else {
+                trace("rx (plaintext pass-through) \(data.count)B")
+                bufferCond.lock()
+                plainBuffer.append(data)
+                bufferCond.broadcast()
+                bufferCond.unlock()
+            }
+        }
+        if let err {
+            trace("rx socket ERROR: \(err)")
+            Log.pairing.fail("RTSP: receive error: \(err)")
+            bufferCond.lock()
+            receiveError = err
+            receiveClosed = true
+            bufferCond.broadcast()
+            bufferCond.unlock()
+            return
+        }
+        if isComplete {
+            trace("rx socket EOF")
+            bufferCond.lock()
+            receiveClosed = true
+            bufferCond.broadcast()
+            bufferCond.unlock()
+        }
+    }
 
     // MARK: - Request
 
@@ -83,8 +199,18 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
         cseq += 1
         var req = "\(method) \(uri) RTSP/1.0\r\n"
         req    += "CSeq: \(cseq)\r\n"
-        req    += "User-Agent: AirPlay/320.20\r\n"
-        req    += "Content-Length: \(body.count)\r\n"
+        req    += "User-Agent: AirPlay/550.10\r\n"
+        req    += "DACP-ID: \(dacpID)\r\n"
+        req    += "Active-Remote: \(activeRemote)\r\n"
+        req    += "Client-Instance: \(clientInstance)\r\n"
+        // Only emit Content-Length for non-empty bodies. tvOS 18 returns 500
+        // Internal Server Error to RECORD if Content-Length: 0 is present —
+        // pyatv omits the header entirely for empty-body requests and the
+        // ATV accepts that. Confirmed by wire-diff: identical request except
+        // for this header, ours 500, pyatv's 200.
+        if !body.isEmpty {
+            req += "Content-Length: \(body.count)\r\n"
+        }
         for (k, v) in headers { req += "\(k): \(v)\r\n" }
         req    += "\r\n"
         var frame = Data(req.utf8)
@@ -92,9 +218,17 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
 
         Log.pairing.report("RTSP: → \(method) \(uri) (body=\(body.count)B, cseq=\(cseq))")
 
-        let encrypted: Data
-        do { encrypted = try session.encrypt(frame) }
-        catch { throw RTSPError.framing(error as! HAPSession.FramingError) }
+        trace("tx plaintext \(frame.count)B:\n\(String(data: Data(req.utf8), encoding: .utf8) ?? "<non-utf8>")")
+        let onWire: Data
+        if Self.encryptionEnabled {
+            do { onWire = try session.encrypt(frame) }
+            catch { throw RTSPError.framing(error as! HAPSession.FramingError) }
+            trace("tx encrypted \(onWire.count)B on wire")
+        } else {
+            onWire = frame
+            trace("tx PLAINTEXT (encryption disabled) \(onWire.count)B on wire")
+        }
+        let encrypted = onWire
 
         let sendGroup = DispatchGroup()
         sendGroup.enter()
@@ -109,50 +243,6 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
         if let e = sendError { throw RTSPError.sendFailed("\(e)") }
 
         return try readResponse(timeoutSeconds: timeoutSeconds)
-    }
-
-    // MARK: - Receive loop
-
-    private func receiveLoop() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, err in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                do {
-                    let plain = try self.session.feed(data)
-                    if !plain.isEmpty {
-                        self.bufferCond.lock()
-                        self.plainBuffer.append(plain)
-                        self.bufferCond.broadcast()
-                        self.bufferCond.unlock()
-                    }
-                } catch {
-                    Log.pairing.fail("RTSP: decrypt error: \(error)")
-                    self.bufferCond.lock()
-                    self.receiveError = error
-                    self.receiveClosed = true
-                    self.bufferCond.broadcast()
-                    self.bufferCond.unlock()
-                    return
-                }
-            }
-            if let err {
-                Log.pairing.fail("RTSP: receive error: \(err)")
-                self.bufferCond.lock()
-                self.receiveError = err
-                self.receiveClosed = true
-                self.bufferCond.broadcast()
-                self.bufferCond.unlock()
-                return
-            }
-            if isComplete {
-                self.bufferCond.lock()
-                self.receiveClosed = true
-                self.bufferCond.broadcast()
-                self.bufferCond.unlock()
-                return
-            }
-            self.receiveLoop()
-        }
     }
 
     // MARK: - Response parsing
