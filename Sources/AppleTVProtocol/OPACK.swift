@@ -26,10 +26,10 @@ public enum OPACK {
 
     private static func encodeUInt32(_ value: UInt32, into out: inout Data) {
         out.append(0x32)
-        out.append(UInt8((value >> 24) & 0xFF))
-        out.append(UInt8((value >> 16) & 0xFF))
-        out.append(UInt8((value >> 8)  & 0xFF))
         out.append(UInt8( value        & 0xFF))
+        out.append(UInt8((value >> 8)  & 0xFF))
+        out.append(UInt8((value >> 16) & 0xFF))
+        out.append(UInt8((value >> 24) & 0xFF))
     }
 
     // MARK: - General OPACK encoder
@@ -50,6 +50,8 @@ public enum OPACK {
             encodeInt(i, into: &out)
         case let u as UInt32:
             encodeUInt32(u, into: &out)
+        case let u as UInt64:
+            encodeInt(Int(bitPattern: UInt(u)), into: &out)
         case let d as Data:
             encodeBytes(d, into: &out)
         case let b as Bool:
@@ -79,10 +81,10 @@ public enum OPACK {
     ///
     ///   0x08..0x2F   small int 0–39
     ///   0x30         uint8   (40..255)
-    ///   0x31         uint16  (256..65535, big-endian)
-    ///   0x32         uint32  (65536..UInt32.max, big-endian)
-    ///   0x33         uint64  (values above UInt32.max, big-endian)
-    ///   0x36         int64   (any negative, two's complement big-endian)
+    ///   0x31         uint16  (256..65535, little-endian)
+    ///   0x32         uint32  (65536..UInt32.max, little-endian)
+    ///   0x33         uint64  (values above UInt32.max, little-endian)
+    ///   0x36         int64   (any negative, two's complement little-endian)
     ///
     /// Pre-fix behavior clamped to Int32 range via UInt32(bitPattern: Int32(clamping:)),
     /// which silently corrupted negatives (−1 → 0xFFFFFFFF = +4294967295) and large
@@ -96,23 +98,23 @@ public enum OPACK {
                 out.append(UInt8(i))
             } else if i <= 0xFFFF {
                 out.append(0x31)
-                appendBigEndian(UInt64(i), byteCount: 2, into: &out)
+                appendLittleEndian(UInt64(i), byteCount: 2, into: &out)
             } else if i <= 0xFFFF_FFFF {
                 out.append(0x32)
-                appendBigEndian(UInt64(i), byteCount: 4, into: &out)
+                appendLittleEndian(UInt64(i), byteCount: 4, into: &out)
             } else {
                 out.append(0x33)
-                appendBigEndian(UInt64(i), byteCount: 8, into: &out)
+                appendLittleEndian(UInt64(i), byteCount: 8, into: &out)
             }
         } else {
             // Negative → signed 64-bit (0x36), two's complement big-endian.
             out.append(0x36)
-            appendBigEndian(UInt64(bitPattern: Int64(i)), byteCount: 8, into: &out)
+            appendLittleEndian(UInt64(bitPattern: Int64(i)), byteCount: 8, into: &out)
         }
     }
 
-    private static func appendBigEndian(_ value: UInt64, byteCount: Int, into out: inout Data) {
-        for offset in stride(from: (byteCount - 1) * 8, through: 0, by: -8) {
+    private static func appendLittleEndian(_ value: UInt64, byteCount: Int, into out: inout Data) {
+        for offset in stride(from: 0, through: (byteCount - 1) * 8, by: 8) {
             out.append(UInt8((value >> offset) & 0xFF))
         }
     }
@@ -187,20 +189,20 @@ public enum OPACK {
     /// Encode a `_hidT` touch event — one frame in a swipe gesture sequence.
     ///
     /// Coordinates are in the 1000×1000 space declared by `_touchStart`.
-    /// - `phase`: 0 = press (begin), 1 = hold (move), 2 = release (end)
-    /// - `nanoseconds`: monotonically-increasing timestamp; use the output of
-    ///   `DispatchTime.now().uptimeNanoseconds`.
+    /// - `phase`: 1 = press (begin), 3 = hold (move), 4 = release (end)
+    /// - `nanoseconds`: ns elapsed since `_touchStart` was sent (pyatv's _base_timestamp).
     ///
-    /// Matches pyatv's `hid_event()` in companion/api.py.
+    /// No `_x` transaction field — pyatv fires these as fire-and-forget events.
+    /// Matches pyatv's `hid_event()` / `_send_event("_hidT", ...)` in companion/api.py.
     public static func encodeTouchEvent(x: Double, y: Double, phase: Int,
                                         txn: UInt32, nanoseconds: UInt64) -> Data {
         pack([
             "_i": "_hidT",
-            "_t": 2,
+            "_t": 1,
             "_x": txn,
             "_c": [
-                "_cx":  x,
-                "_cy":  y,
+                "_cx":  Int(x),
+                "_cy":  Int(y),
                 "_tPh": phase,
                 "_tFg": 1,
                 "_ns":  nanoseconds,
@@ -208,10 +210,10 @@ public enum OPACK {
         ] as [String: Any])
     }
 
-    /// Encode a `_hidT` touch stop frame — closes the touch session.
+    /// Encode a `_touchStop` frame — closes the touch session.
     public static func encodeTouchStop(txn: UInt32) -> Data {
         pack([
-            "_i": "_hidT",
+            "_i": "_touchStop",
             "_t": 2,
             "_x": txn,
             "_c": ["_i": 1] as [String: Any],

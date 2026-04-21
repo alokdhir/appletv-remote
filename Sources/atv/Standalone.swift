@@ -272,30 +272,23 @@ final class StandaloneSession {
     func sendSwipe(_ direction: SwipeDirection) throws {
         let (start, end) = direction.coordinates
         let steps = 8
-
-        // Re-send _touchStart before each swipe; use timestamps relative to
-        // that moment — matches pyatv's _base_timestamp pattern.
-        try sendEncrypted(OPACK.encodeTouchStart(txn: nextTxn()))
-        Thread.sleep(forTimeInterval: 0.02)
         let baseNs = DispatchTime.now().uptimeNanoseconds
 
         // Press
-        try sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
-                                                  txn: nextTxn(), nanoseconds: 0))
+        try sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 1,
+                                                  txn: nextTxn(), nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
         // Hold / move
         for i in 1...steps {
             let f = Double(i) / Double(steps)
             let x = start.x + (end.x - start.x) * f
             let y = start.y + (end.y - start.y) * f
-            let relNs = DispatchTime.now().uptimeNanoseconds - baseNs
-            try sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
-                                                      txn: nextTxn(), nanoseconds: relNs))
-            Thread.sleep(forTimeInterval: 0.016)
+            try sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 3,
+                                                      txn: nextTxn(), nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+            Thread.sleep(forTimeInterval: 0.018)
         }
         // Release
-        let relNsEnd = DispatchTime.now().uptimeNanoseconds - baseNs
-        try sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
-                                                  txn: nextTxn(), nanoseconds: relNsEnd))
+        try sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 4,
+                                                  txn: nextTxn(), nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
         Thread.sleep(forTimeInterval: 0.05)
         try sendEncrypted(OPACK.encodeTouchStop(txn: nextTxn()))
         Thread.sleep(forTimeInterval: 0.1)

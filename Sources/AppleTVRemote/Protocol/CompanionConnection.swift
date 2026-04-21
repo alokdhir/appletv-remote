@@ -75,6 +75,7 @@ final class CompanionConnection: ObservableObject {
     /// Provides real-time now-playing pushes (title, artist, position) that the
     /// Companion `_iMC` channel only delivers reactively on state changes.
     private var airPlayTunnel: AirPlayTunnel.Tunnel?
+    private var lastPlaybackStateTimestamp: Double = 0
 
     // MARK: - Connect / Disconnect
 
@@ -368,6 +369,7 @@ final class CompanionConnection: ObservableObject {
         sendWakeOnConnect = false
         sessionStartTxn = nil
         attentionState = nil
+        lastPlaybackStateTimestamp = 0
     }
 
     // MARK: - Remote Commands (post-session)
@@ -428,34 +430,26 @@ final class CompanionConnection: ObservableObject {
             guard self.state == .connected else { return }
             let (start, end) = direction.coordinates
             let steps = 8
-
-            // Re-send _touchStart before each swipe; use timestamps relative
-            // to that moment — matches pyatv's _base_timestamp pattern.
-            let t0 = self.txnCounter; self.txnCounter &+= 1
-            self.sendEncrypted(OPACK.encodeTouchStart(txn: t0))
-            try? await Task.sleep(for: .milliseconds(20))
             let baseNs = DispatchTime.now().uptimeNanoseconds
 
             // Press
-            let tPress = self.txnCounter; self.txnCounter &+= 1
-            self.sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 0,
-                                                      txn: tPress, nanoseconds: 0))
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 1,
+                                                      txn: self.txnCounter, nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+            self.txnCounter &+= 1
             // Hold / move
             for i in 1...steps {
                 let f = Double(i) / Double(steps)
                 let x = start.x + (end.x - start.x) * f
                 let y = start.y + (end.y - start.y) * f
-                let relNs = DispatchTime.now().uptimeNanoseconds - baseNs
-                let tN = self.txnCounter; self.txnCounter &+= 1
-                self.sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 1,
-                                                          txn: tN, nanoseconds: relNs))
-                try? await Task.sleep(for: .milliseconds(16))
+                self.sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 3,
+                                                          txn: self.txnCounter, nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+                self.txnCounter &+= 1
+                try? await Task.sleep(for: .milliseconds(18))
             }
             // Release
-            let relNsEnd = DispatchTime.now().uptimeNanoseconds - baseNs
-            let tEnd = self.txnCounter; self.txnCounter &+= 1
-            self.sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 2,
-                                                      txn: tEnd, nanoseconds: relNsEnd))
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 4,
+                                                      txn: self.txnCounter, nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+            self.txnCounter &+= 1
             try? await Task.sleep(for: .milliseconds(50))
             let tStop = self.txnCounter; self.txnCounter &+= 1
             self.sendEncrypted(OPACK.encodeTouchStop(txn: tStop))
@@ -481,12 +475,22 @@ final class CompanionConnection: ObservableObject {
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
                             var info = self.nowPlaying ?? NowPlayingInfo()
-                            if let v = update.title    { info.title        = v }
-                            if let v = update.artist   { info.artist       = v }
-                            if let v = update.album    { info.album        = v }
-                            if let v = update.duration { info.duration     = v }
-                            if let v = update.elapsedTime { info.elapsedTime = v }
-                            if let v = update.playbackRate { info.playbackRate = v }
+                            if let v = update.title       { info.title        = v }
+                            if let v = update.artist      { info.artist       = v }
+                            if let v = update.album       { info.album        = v }
+                            if let v = update.duration    { info.duration     = v }
+                            if let v = update.elapsedTime { info.elapsedTime  = v }
+                            // Only accept playbackRate if this message has a newer
+                            // playbackStateTimestamp than what we've seen before.
+                            // Ghost messages from inactive apps share stale timestamps
+                            // and would otherwise clobber the real playing state.
+                            if let v = update.playbackRate {
+                                let ts = update.playbackStateTimestamp ?? 0
+                                if ts >= self.lastPlaybackStateTimestamp {
+                                    self.lastPlaybackStateTimestamp = ts
+                                    info.playbackRate = v
+                                }
+                            }
                             self.nowPlaying = info
                         }
                     }
@@ -771,7 +775,26 @@ final class CompanionConnection: ObservableObject {
     private func updateNowPlaying(from msg: [String: Any]) {
         // Media-control data lives in `_c`; some responses put it top-level.
         let inner = (msg["_c"] as? [String: Any]) ?? msg
-        nowPlaying = NowPlayingInfo(from: inner)
+        let update = NowPlayingInfo(from: inner)
+        Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))") 
+        // Merge into existing state so fields absent from this event (e.g.
+        // playbackRate not included in a title-only push) don't overwrite
+        // previously-known good values.
+        var info = nowPlaying ?? NowPlayingInfo()
+        // If the app changed, reset stale metadata so old title/artist don't linger.
+        if let newApp = update.app, newApp != info.app {
+            info.title = nil; info.artist = nil; info.album = nil
+            info.elapsedTime = nil; info.duration = nil; info.playbackRate = nil
+        }
+        if let v = update.title        { info.title        = v }
+        if let v = update.artist       { info.artist       = v }
+        if let v = update.album        { info.album        = v }
+        if let v = update.app          { info.app          = v }
+        if let v = update.elapsedTime  { info.elapsedTime  = v }
+        if let v = update.duration     { info.duration     = v }
+        if let v = update.playbackRate { info.playbackRate = v }
+        info.raw.merge(update.raw) { _, new in new }
+        nowPlaying = info
         Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
     }
 

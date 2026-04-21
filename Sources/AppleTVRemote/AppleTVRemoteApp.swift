@@ -130,6 +130,8 @@ private class WindowSetupView: NSView {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.titlebarAppearsTransparent = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         // Disable SwiftUI's auto-generated frame autosave. SwiftUI derives
         // the autosave name from the full view-modifier type signature, so

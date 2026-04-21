@@ -97,7 +97,7 @@ public enum MRPMessage {
     public static func clientUpdatesConfig() -> Data {
         var inner = Data()
         inner.appendBoolField(fieldNumber: 1, value: true)   // artworkUpdates
-        inner.appendBoolField(fieldNumber: 2, value: false)  // nowPlayingUpdates (pyatv default)
+        inner.appendBoolField(fieldNumber: 2, value: true)   // nowPlayingUpdates
         inner.appendBoolField(fieldNumber: 3, value: true)   // volumeUpdates
         inner.appendBoolField(fieldNumber: 4, value: true)   // keyboardUpdates
         inner.appendBoolField(fieldNumber: 5, value: true)   // outputDeviceUpdates

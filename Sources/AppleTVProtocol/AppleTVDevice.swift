@@ -106,10 +106,10 @@ public enum SwipeDirection: CaseIterable, Sendable {
     /// (start, end) touch coordinates for this swipe direction.
     public var coordinates: (start: (x: Double, y: Double), end: (x: Double, y: Double)) {
         switch self {
-        case .up:    return (start: (500, 750), end: (500, 250))
-        case .down:  return (start: (500, 250), end: (500, 750))
-        case .left:  return (start: (750, 500), end: (250, 500))
-        case .right: return (start: (250, 500), end: (750, 500))
+        case .up:    return (start: (500, 1000), end: (500, 0))
+        case .down:  return (start: (500, 0), end: (500, 1000))
+        case .left:  return (start: (1000, 500), end: (0, 500))
+        case .right: return (start: (0, 500), end: (1000, 500))
         }
     }
 }
