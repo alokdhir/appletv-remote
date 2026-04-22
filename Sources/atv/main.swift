@@ -814,11 +814,7 @@ func runStandalone(args: [String], device: String?) throws {
     case "home":       try standaloneSendKey(deviceName: device, command: .home)
     case "vol+":       try standaloneSendKey(deviceName: device, command: .volumeUp)
     case "vol-":       try standaloneSendKey(deviceName: device, command: .volumeDown)
-    case "power":
-        // Without a live session we don't know the ATV's power state, so
-        // "power" always sends wake. (The app-backed path can toggle.)
-        try standaloneSendKey(deviceName: device, command: .wake)
-    case "status", "select", "pair", "ping", "disconnect":
+    case "status", "select", "pair", "ping", "disconnect", "power":
         die("--standalone does not support '\(cmd)' — run AppleTVRemote.app for that")
     default:
         die("unknown command: \(cmd)")
@@ -1025,7 +1021,7 @@ do {
     let standaloneCapable: Set<String> = [
         "list", "l", "r", "u", "d", "sl", "sr", "su", "sd",
         "ff", "rew",
-        "click", "pp", "menu", "home", "vol+", "vol-", "power",
+        "click", "pp", "menu", "home", "vol+", "vol-",
     ]
     // Either a regular single-command run fits standalone, or every command
     // in the chain does (chains are all keys, so by construction they do).
