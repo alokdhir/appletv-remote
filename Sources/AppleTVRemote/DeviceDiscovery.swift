@@ -123,7 +123,6 @@ final class DeviceDiscovery: ObservableObject {
             if devices.first(where: { $0.id == id }) == nil {
                 let device = AppleTVDevice(id: id, name: name, endpoint: result.endpoint)
                 devices.append(device)
-                devices.sort { $0.name < $1.name }
                 resolveService(name: name, type: type_, domain: domain.isEmpty ? "local." : domain)
             }
         }

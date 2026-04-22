@@ -98,13 +98,11 @@ public final class AirPlayHTTP: @unchecked Sendable {
                     self.readyGroup.leave()
                 }
             case .failed(let err):
-                FileHandle.standardError.write(Data("    [http-state] FAILED: \(err)\n".utf8))
                 self.trace("connection failed: \(err)")
                 if !self.isReady { self.isReady = true; self.readyGroup.leave() }
             case .waiting(let err):
                 self.trace("waiting: \(err)")
             case .cancelled:
-                FileHandle.standardError.write(Data("    [http-state] CANCELLED\n".utf8))
                 self.trace("cancelled")
             case .preparing:
                 self.trace("preparing")
@@ -191,7 +189,7 @@ public final class AirPlayHTTP: @unchecked Sendable {
                 // Ownership handed off — forward to the sink and keep the
                 // loop alive so subsequent bytes also reach the new owner.
                 let dataLen = data?.count ?? 0
-                FileHandle.standardError.write(Data("    [http-detached] data=\(dataLen)B err=\(err.map{"\($0)"} ?? "nil") eof=\(isComplete)\n".utf8))
+                self.trace("detached: data=\(dataLen)B err=\(err.map{"\($0)"} ?? "nil") eof=\(isComplete)")
                 self.detachedSink?(data, err, isComplete)
                 if err == nil && !isComplete { self.receiveLoop() }
                 return
