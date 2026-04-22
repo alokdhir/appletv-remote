@@ -937,6 +937,7 @@ guard !args.isEmpty else { usage() }
 let chainable: Set<String> = [
     "l", "r", "u", "d", "sl", "sr", "su", "sd",
     "click", "pp", "menu", "home", "vol+", "vol-",
+    "ff", "rew",
 ]
 
 /// Expand a chain of args into the final sequence of commands to run, or nil
