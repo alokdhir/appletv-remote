@@ -56,6 +56,12 @@ final class CompanionConnection: ObservableObject {
     // auto-send the Wake HID command after the session is established.
     private var sendWakeOnConnect = false
 
+    /// Wake the device and send a Wake HID command once connected (HDMI-CEC TV power-on).
+    func wakeAndPowerOn(to device: AppleTVDevice) {
+        sendWakeOnConnect = true
+        wakeAndConnect(to: device)
+    }
+
     /// Set when the user explicitly tore down the connection (via `disconnect()`).
     /// Auto-retry logic checks this to distinguish user-intent cancellation from
     /// network-driven drops/failures.

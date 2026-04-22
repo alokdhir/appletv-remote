@@ -390,8 +390,8 @@ final class IPCServer {
             client.send(.response(.ok(id)))
             return
         }
-        // Not connected — pick the current device, default device, or first
-        // discovered, and wake+connect it.
+        // Not connected — treat power as wake: connect and send Wake HID.
+        // Route through handleKey so the response waits until connected.
         let target: AppleTVDevice? = connection.currentDevice
             ?? discovery.devices.first(where: { $0.id == DefaultDevice.id })
             ?? discovery.devices.first(where: { $0.host != nil })
@@ -399,7 +399,7 @@ final class IPCServer {
             client.send(.response(.failure(id, "No device available to wake")))
             return
         }
-        connection.wakeAndConnect(to: device)
+        connection.wakeAndPowerOn(to: device)
         client.send(.response(.ok(id)))
     }
 
