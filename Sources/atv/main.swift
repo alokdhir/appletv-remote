@@ -317,7 +317,7 @@ _atv() {
 }
 
 _atv "$@"
-compdef _atv atv
+(( $+functions[compdef] )) && compdef _atv atv
 """#
 
 let bashCompletion = #"""
