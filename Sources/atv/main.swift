@@ -317,7 +317,8 @@ _atv() {
 }
 
 _atv "$@"
-(( $+functions[compdef] )) && compdef _atv atv
+(( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
+compdef _atv atv
 """#
 
 let bashCompletion = #"""
