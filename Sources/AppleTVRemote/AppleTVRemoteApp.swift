@@ -13,6 +13,7 @@ struct AppleTVRemoteApp: App {
     @StateObject private var autoConnect = AutoConnectStore()
     @StateObject private var reconnector = AutoReconnector()
     @State       private var ipcServer:  IPCServer?
+    @State       private var autoConnectObserver: AnyCancellable?
 
     var body: some Scene {
         // Register setUp on the delegate here — body evaluates before
@@ -34,14 +35,6 @@ struct AppleTVRemoteApp: App {
                     // Fallback for Dock/normal launches where the window appears.
                     setUp()
                 }
-                .onChange(of: discovery.devices) { devices in
-                    guard connection.state == .disconnected else { return }
-                    if let device = devices.first(where: {
-                        autoConnect.isEnabled($0.id) && $0.host != nil
-                    }) {
-                        connection.wakeAndConnect(to: device)
-                    }
-                }
         }
         .windowResizability(.contentMinSize)
         .commands {
@@ -54,6 +47,7 @@ struct AppleTVRemoteApp: App {
     /// Idempotent: safe to call again from .onAppear.
     private func setUp() {
         appDelegate.onFinishLaunching = nil  // clear after first real call
+        discovery.startDiscovery()
         MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
         reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
         if ipcServer == nil {
@@ -63,6 +57,18 @@ struct AppleTVRemoteApp: App {
                                    reconnector: reconnector)
             server.start()
             ipcServer = server
+        }
+        if autoConnectObserver == nil {
+            autoConnectObserver = discovery.$devices
+                .receive(on: DispatchQueue.main)
+                .sink { [connection, autoConnect] devices in
+                    guard connection.state == .disconnected else { return }
+                    if let device = devices.first(where: {
+                        autoConnect.isEnabled($0.id) && $0.host != nil
+                    }) {
+                        connection.wakeAndConnect(to: device)
+                    }
+                }
         }
     }
 }
