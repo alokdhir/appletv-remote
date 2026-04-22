@@ -897,7 +897,7 @@ func usage() -> Never {
     print(row("version",                 "Print atv version (1.0-<build timestamp>)"))
     print(row("completion <bash|zsh>",   "Emit shell completion script to stdout"))
     print("")
-    print(cyan("Command chaining") + " (keys only):")
+    print(cyan("Command chaining") + " (navigation + playback commands):")
     print(dim("  atv r u d          → right, up, down in sequence"))
     print(dim("  atv 3 r            → right × 3"))
     print(dim("  atv 3 r u          → right+up sequence × 3"))
