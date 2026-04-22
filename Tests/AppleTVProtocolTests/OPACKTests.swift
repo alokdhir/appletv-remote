@@ -34,49 +34,50 @@ final class OPACKTests: XCTestCase {
         XCTAssertEqual(OPACK.pack(255), Data([0x30, 0xFF]))
     }
 
-    // MARK: - uint16 (0x31) — big-endian
+    // MARK: - uint16 (0x31) — little-endian
 
     func testUInt16BoundaryLower() {
-        XCTAssertEqual(OPACK.pack(256), Data([0x31, 0x01, 0x00]))
+        XCTAssertEqual(OPACK.pack(256), Data([0x31, 0x00, 0x01]))
     }
 
     func testUInt16BoundaryUpper() {
         XCTAssertEqual(OPACK.pack(65535), Data([0x31, 0xFF, 0xFF]))
     }
 
-    // MARK: - uint32 (0x32) — big-endian
+    // MARK: - uint32 (0x32) — little-endian
 
     func testUInt32BoundaryLower() {
-        XCTAssertEqual(OPACK.pack(65536), Data([0x32, 0x00, 0x01, 0x00, 0x00]))
+        XCTAssertEqual(OPACK.pack(65536), Data([0x32, 0x00, 0x00, 0x01, 0x00]))
     }
 
     func testUInt32BoundaryUpper() {
-        // 0xFFFFFFFF = 4_294_967_295 — used to silently clamp via Int32(clamping:)
+        // 0xFFFFFFFF = 4_294_967_295
         XCTAssertEqual(OPACK.pack(4_294_967_295), Data([0x32, 0xFF, 0xFF, 0xFF, 0xFF]))
     }
 
-    // MARK: - uint64 (0x33) — big-endian. Bug 79c: previously clamped to Int32.max
+    // MARK: - uint64 (0x33) — little-endian. Bug 79c: previously clamped to Int32.max
 
     func testUInt64ForValuesAboveUInt32Max() {
         let value = 0x1_0000_0000 // 2^32 — no longer fits uint32
         let bytes = OPACK.pack(value)
-        XCTAssertEqual(bytes, Data([0x33, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]))
+        XCTAssertEqual(bytes, Data([0x33, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]))
     }
 
-    // MARK: - Negative ints (0x36 int64 signed). Bug 79c: previously corrupted
+    // MARK: - Negative ints (0x36 int64 signed little-endian). Bug 79c: previously corrupted
 
     func testNegativeOneDoesNotBecomeLargePositive() {
         // Before fix: -1 → Int32(clamping: -1) = -1 → UInt32(bitPattern:) = 0xFFFFFFFF,
         // emitted as 0x32 0xFF 0xFF 0xFF 0xFF — which decodes as +4_294_967_295, not -1.
-        // After fix: emit as 0x36 (int64 signed) with two's-complement 0xFF..FF.
+        // After fix: emit as 0x36 (int64 signed little-endian) with two's-complement 0xFF..FF.
         let bytes = OPACK.pack(-1)
         XCTAssertEqual(bytes, Data([0x36, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]))
     }
 
     func testNegativeIntMinRoundTrip() {
         // Int.min on 64-bit platforms = -2^63 = 0x8000_0000_0000_0000
+        // Little-endian: 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x80
         let bytes = OPACK.pack(Int.min)
-        XCTAssertEqual(bytes, Data([0x36, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]))
+        XCTAssertEqual(bytes, Data([0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]))
     }
 
     // MARK: - Dict key ordering. Bug r2g: insertion order was non-deterministic

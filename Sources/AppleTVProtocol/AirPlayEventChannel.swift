@@ -40,14 +40,11 @@ public final class AirPlayEventChannel: @unchecked Sendable {
             if let data, !data.isEmpty {
                 do {
                     let plain = try self.session.feed(data)
-                    let hex = plain.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
                     if !plain.isEmpty { self.processPlain(plain) }
                 } catch {
                     Log.pairing.fail("EventChannel: decrypt error: \(error)")
                     return
                 }
-            }
-            if let err {
             }
             guard err == nil, !isComplete else { return }
             self.receiveLoop()
@@ -65,7 +62,7 @@ public final class AirPlayEventChannel: @unchecked Sendable {
                 plainBuffer = Data()
                 return
             }
-            var lines = headerStr.split(separator: "\r\n", omittingEmptySubsequences: false)
+            let lines = headerStr.split(separator: "\r\n", omittingEmptySubsequences: false)
             guard !lines.isEmpty else { plainBuffer = Data(); return }
 
             // Parse Content-Length header.

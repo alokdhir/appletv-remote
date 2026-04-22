@@ -11,8 +11,8 @@ import Foundation
 ///   0x04         null
 ///   0x08–0x2F    small integers (value = byte - 0x08)
 ///   0x30         uint8  (1 byte follows)
-///   0x31         uint16 (2 bytes, big-endian)
-///   0x32         uint32 (4 bytes)
+///   0x31         uint16 (2 bytes, little-endian)
+///   0x32         uint32 (4 bytes, little-endian)
 ///   0x33         uint64 (8 bytes)
 ///   0x40–0x5F    string, length = byte - 0x40  (0–31 UTF-8 bytes)
 ///   0x60         string, 1-byte length follows
@@ -319,46 +319,46 @@ public enum OPACK {
             data.formIndex(after: &cursor)
             return Int(tag) - 0x08
         case 0x30:
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 1) else { return nil }
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 1) else { return nil }
             data.formIndex(&cursor, offsetBy: 2)
             return Int(u)
         case 0x31:
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 2) else { return nil }
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 2) else { return nil }
             data.formIndex(&cursor, offsetBy: 3)
             return Int(u)
         case 0x32:
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
             data.formIndex(&cursor, offsetBy: 5)
             return Int(u)
         case 0x33:
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
             data.formIndex(&cursor, offsetBy: 9)
             // On 64-bit platforms Int == Int64, so values above Int64.max round-trip lossily.
             // Our encoder never emits such values (they come from Swift Int input).
             return Int(bitPattern: UInt(u))
         case 0x35:
-            // int32, signed big-endian
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
+            // int32, signed little-endian
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 4) else { return nil }
             data.formIndex(&cursor, offsetBy: 5)
             return Int(Int32(bitPattern: UInt32(u)))
         case 0x36:
-            // int64, signed big-endian
-            guard let u = readBigEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
+            // int64, signed little-endian
+            guard let u = readLittleEndianUInt(data, cursor: cursor, byteCount: 8) else { return nil }
             data.formIndex(&cursor, offsetBy: 9)
             return Int(Int64(bitPattern: u))
         default: return nil
         }
     }
 
-    /// Reads `byteCount` big-endian bytes starting at `cursor + 1` (skipping the tag
+    /// Reads `byteCount` little-endian bytes starting at `cursor + 1` (skipping the tag
     /// byte at `cursor`). Returns nil if the slice is out of bounds. Does NOT advance
     /// the cursor — callers do that themselves after consuming the value.
-    private static func readBigEndianUInt(_ data: Data,
-                                          cursor: Data.Index,
-                                          byteCount: Int) -> UInt64? {
+    private static func readLittleEndianUInt(_ data: Data,
+                                             cursor: Data.Index,
+                                             byteCount: Int) -> UInt64? {
         guard data.distance(from: cursor, to: data.endIndex) >= 1 + byteCount else { return nil }
         var v: UInt64 = 0
-        for offset in 1...byteCount {
+        for offset in stride(from: byteCount, through: 1, by: -1) {
             v = (v << 8) | UInt64(data[data.index(cursor, offsetBy: offset)])
         }
         return v

@@ -43,23 +43,6 @@ public enum MRPMessage {
         }
     }
 
-    // MARK: - HID usages for SendCommandMessage
-
-    private enum HIDUsage: Int32 {
-        case home         = 3
-        case up           = 4
-        case down         = 5
-        case left         = 6
-        case right        = 7
-        case select       = 8
-        case menu         = 9
-        case playPause    = 11
-        case skipForward  = 12
-        case skipBackward = 13
-        case volumeUp     = 14
-        case volumeDown   = 15
-    }
-
     // MARK: - Public factory
 
     /// DEVICE_INFO_MESSAGE — identifies this client to the ATV.
@@ -128,24 +111,6 @@ public enum MRPMessage {
             outer.appendBytesField(fieldNumber: type.extensionField, value: inner) // inner (extension field)
         }
         return frameLengthPrefixed(outer)
-    }
-
-    private static func hidUsage(for command: AppleTVRemoteCommand) -> HIDUsage? {
-        switch command {
-        case .up:           return .up
-        case .down:         return .down
-        case .left:         return .left
-        case .right:        return .right
-        case .select:       return .select
-        case .menu:         return .menu
-        case .home:         return .home
-        case .playPause:    return .playPause
-        case .skipForward:  return .skipForward
-        case .skipBackward: return .skipBackward
-        case .volumeUp:     return .volumeUp
-        case .volumeDown:   return .volumeDown
-        default:            return nil
-        }
     }
 
     private static func frameLengthPrefixed(_ data: Data) -> Data {

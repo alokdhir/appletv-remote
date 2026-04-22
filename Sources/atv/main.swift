@@ -593,23 +593,11 @@ func cmdAirPlayTunnel(_ conn: IPCConnection, device: String) throws {
     print(green("✓ encrypted RTSP control channel established"))
 
     let sessionUUID = UUID().uuidString.uppercased()
-    let setupBody: [String: Any] = [
-        "isRemoteControlOnly": true,
-        "osName":              "iPhone OS",
-        "sourceVersion":       "550.10",
-        "timingProtocol":      "None",
-        "model":               "iPhone10,6",
-        "deviceID":            "AA:BB:CC:DD:EE:FF",
-        "osVersion":           "15.0",
-        "osBuildVersion":      "19A5297e",
-        "macAddress":          "AA:BB:CC:DD:EE:FF",
-        "sessionUUID":         sessionUUID,
-        "name":                "AppleTVRemote",
-    ]
     let bodyData: Data
     do {
         bodyData = try PropertyListSerialization.data(
-            fromPropertyList: setupBody, format: .binary, options: 0)
+            fromPropertyList: AirPlayTunnel.eventSetupBody(sessionUUID: sessionUUID),
+            format: .binary, options: 0)
     } catch { die("plist encode failed: \(error)") }
 
     let resp: EncryptedAirPlayRTSP.Response
@@ -741,11 +729,9 @@ func cmdPair(_ conn: IPCConnection, device: String) throws {
     print(cyan("Starting pairing with \(device)…"))
     let id = String(UUID().uuidString.prefix(8))
     try conn.send(.request(IPCRequest(id: id, cmd: .pairStart, args: ["device": device])))
-    var promptedForPin = false
     let final = try conn.awaitResponse(id: id) { event in
         switch event.event {
         case .pinRequired:
-            promptedForPin = true
             fputs(cyan("Enter PIN shown on Apple TV: "), stdout); fflush(stdout)
             guard let pin = readLine(strippingNewline: true), !pin.isEmpty else {
                 FileHandle.standardError.write(Data(red("no PIN supplied\n").utf8))
@@ -767,7 +753,6 @@ func cmdPair(_ conn: IPCConnection, device: String) throws {
             break
         }
     }
-    _ = promptedForPin
     expectOk(final)
 }
 

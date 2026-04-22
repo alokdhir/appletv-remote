@@ -776,7 +776,6 @@ final class CompanionConnection: ObservableObject {
         // Media-control data lives in `_c`; some responses put it top-level.
         let inner = (msg["_c"] as? [String: Any]) ?? msg
         let update = NowPlayingInfo(from: inner)
-        Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))") 
         // Merge into existing state so fields absent from this event (e.g.
         // playbackRate not included in a title-only push) don't overwrite
         // previously-known good values.

@@ -86,20 +86,7 @@ public enum AirPlayTunnel {
         // in the path — confirmed by diffing our wire trace against pyatv.
         let sessionUUID = UUID().uuidString.uppercased()   // still used in body
         let rtspURI = rtsp.rtspURI
-        let setupBody1: [String: Any] = [
-            "isRemoteControlOnly": true,
-            "osName":              "iPhone OS",
-            "sourceVersion":       "550.10",
-            "timingProtocol":      "None",
-            "model":               "iPhone10,6",
-            "deviceID":            "AA:BB:CC:DD:EE:FF",
-            "osVersion":           "15.0",
-            "osBuildVersion":      "19A5297e",
-            "macAddress":          "AA:BB:CC:DD:EE:FF",
-            "sessionUUID":         sessionUUID,
-            "name":                "AppleTVRemote",
-        ]
-        let setup1Data = try encodePlist(setupBody1)
+        let setup1Data = try encodePlist(eventSetupBody(sessionUUID: sessionUUID))
         let r1 = try rtsp.request(method: "SETUP", uri: rtspURI,
                                   headers: ["Content-Type": "application/x-apple-binary-plist"],
                                   body: setup1Data)
@@ -320,6 +307,25 @@ public enum AirPlayTunnel {
     }
 
     // MARK: - Helpers
+
+    /// Standard RTSP SETUP body for the event channel (SETUP #1).
+    /// Exposed so CLI diagnostic commands can build the same request without
+    /// duplicating the field values.
+    public static func eventSetupBody(sessionUUID: String) -> [String: Any] {
+        [
+            "isRemoteControlOnly": true,
+            "osName":              "iPhone OS",
+            "sourceVersion":       "550.10",
+            "timingProtocol":      "None",
+            "model":               "iPhone10,6",
+            "deviceID":            "AA:BB:CC:DD:EE:FF",
+            "osVersion":           "15.0",
+            "osBuildVersion":      "19A5297e",
+            "macAddress":          "AA:BB:CC:DD:EE:FF",
+            "sessionUUID":         sessionUUID,
+            "name":                "AppleTVRemote",
+        ]
+    }
 
     private static func encodePlist(_ obj: [String: Any]) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: obj, format: .binary, options: 0)

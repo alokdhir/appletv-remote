@@ -70,7 +70,7 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
 
     /// When true, every send / receive / decrypt step is mirrored to stderr
     /// so CLI debugging can see the wire activity that os_log hides.
-    public static var verbose = true
+    public static var verbose = false
 
     private func trace(_ s: @autoclosure () -> String) {
         if Self.verbose {
