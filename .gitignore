@@ -10,3 +10,4 @@
 *.db
 .beads/.beads-credential-key
 AppleTVRemote.xcodeproj/
+.claude/
