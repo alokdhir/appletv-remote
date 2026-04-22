@@ -222,7 +222,8 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
         let onWire: Data
         if Self.encryptionEnabled {
             do { onWire = try session.encrypt(frame) }
-            catch { throw RTSPError.framing(error as! HAPSession.FramingError) }
+            catch let e as HAPSession.FramingError { throw RTSPError.framing(e) }
+            catch { throw error }
             trace("tx encrypted \(onWire.count)B on wire")
         } else {
             onWire = frame

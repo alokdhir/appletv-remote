@@ -79,6 +79,7 @@ public enum AirPlayTunnel {
                             connectTimeout: TimeInterval = 5) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
+        do {
 
         // SETUP #1 — event channel. The RTSP URI format MUST be
         // `rtsp://<client-ip>/<random-32bit-id>` (same as pyatv). tvOS 18
@@ -264,6 +265,10 @@ public enum AirPlayTunnel {
         }
 
         return Tunnel(rtsp: rtsp, mrp: mrp, event: eventChannel)
+        } catch {
+            rtsp.close()
+            throw error
+        }
     }
 
     // MARK: - Shared HTTP setup (pair-verify + HAP session)

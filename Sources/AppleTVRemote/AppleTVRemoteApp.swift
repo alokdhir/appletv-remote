@@ -507,6 +507,11 @@ final class AutoReconnector: ObservableObject {
     /// to the connect prompt.
     @Published var isReconnecting: Bool = false
 
+    deinit {
+        retryTask?.cancel()
+        cancellable?.cancel()
+    }
+
     private var cancellable: AnyCancellable?
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0

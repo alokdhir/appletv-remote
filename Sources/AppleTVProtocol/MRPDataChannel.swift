@@ -165,7 +165,8 @@ public final class MRPDataChannel: @unchecked Sendable {
 
         let encrypted: Data
         do { encrypted = try session.encrypt(hdr) }
-        catch { throw ChannelError.framingError(error as! HAPSession.FramingError) }
+        catch let e as HAPSession.FramingError { throw ChannelError.framingError(e) }
+        catch { throw error }
 
         let g = DispatchGroup()
         g.enter()

@@ -376,6 +376,7 @@ final class CompanionConnection: ObservableObject {
         sessionStartTxn = nil
         attentionState = nil
         lastPlaybackStateTimestamp = 0
+        nowPlaying = nil
     }
 
     // MARK: - Remote Commands (post-session)
@@ -681,9 +682,12 @@ final class CompanionConnection: ObservableObject {
                     }
                 }
             } catch {
-                // Authentication error (code=2) = credentials mismatch; delete and re-pair.
-                // Other errors also delete since stale credentials are the likely cause.
-                if let device = currentDevice { credentialStore.delete(deviceID: device.id) }
+                // Only delete credentials if the ATV explicitly rejected them (serverError).
+                // Transient failures (TCP reset, timeout, crypto) should not wipe valid credentials.
+                if case CompanionPairVerify.VerifyError.serverError = error,
+                   let device = currentDevice {
+                    credentialStore.delete(deviceID: device.id)
+                }
                 state = .error("Pair verify failed: \(error)\nPress Connect to re-pair.")
             }
 
