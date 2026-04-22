@@ -169,10 +169,13 @@ func connectOrLaunch() -> IPCConnection {
         return c
     }
 
-    // Launch the app (non-interactively, don't steal focus).
+    // Launch the app. -g (background/no-window) is intentionally omitted: with
+    // -g SwiftUI never creates the WindowGroup window, so dock-click has nothing
+    // to show. hideWindowAtStartup defaults to true so the window is hidden on
+    // launch but still created — dock-click can then surface it normally.
     let launch = Process()
     launch.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    launch.arguments = ["-g", "-b", "com.adhir.appletv-remote"]
+    launch.arguments = ["-b", "com.adhir.appletv-remote"]
     do {
         try launch.run()
     } catch {

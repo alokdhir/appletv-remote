@@ -98,9 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// tells AppKit we've handled the reopen ourselves so it doesn't try to
     /// un-miniaturize or surface some other window on top.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows {
-            MenuBarController.shared.openMainWindow()
-        }
+        MenuBarController.shared.openMainWindow()
         return false
     }
 }
@@ -166,7 +164,12 @@ private class WindowSetupView: NSView {
         let collapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed")
         window.setContentSize(NSSize(width: collapsed ? 300 : 520, height: 620))
 
-        guard UserDefaults.standard.bool(forKey: "hideWindowAtStartup") else { return }
+        // Default true: hide window on startup so CLI-launched app doesn't steal
+        // focus, but the window is still created so dock-click can surface it.
+        let hide = UserDefaults.standard.object(forKey: "hideWindowAtStartup") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "hideWindowAtStartup")
+        guard hide else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
         // before our async orderOut runs.
         window.alphaValue = 0
@@ -309,9 +312,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     func openMainWindow() {
         if let pop = popover, pop.isShown {
-            // Suppress the deactivate that popoverDidClose would otherwise queue
-            // — if it ran after our activate+show below, it would steal focus
-            // from the main window we just raised.
             suppressPopoverDeactivate = true
             pop.performClose(nil)
         }
