@@ -224,7 +224,7 @@ public final class AirPlayPairSetup {
         inner.append(.signature,  Data(signature))
 
         let innerEncoded = inner.encode()
-        let nonce = try ChaChaPoly.Nonce(data: noncePadded("PS-Msg05"))
+        let nonce = try ChaChaPoly.Nonce(data: Data.noncePadded("PS-Msg05"))
         let sealed = try ChaChaPoly.seal(innerEncoded, using: encryptKey, nonce: nonce)
         let encPayload = sealed.ciphertext + sealed.tag
 
@@ -242,7 +242,7 @@ public final class AirPlayPairSetup {
 
         // Decrypt M6 to learn the ATV's identifier + long-term public key.
         guard encData.count > 16 else { throw PairError.cryptoFailed("M6 too short") }
-        let nonce6 = try ChaChaPoly.Nonce(data: noncePadded("PS-Msg06"))
+        let nonce6 = try ChaChaPoly.Nonce(data: Data.noncePadded("PS-Msg06"))
         let box    = try ChaChaPoly.SealedBox(
             combined: nonce6.withUnsafeBytes { Data($0) } + encData
         )
@@ -271,12 +271,6 @@ public final class AirPlayPairSetup {
     private func pad(_ data: Data, to length: Int) -> Data {
         if data.count >= length { return data }
         return Data(repeating: 0, count: length - data.count) + data
-    }
-
-    private func noncePadded(_ s: String) -> Data {
-        let b = Data(s.utf8)
-        assert(b.count <= 12)
-        return Data(repeating: 0, count: 12 - b.count) + b
     }
 }
 
@@ -341,7 +335,7 @@ public final class AirPlayPairVerify {
 
         // Decrypt M2 payload (contains ATV identifier + signature).
         guard encData.count > 16 else { throw VerifyError.cryptoFailed("M2 too short") }
-        let nonce2 = try ChaChaPoly.Nonce(data: noncePadded("PV-Msg02"))
+        let nonce2 = try ChaChaPoly.Nonce(data: Data.noncePadded("PV-Msg02"))
         let box    = try ChaChaPoly.SealedBox(
             combined: nonce2.withUnsafeBytes { Data($0) } + encData
         )
@@ -372,7 +366,7 @@ public final class AirPlayPairVerify {
         m3Inner.append(.identifier, credentials.clientID)
         m3Inner.append(.signature,  Data(signature))
 
-        let nonce3 = try ChaChaPoly.Nonce(data: noncePadded("PV-Msg03"))
+        let nonce3 = try ChaChaPoly.Nonce(data: Data.noncePadded("PV-Msg03"))
         let sealed = try ChaChaPoly.seal(m3Inner.encode(), using: sessionKey, nonce: nonce3)
 
         var m3 = TLV8()
@@ -404,10 +398,5 @@ public final class AirPlayPairVerify {
             writeKey:     writeKey.withUnsafeBytes { Data($0) },
             sharedSecret: sharedData
         )
-    }
-
-    private func noncePadded(_ s: String) -> Data {
-        let b = Data(s.utf8)
-        return Data(repeating: 0, count: 12 - b.count) + b
     }
 }

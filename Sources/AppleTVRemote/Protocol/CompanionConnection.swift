@@ -389,22 +389,13 @@ final class CompanionConnection: ObservableObject {
             // Wake/Sleep: single "button up" (release) event only — no press first.
             // The Companion protocol triggers the power/CEC action on the release edge.
             let txn = txnCounter; txnCounter &+= 1
-            sendEncrypted(OPACK.pack([
-                "_i": "_hidC", "_t": 2, "_x": txn,
-                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
-            ] as [String: Any]))
+            sendEncrypted(OPACK.encodeHIDCommand(keycode: keycode, state: 2, txn: txn))
         } else {
             // Normal buttons: down then up
             let txn = txnCounter; txnCounter &+= 1
-            sendEncrypted(OPACK.pack([
-                "_i": "_hidC", "_t": 2, "_x": txn,
-                "_c": ["_hBtS": 1, "_hidC": Int(keycode)] as [String: Any],
-            ] as [String: Any]))
+            sendEncrypted(OPACK.encodeHIDCommand(keycode: keycode, state: 1, txn: txn))
             let txn2 = txnCounter; txnCounter &+= 1
-            sendEncrypted(OPACK.pack([
-                "_i": "_hidC", "_t": 2, "_x": txn2,
-                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
-            ] as [String: Any]))
+            sendEncrypted(OPACK.encodeHIDCommand(keycode: keycode, state: 2, txn: txn2))
         }
     }
 
@@ -413,18 +404,12 @@ final class CompanionConnection: ObservableObject {
         guard state == .connected else { return }
         let keycode = command.hidKeycode
         let txn = txnCounter; txnCounter &+= 1
-        sendEncrypted(OPACK.pack([
-            "_i": "_hidC", "_t": 2, "_x": txn,
-            "_c": ["_hBtS": 1, "_hidC": Int(keycode)] as [String: Any],
-        ] as [String: Any]))
+        sendEncrypted(OPACK.encodeHIDCommand(keycode: keycode, state: 1, txn: txn))
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(ms))
             guard self.state == .connected else { return }
             let txn2 = self.txnCounter; self.txnCounter &+= 1
-            self.sendEncrypted(OPACK.pack([
-                "_i": "_hidC", "_t": 2, "_x": txn2,
-                "_c": ["_hBtS": 2, "_hidC": Int(keycode)] as [String: Any],
-            ] as [String: Any]))
+            self.sendEncrypted(OPACK.encodeHIDCommand(keycode: keycode, state: 2, txn: txn2))
         }
     }
 
@@ -436,7 +421,6 @@ final class CompanionConnection: ObservableObject {
         Task { @MainActor in
             guard self.state == .connected else { return }
             let (start, end) = direction.coordinates
-            let steps = 8
             let baseNs = DispatchTime.now().uptimeNanoseconds
 
             // Press
@@ -444,11 +428,8 @@ final class CompanionConnection: ObservableObject {
                                                       txn: self.txnCounter, nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
             self.txnCounter &+= 1
             // Hold / move
-            for i in 1...steps {
-                let f = Double(i) / Double(steps)
-                let x = start.x + (end.x - start.x) * f
-                let y = start.y + (end.y - start.y) * f
-                self.sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 3,
+            for pt in direction.interpolatedSteps() {
+                self.sendEncrypted(OPACK.encodeTouchEvent(x: pt.x, y: pt.y, phase: 3,
                                                           txn: self.txnCounter, nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
                 self.txnCounter &+= 1
                 try? await Task.sleep(for: .milliseconds(18))

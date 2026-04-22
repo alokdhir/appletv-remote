@@ -112,4 +112,27 @@ public enum SwipeDirection: CaseIterable, Sendable {
         case .right: return (start: (0, 500), end: (1000, 500))
         }
     }
+
+    /// Linearly interpolated (x, y) coordinates across `steps` evenly-spaced
+    /// points from start to end. Used by both CompanionConnection and
+    /// StandaloneSession to generate the hold/move phase of a swipe gesture.
+    public func interpolatedSteps(steps: Int = 8) -> [(x: Double, y: Double)] {
+        let (start, end) = coordinates
+        return (1...steps).map { i in
+            let f = Double(i) / Double(steps)
+            return (x: start.x + (end.x - start.x) * f,
+                    y: start.y + (end.y - start.y) * f)
+        }
+    }
+}
+
+// MARK: - Device collection helpers
+
+extension Array where Element == AppleTVDevice {
+    /// Finds a device by exact ID match first, then by case-insensitive name prefix.
+    public func resolving(_ nameOrID: String) -> AppleTVDevice? {
+        if let byID = first(where: { $0.id == nameOrID }) { return byID }
+        let lower = nameOrID.lowercased()
+        return first { $0.name.lowercased().hasPrefix(lower) }
+    }
 }

@@ -75,7 +75,7 @@ public final class CompanionPairVerify {
 
         // Decrypt ATV's identity
         guard encData.count > 16 else { throw VerifyError.decryptionFailed }
-        let box   = try ChaChaPoly.SealedBox(combined: noncePadded("PV-Msg02") + encData)
+        let box   = try ChaChaPoly.SealedBox(combined: Data.noncePadded("PV-Msg02") + encData)
         let plain = try ChaChaPoly.open(box, using: encKey)
 
         let inner = TLV8.decode(plain)
@@ -96,7 +96,7 @@ public final class CompanionPairVerify {
         innerOut.append(.identifier, idData)
         innerOut.append(.signature, Data(sig))
 
-        let nonceM3  = try ChaChaPoly.Nonce(data: noncePadded("PV-Msg03"))
+        let nonceM3  = try ChaChaPoly.Nonce(data: Data.noncePadded("PV-Msg03"))
         let sealedBox = try ChaChaPoly.seal(innerOut.encode(), using: encKey, nonce: nonceM3)
 
         var tlvOut = TLV8()
@@ -138,11 +138,5 @@ public final class CompanionPairVerify {
             sharedInfo: Data("ServerEncrypt-main".utf8),
             outputByteCount: 32
         )
-    }
-
-    private func noncePadded(_ string: String) -> Data {
-        let bytes = Data(string.utf8)
-        precondition(bytes.count <= 12)
-        return Data(repeating: 0, count: 12 - bytes.count) + bytes
     }
 }

@@ -220,6 +220,18 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode a HID button command (`_hidC`).
+    /// - Parameters:
+    ///   - keycode: HID keycode for the button.
+    ///   - state: 1 = button down, 2 = button up.
+    ///   - txn: Transaction counter value.
+    public static func encodeHIDCommand(keycode: UInt8, state: Int, txn: UInt32) -> Data {
+        pack([
+            "_i": "_hidC", "_t": 2, "_x": txn,
+            "_c": ["_hBtS": state, "_hidC": Int(keycode)] as [String: Any],
+        ] as [String: Any])
+    }
+
     /// Encode `_tiStart` (text input start) request — sent between
     /// `_sessionStart` and `_interest`. Empty content payload.
     /// Matches pyatv's CompanionAPI._text_input_start (api.py:385).

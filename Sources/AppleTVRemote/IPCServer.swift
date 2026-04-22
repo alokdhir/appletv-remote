@@ -311,10 +311,7 @@ final class IPCServer {
     }
 
     private func resolveDevice(_ nameOrID: String) -> AppleTVDevice? {
-        if let byID = discovery.devices.first(where: { $0.id == nameOrID }) { return byID }
-        return discovery.devices.first {
-            $0.name.caseInsensitiveCompare(nameOrID) == .orderedSame
-        }
+        discovery.devices.resolving(nameOrID)
     }
 
     private func handleSelect(id: String, nameOrID: String, client: IPCClient) throws {

@@ -112,7 +112,7 @@ public final class HAPPairing: @unchecked Sendable {
 
         // Decrypt: last 16 bytes are the Poly1305 auth tag (ChaChaPoly appends it)
         guard encData.count > 16 else { throw PairingError.decryptionFailed }
-        let nonce = try ChaChaPoly.Nonce(data: noncePadded("PS-Msg06"))
+        let nonce = try ChaChaPoly.Nonce(data: Data.noncePadded("PS-Msg06"))
         let box   = try ChaChaPoly.SealedBox(combined: nonce.withUnsafeBytes { Data($0) } + encData)
         let plain = try ChaChaPoly.open(box, using: key)
 
@@ -166,7 +166,7 @@ public final class HAPPairing: @unchecked Sendable {
         inner.append(.name, OPACK.encodeDeviceName("Mac Remote"))
 
         // Encrypt with ChaCha20-Poly1305, nonce = "PS-Msg05" zero-padded to 12 bytes
-        let nonceData = noncePadded("PS-Msg05")
+        let nonceData = Data.noncePadded("PS-Msg05")
         let nonce    = try ChaChaPoly.Nonce(data: nonceData)
         let innerEncoded = inner.encode()
         let sealedBox = try ChaChaPoly.seal(innerEncoded, using: key, nonce: nonce)
@@ -181,12 +181,6 @@ public final class HAPPairing: @unchecked Sendable {
         return tlvOut.encode()
     }
 
-    /// Returns a 12-byte nonce: ASCII string zero-padded on the left.
-    private func noncePadded(_ string: String) -> Data {
-        let bytes = Data(string.utf8)
-        assert(bytes.count <= 12)
-        return Data(repeating: 0, count: 12 - bytes.count) + bytes
-    }
 
     private func checkState(_ tlv: TLV8, expected: Step) throws {
         if let errByte = tlv[.error] {

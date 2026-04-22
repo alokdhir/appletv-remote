@@ -271,18 +271,14 @@ final class StandaloneSession {
     /// Send a trackpad swipe gesture (series of _hidT touch events).
     func sendSwipe(_ direction: SwipeDirection) throws {
         let (start, end) = direction.coordinates
-        let steps = 8
         let baseNs = DispatchTime.now().uptimeNanoseconds
 
         // Press
         try sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 1,
                                                   txn: nextTxn(), nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
         // Hold / move
-        for i in 1...steps {
-            let f = Double(i) / Double(steps)
-            let x = start.x + (end.x - start.x) * f
-            let y = start.y + (end.y - start.y) * f
-            try sendEncrypted(OPACK.encodeTouchEvent(x: x, y: y, phase: 3,
+        for pt in direction.interpolatedSteps() {
+            try sendEncrypted(OPACK.encodeTouchEvent(x: pt.x, y: pt.y, phase: 3,
                                                       txn: nextTxn(), nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
             Thread.sleep(forTimeInterval: 0.018)
         }
@@ -295,11 +291,7 @@ final class StandaloneSession {
     }
 
     private func hidOPACK(state: Int, keycode: UInt8) -> Data {
-        let t = nextTxn()
-        return OPACK.pack([
-            "_i": "_hidC", "_t": 2, "_x": t,
-            "_c": ["_hBtS": state, "_hidC": Int(keycode)] as [String: Any],
-        ] as [String: Any])
+        OPACK.encodeHIDCommand(keycode: keycode, state: state, txn: nextTxn())
     }
 
     private func nextTxn() -> UInt32 { let v = txn; txn &+= 1; return v }
