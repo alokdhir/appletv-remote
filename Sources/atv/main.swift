@@ -261,9 +261,8 @@ func cmdList(_ conn: IPCConnection, namesOnly: Bool = false) throws {
 // MARK: - Shell completion scripts
 
 let zshCompletion = #"""
-#compdef atv
 # zsh completion for atv — install via: eval "$(atv completion zsh)"
-# or save to a file in $fpath (e.g. ~/.zsh/completions/_atv).
+# or save to a file in $fpath as _atv (then #compdef atv replaces the compdef line).
 
 _atv() {
     local -a subcommands
@@ -318,6 +317,7 @@ _atv() {
 }
 
 _atv "$@"
+compdef _atv atv
 """#
 
 let bashCompletion = #"""
