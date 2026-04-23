@@ -27,7 +27,7 @@ public enum RTITextOperations {
     ///   [2]  TIKeyboardOutput instance   { insertionText:UID(3),  $class:UID(4) }
     ///   [3]  text string
     ///   [4]  TIKeyboardOutput class dict { $classname, $classes }
-    ///   [5]  NSUUID instance dict        { NS.uuidbytes:UID(?),   $class:UID(6) }
+    ///   [5]  NSUUID instance dict        { NS.uuidbytes:<Data>,   $class:UID(6) }
     ///   [6]  NSUUID class dict           { $classname, $classes }
     ///   [7]  RTITextOperations class dict { $classname, $classes }
     public static func inputPayload(sessionUUID: Data, text: String) -> Data {

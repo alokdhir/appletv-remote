@@ -63,11 +63,21 @@ struct BinaryPlistWriter {
             let payload = Array(s.utf8)
             bytes = lengthPrefixed(tag: 0x50, count: payload.count) + payload
         } else {
+            // Encode as UTF-16BE with proper surrogate pairs for chars > U+FFFF.
             var utf16: [UInt8] = []
             for scalar in s.unicodeScalars {
                 let v = scalar.value
-                utf16.append(UInt8((v >> 8) & 0xFF))
-                utf16.append(UInt8(v & 0xFF))
+                if v <= 0xFFFF {
+                    utf16.append(UInt8((v >> 8) & 0xFF))
+                    utf16.append(UInt8(v & 0xFF))
+                } else {
+                    // Encode as UTF-16 surrogate pair
+                    let vp = v - 0x10000
+                    let hi = UInt16(0xD800 + (vp >> 10))
+                    let lo = UInt16(0xDC00 + (vp & 0x3FF))
+                    utf16.append(UInt8(hi >> 8)); utf16.append(UInt8(hi & 0xFF))
+                    utf16.append(UInt8(lo >> 8)); utf16.append(UInt8(lo & 0xFF))
+                }
             }
             let charCount = utf16.count / 2
             bytes = lengthPrefixed(tag: 0x60, count: charCount) + utf16
@@ -104,8 +114,8 @@ struct BinaryPlistWriter {
 
     /// Serialise all objects into a binary plist with `topObject` as the root.
     func build(topObject: ObjRef) -> Data {
-        // Determine objRefSize: 1 byte if < 256 objects, else 2.
-        let refSize = objects.count <= 0xFF ? 1 : 2
+        precondition(objects.count <= 0xFF, "BinaryPlistWriter: too many objects (\(objects.count)) for 1-byte refs")
+        let refSize = 1
 
         // Lay out object bytes and record offsets.
         var body = Data()
@@ -115,9 +125,6 @@ struct BinaryPlistWriter {
             offsets.append(headerLen + body.count)
             body.append(contentsOf: obj)
         }
-
-        // Object ref bytes may be wrong above if refSize > 1 — re-encode dicts/arrays.
-        // (For our use-case objects.count is always < 256 so refSize == 1, safe.)
 
         let offsetTableStart = headerLen + body.count
         let offsetSize = offsetTableStart <= 0xFF ? 1 : (offsetTableStart <= 0xFFFF ? 2 : 4)
@@ -151,8 +158,11 @@ struct BinaryPlistWriter {
     }
 
     private func objRefBytes(_ idx: Int) -> [UInt8] {
-        if objects.count <= 0xFF { return [UInt8(idx)] }
-        return [UInt8((idx >> 8) & 0xFF), UInt8(idx & 0xFF)]
+        // objRefSize is always 1 for our use-case (RTI payloads have ~50 objects max).
+        // If this writer is ever used for larger plists, the add* methods would need
+        // to be called with a known final refSize so refs are encoded correctly.
+        precondition(idx <= 0xFF, "BinaryPlistWriter: object index \(idx) exceeds 1-byte ref limit")
+        return [UInt8(idx)]
     }
 
     private func lengthPrefixed(tag: UInt8, count: Int) -> [UInt8] {
