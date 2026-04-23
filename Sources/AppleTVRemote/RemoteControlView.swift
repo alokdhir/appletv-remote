@@ -297,6 +297,8 @@ struct RemoteControlView: View {
                     showKeyboardInput = false
                 }
                 .keyboardShortcut(.cancelAction)
+                Button("Clear") { clearKeyboardText() }
+                    .foregroundStyle(.red)
                 Button("Send") { submitKeyboardText() }
                     .buttonStyle(.borderedProminent)
                     .disabled(keyboardInputText.isEmpty)
@@ -314,6 +316,15 @@ struct RemoteControlView: View {
         connection.sendText(text) { error in
             if let error {
                 Log.companion.fail("Keyboard input failed: \(error)")
+            }
+        }
+    }
+
+    private func clearKeyboardText() {
+        keyboardInputText = ""
+        connection.sendClearText { error in
+            if let error {
+                Log.companion.fail("Keyboard clear failed: \(error)")
             }
         }
     }

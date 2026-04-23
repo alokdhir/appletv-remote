@@ -492,6 +492,23 @@ final class CompanionConnection: ObservableObject {
         Log.companion.report("Companion: sent text input (\(text.count) chars)")
         completion(nil)
     }
+
+    /// Clear the active text field on the ATV by sending an empty `textToAssert` RTI payload.
+    func sendClearText(completion: @escaping (Error?) -> Void) {
+        guard state == .connected else { completion(TextInputError.notConnected); return }
+        guard keyboardActive, let tiD = currentTextInputData else {
+            completion(TextInputError.noActiveTextField); return
+        }
+        guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
+            completion(TextInputError.sessionUUIDMissing); return
+        }
+        let payload = RTITextOperations.clearPayload(sessionUUID: uuid)
+        let cmdTxn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: cmdTxn))
+        Log.companion.report("Companion: sent clear text input")
+        completion(nil)
+    }
+
     private func startAirPlayMRP() {
         guard let device = currentDevice,
               let host = device.host,
