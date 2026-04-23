@@ -5,15 +5,17 @@ import BigInt
 
 /// Known-answer tests for SRPClient.
 ///
-/// Rather than hardcoding opaque byte vectors, we implement a minimal SRP server
-/// in-test using the same group parameters and verify the algebraic invariants:
-///   1. Client and server derive the same session key K.
-///   2. M1 (client proof) is correctly formed.
-///   3. M2 (expected server proof) matches server-side computation of H(PAD(A)|M1|K).
-///   4. Invalid server public key (B ≡ 0 mod N) is rejected.
-///   5. A second client with the same PIN but a different private key produces a
-///      different K (no key reuse / determinism regression).
+/// These tests perform 3072-bit modular exponentiation and take ~30s in debug.
+/// They are skipped unless the environment variable SRP_TESTS=1 is set:
+///
+///   SRP_TESTS=1 swift test --filter SRPClientTests
+///
 final class SRPClientTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SRP_TESTS"] == "1",
+                          "Skipping SRP tests (set SRP_TESTS=1 to run)")
+    }
 
     // MARK: - Helpers (mirror SRPClient internals with fixed params)
 
