@@ -66,6 +66,7 @@ public enum RemoteCommand {
     case home
     case playPause
     case volumeUp, volumeDown
+    case siri
     case wake   // power on — also triggers HDMI-CEC TV power-on
     case sleep  // power off
 
@@ -81,6 +82,7 @@ public enum RemoteCommand {
         case .home:        return 7
         case .volumeUp:    return 8
         case .volumeDown:  return 9
+        case .siri:        return 10
         case .sleep:       return 12
         case .wake:        return 13
         case .playPause:   return 14

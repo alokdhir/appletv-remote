@@ -226,6 +226,11 @@ struct RemoteControlView: View {
                     }
                 }
 
+                // Siri
+                LabeledRemoteButton(sfSymbol: "mic.fill", label: "Siri") {
+                    connection.send(.siri)
+                }
+
                 // Keyboard — always visible, enabled only when ATV wants text input
                 LabeledRemoteButton(sfSymbol: "keyboard", label: "Keyboard") {
                     showKeyboardInput = true
