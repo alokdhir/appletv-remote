@@ -136,3 +136,24 @@ extension Array where Element == AppleTVDevice {
         return first { $0.name.lowercased().hasPrefix(lower) }
     }
 }
+
+// MARK: - Companion-link TXT record filtering
+
+/// Returns true if the Bonjour TXT record fields indicate an Apple TV.
+///
+/// Filters based on:
+/// - `rpMd` model string (e.g. "AppleTV14,1") — present on most Apple TVs
+/// - `rpFl` bit 0x4000 — "PIN pairing supported", set only on Apple TVs
+///   (Macs: 0x20000, HomePods: 0x627B2/0x62792)
+/// - If neither field is present, returns true (Apple TVs sometimes omit TXT at browse time)
+public func companionTXTIsAppleTV(_ dict: [String: String]) -> Bool {
+    let model = dict["rpMd"] ?? ""
+    if model.hasPrefix("AppleTV") { return true }
+    if !model.isEmpty { return false }
+    let rpflRaw = dict["rpFl"] ?? dict["rpfl"] ?? ""
+    if !rpflRaw.isEmpty,
+       let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16) {
+        return (rpfl & 0x4000) != 0
+    }
+    return true
+}

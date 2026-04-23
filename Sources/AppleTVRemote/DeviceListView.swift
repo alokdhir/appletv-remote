@@ -4,12 +4,12 @@ import AppleTVProtocol
 // MARK: - Auto-connect store
 
 final class AutoConnectStore: ObservableObject {
-    private let key = "autoConnectDeviceIDs"
+    private let key = "com.adhir.appletv-remote.autoConnectDeviceIDs"
 
     @Published private(set) var deviceIDs: Set<String>
 
     init() {
-        let saved = UserDefaults.standard.stringArray(forKey: "autoConnectDeviceIDs") ?? []
+        let saved = UserDefaults.standard.stringArray(forKey: "com.adhir.appletv-remote.autoConnectDeviceIDs") ?? []
         deviceIDs = Set(saved)
     }
 
@@ -27,7 +27,7 @@ struct DeviceListView: View {
     @EnvironmentObject private var discovery: DeviceDiscovery
     @EnvironmentObject private var autoConnect: AutoConnectStore
     @Binding var selectedDevice: AppleTVDevice?
-    @AppStorage("hideWindowAtStartup") private var hideWindowAtStartup = false
+    @AppStorage("com.adhir.appletv-remote.hideWindowAtStartup") private var hideWindowAtStartup = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

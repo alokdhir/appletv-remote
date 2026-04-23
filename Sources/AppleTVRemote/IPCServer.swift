@@ -532,8 +532,8 @@ private enum IPCError: LocalizedError {
 @MainActor
 enum DefaultDevice {
     static var id: String {
-        get { UserDefaults.standard.string(forKey: "defaultDeviceID") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "defaultDeviceID") }
+        get { UserDefaults.standard.string(forKey: "com.adhir.appletv-remote.defaultDeviceID") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "com.adhir.appletv-remote.defaultDeviceID") }
     }
 }
 

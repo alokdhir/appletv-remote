@@ -10,7 +10,7 @@ struct RemoteControlView: View {
     @State private var pairingPin = ""
     @State private var cancelEnabled = false
     @FocusState private var pinFocused: Bool
-    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
+    @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
 
     var body: some View {
         VStack(spacing: 0) {

@@ -59,14 +59,14 @@ class WindowSetupView: NSView {
         // initial size up to SwiftUI, which — given ContentView's maxWidth:
         // .infinity — yields a screen-wide window. Set it before the window
         // becomes visible so the user never sees the wrong size.
-        let collapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed")
+        let collapsed = UserDefaults.standard.bool(forKey: "com.adhir.appletv-remote.sidebarCollapsed")
         window.setContentSize(NSSize(width: collapsed ? 300 : 520, height: 620))
 
         // Default true: hide window on startup so CLI-launched app doesn't steal
         // focus, but the window is still created so dock-click can surface it.
-        let hide = UserDefaults.standard.object(forKey: "hideWindowAtStartup") == nil
+        let hide = UserDefaults.standard.object(forKey: "com.adhir.appletv-remote.hideWindowAtStartup") == nil
             ? true
-            : UserDefaults.standard.bool(forKey: "hideWindowAtStartup")
+            : UserDefaults.standard.bool(forKey: "com.adhir.appletv-remote.hideWindowAtStartup")
         guard hide else { return }
         // Zero alpha hides the window even if SwiftUI calls makeKeyAndOrderFront
         // before our async orderOut runs.

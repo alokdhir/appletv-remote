@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var onFinishLaunching: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        onFinishLaunching?()
+        onFinishLaunching?();
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

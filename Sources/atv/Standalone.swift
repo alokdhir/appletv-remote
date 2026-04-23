@@ -58,12 +58,9 @@ enum StandaloneDiscovery {
                 lock.unlock()
                 if !isNew { continue }
 
-                // Filter at browse time where possible. Apple TVs advertise
-                // rpMd like "AppleTV14,1". HomePods and Macs also appear on
-                // _companion-link._tcp; we drop them here if the TXT is present.
+                // Filter at browse time using the shared TXT-based Apple TV detection.
                 if case .bonjour(let txt) = result.metadata {
-                    let model = txt.dictionary["rpMd"] ?? ""
-                    if !model.isEmpty && !model.hasPrefix("AppleTV") { continue }
+                    if !companionTXTIsAppleTV(txt.dictionary) { continue }
                 }
 
                 // Resolve via UDP NWConnection — we want only the IP, not a
@@ -369,8 +366,13 @@ func pickStandaloneDevice(nameOrNil: String?, discovered: [AppleTVDevice]) throw
         if let byName = discovered.first(where: { $0.name.caseInsensitiveCompare(q) == .orderedSame }) { return byName }
         throw StandaloneError.notFound("no device matching \"\(q)\"")
     }
-    if discovered.count == 1 { return discovered[0] }
-    let names = discovered.map(\.name).joined(separator: ", ")
+    // No name specified — filter to devices we have credentials for so non-Apple TV
+    // devices (Macs, HomePods) that slipped past the browse-time TXT filter are excluded.
+    let store = CredentialStore()
+    let paired = discovered.filter { store.hasCredentials(for: $0.id) }
+    let candidates = paired.isEmpty ? discovered : paired
+    if candidates.count == 1 { return candidates[0] }
+    let names = candidates.map(\.name).joined(separator: ", ")
     throw StandaloneError.notFound("multiple devices discovered (\(names)) — specify one with --device <name>")
 }
 
@@ -403,12 +405,15 @@ func standaloneSwipe(deviceName: String?, direction: SwipeDirection) throws {
 }
 
 func standaloneList() throws {
-    let devices = StandaloneDiscovery.discover(timeout: 8.0)
+    let discovered = StandaloneDiscovery.discover(timeout: 8.0)
+    let store = CredentialStore()
+    // In standalone mode we have no resolve-time TXT filter, so restrict the list
+    // to devices we have credentials for — non-Apple TVs will never be paired.
+    let devices = discovered.filter { store.hasCredentials(for: $0.id) }
     if devices.isEmpty {
-        print(yellow("No Apple TVs discovered."))
+        print(yellow("No paired Apple TVs discovered."))
         return
     }
-    let store = CredentialStore()
     let nameWidth = max(12, devices.map { $0.name.count }.max() ?? 12)
     for d in devices {
         let paired = store.hasCredentials(for: d.id)

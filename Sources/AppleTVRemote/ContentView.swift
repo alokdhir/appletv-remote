@@ -6,8 +6,8 @@ struct ContentView: View {
     @EnvironmentObject private var connection: CompanionConnection
     @State private var selectedDevice: AppleTVDevice?
     @State private var previousSelectedID: String?
-    @AppStorage("lastDeviceID") private var lastDeviceID = ""
-    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
+    @AppStorage("com.adhir.appletv-remote.lastDeviceID") private var lastDeviceID = ""
+    @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
 
     /// When no device is selected the statusBar (which owns the sidebar toggle)
     /// isn't visible, so we pin the sidebar open — otherwise the user can't

@@ -709,20 +709,22 @@ final class CompanionConnection: ObservableObject {
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
 
         // Log every message so we can see what the ATV sends
-        func describeValue(_ v: Any?) -> String {
-            switch v {
-            case let s as String:        return "\"\(s)\""
-            case let i as Int:           return "\(i)"
-            case let f as Double:        return "\(f)"
-            case let d as Data:          return "<\(d.count)B>"
-            case let dict as [String: Any]:
-                let inner = dict.keys.sorted().map { "\($0)=\(describeValue(dict[$0]))" }.joined(separator: ",")
-                return "{\(inner)}"
-            default:                     return "?"
+        if Log.companion.isEnabled(type: .debug) {
+            func describeValue(_ v: Any?) -> String {
+                switch v {
+                case let s as String:        return "\"\(s)\""
+                case let i as Int:           return "\(i)"
+                case let f as Double:        return "\(f)"
+                case let d as Data:          return "<\(d.count)B>"
+                case let dict as [String: Any]:
+                    let inner = dict.keys.sorted().map { "\($0)=\(describeValue(dict[$0]))" }.joined(separator: ",")
+                    return "{\(inner)}"
+                default:                     return "?"
+                }
             }
+            let kvDesc = msg.keys.sorted().map { k in "\(k)=\(describeValue(msg[k]))" }.joined(separator: " ")
+            Log.companion.report("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
         }
-        let kvDesc = msg.keys.sorted().map { k in "\(k)=\(describeValue(msg[k]))" }.joined(separator: " ")
-        Log.companion.report("Companion ← OPACK[\(data.count)B]: \(kvDesc)")
 
         switch identifier {
         case "_heartbeat":
@@ -794,13 +796,15 @@ final class CompanionConnection: ObservableObject {
             return
         }
         // Peek at the OPACK dict so we can see what we tried to send
-        let peek = OPACK.decodeDict(opackData).map { d -> String in
-            let i = d["_i"] as? String ?? "?"
-            let t = d["_t"] as? Int ?? -1
-            let x = d["_x"] as? Int ?? -1
-            return "_i=\(i) _t=\(t) _x=\(x)"
-        } ?? "<undecodable \(opackData.count)B>"
-        Log.companion.report("Companion → OPACK[\(opackData.count)B]: \(peek)")
+        if Log.companion.isEnabled(type: .debug) {
+            let peek = OPACK.decodeDict(opackData).map { d -> String in
+                let i = d["_i"] as? String ?? "?"
+                let t = d["_t"] as? Int ?? -1
+                let x = d["_x"] as? Int ?? -1
+                return "_i=\(i) _t=\(t) _x=\(x)"
+            } ?? "<undecodable \(opackData.count)B>"
+            Log.companion.report("Companion → OPACK[\(opackData.count)B]: \(peek)")
+        }
         do {
             let nonce = try ChaChaPoly.Nonce(data: nonceData(sendNonce))
             sendNonce += 1

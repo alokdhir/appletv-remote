@@ -85,24 +85,9 @@ final class DeviceDiscovery: ObservableObject {
                 Log.discovery.trace("Discovery: \(name) — no TXT metadata, allowing")
                 return true
             }
-            let model = txt.dictionary["rpMd"] ?? ""
-            Log.discovery.trace("Discovery: \(name) rpMd='\(model)'")
-            // rpMd present and identifies as Apple TV → allow
-            if model.hasPrefix("AppleTV") { return true }
-            // rpMd present and identifies as something else → reject
-            if !model.isEmpty { return false }
-            // rpMd absent — use rpFl flags as tiebreaker.
-            // Bit 0x4000 = PIN pairing supported; only Apple TVs have this bit set.
-            // Macs: 0x20000, HomePods: 0x627B2/0x62792 — neither sets 0x4000.
-            let rpflRaw = txt.dictionary["rpFl"] ?? txt.dictionary["rpfl"] ?? ""
-            if !rpflRaw.isEmpty,
-               let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16) {
-                let pairable = (rpfl & 0x4000) != 0
-                Log.discovery.trace("Discovery: \(name) rpFl=\(rpflRaw) PIN-pairable=\(pairable)")
-                return pairable
-            }
-            // Neither rpMd nor rpFl present — allow (Apple TVs sometimes omit TXT at browse time)
-            return true
+            let allowed = companionTXTIsAppleTV(txt.dictionary)
+            Log.discovery.trace("Discovery: \(name) rpMd='\(txt.dictionary["rpMd"] ?? "")' allowed=\(allowed)")
+            return allowed
         }
 
         // Cancel resolvers for services that disappeared.
@@ -138,25 +123,12 @@ final class DeviceDiscovery: ObservableObject {
         resolver.resolve { [weak self] host, port, txt in
             Task { @MainActor in
                 guard let self else { return }
-                // Filter at resolve time using rpMd first, then rpFl fallback.
-                if let model = txt["rpMd"] {
-                    if !model.hasPrefix("AppleTV") {
-                        Log.discovery.report("Discovery: \(name) resolved rpMd='\(model)' — not an Apple TV, removing")
-                        self.devices.removeAll { $0.id == name }
-                        self.resolvers[name] = nil
-                        return
-                    }
-                } else {
-                    // rpMd absent at resolve time — check rpFl PIN-pairing bit
-                    let rpflRaw = txt["rpFl"] ?? txt["rpfl"] ?? ""
-                    if !rpflRaw.isEmpty,
-                       let rpfl = UInt32(rpflRaw.hasPrefix("0x") ? String(rpflRaw.dropFirst(2)) : rpflRaw, radix: 16),
-                       (rpfl & 0x4000) == 0 {
-                        Log.discovery.report("Discovery: \(name) resolved rpFl=\(rpflRaw) — not PIN-pairable, removing")
-                        self.devices.removeAll { $0.id == name }
-                        self.resolvers[name] = nil
-                        return
-                    }
+                // Filter at resolve time — TXT is more complete here than at browse time.
+                if !companionTXTIsAppleTV(txt) {
+                    Log.discovery.report("Discovery: \(name) resolved TXT \(txt) — not an Apple TV, removing")
+                    self.devices.removeAll { $0.id == name }
+                    self.resolvers[name] = nil
+                    return
                 }
                 Log.discovery.report("Resolved \(name) → \(host):\(port)")
                 if let idx = self.devices.firstIndex(where: { $0.id == name }) {
