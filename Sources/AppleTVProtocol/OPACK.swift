@@ -18,8 +18,9 @@ import Foundation
 ///   0x60         string, 1-byte length follows
 ///   0x70–0x8F    bytes,  length = byte - 0x70  (0–31 bytes)
 ///   0x90         bytes,  1-byte length follows
-///   0x91         bytes,  2-byte big-endian length follows
-///   0x92         bytes,  4-byte big-endian length follows
+///   0x91         bytes,  1-byte length follows  (ATV uses this; treated same as 0x90)
+///   0x92         bytes,  2-byte little-endian length follows
+///   0x93         bytes,  4-byte little-endian length follows
 ///   0xD0–0xDF    array,  count = byte - 0xD0   (0–15 items)
 ///   0xE0–0xEF    dict,   count = byte - 0xE0   (0–15 key-value pairs)
 public enum OPACK {
@@ -512,11 +513,17 @@ public enum OPACK {
         } else if n <= 0xFF {
             out.append(0x91)
             out.append(UInt8(n))
-        } else {
-            // 0x92: 2-byte little-endian length (Companion OPACK convention)
+        } else if n <= 0xFFFF {
             out.append(0x92)
             out.append(UInt8(n & 0xFF))
             out.append(UInt8((n >> 8) & 0xFF))
+        } else {
+            precondition(n <= 0xFFFF_FFFF, "OPACK bytes > 4 GiB not supported")
+            out.append(0x93)
+            out.append(UInt8( n        & 0xFF))
+            out.append(UInt8((n >>  8) & 0xFF))
+            out.append(UInt8((n >> 16) & 0xFF))
+            out.append(UInt8((n >> 24) & 0xFF))
         }
         out.append(contentsOf: data)
     }
@@ -573,6 +580,13 @@ public enum OPACK {
             guard data.distance(from: cursor, to: data.endIndex) >= 2 else { return nil }
             length = Int(data[cursor]) | Int(data[data.index(cursor, offsetBy: 1)]) << 8
             data.formIndex(&cursor, offsetBy: 2)
+        case 0x93:
+            guard data.distance(from: cursor, to: data.endIndex) >= 4 else { return nil }
+            length =  Int(data[cursor])
+                   | (Int(data[data.index(cursor, offsetBy: 1)]) <<  8)
+                   | (Int(data[data.index(cursor, offsetBy: 2)]) << 16)
+                   | (Int(data[data.index(cursor, offsetBy: 3)]) << 24)
+            data.formIndex(&cursor, offsetBy: 4)
         default:
             return nil
         }
@@ -606,6 +620,14 @@ public enum OPACK {
             if data.distance(from: cursor, to: data.endIndex) >= 2 {
                 let n = Int(data[cursor]) | Int(data[data.index(cursor, offsetBy: 1)]) << 8
                 data.formIndex(&cursor, offsetBy: 2); advance(&cursor, by: n, in: data)
+            }
+        case 0x93:
+            if data.distance(from: cursor, to: data.endIndex) >= 4 {
+                let n =  Int(data[cursor])
+                      | (Int(data[data.index(cursor, offsetBy: 1)]) <<  8)
+                      | (Int(data[data.index(cursor, offsetBy: 2)]) << 16)
+                      | (Int(data[data.index(cursor, offsetBy: 3)]) << 24)
+                data.formIndex(&cursor, offsetBy: 4); advance(&cursor, by: n, in: data)
             }
         case 0xD0...0xDF:
             let count = Int(tag - 0xD0)

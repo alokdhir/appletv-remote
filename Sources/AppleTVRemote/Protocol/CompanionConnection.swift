@@ -22,6 +22,7 @@ final class CompanionConnection: ObservableObject {
     @Published var state: ConnectionState = .disconnected
 
     private var socketFD: Int32 = -1
+    private var connectionEpoch: Int = 0
     private let writeQueue = DispatchQueue(label: "companion.write", qos: .userInitiated)
     private let readQueue  = DispatchQueue(label: "companion.read",  qos: .userInitiated)
     private let credentialStore = CredentialStore()
@@ -343,10 +344,11 @@ final class CompanionConnection: ObservableObject {
 
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.connectionEpoch &+= 1
                 self.socketFD = fd
                 self.receiveBuffer.removeAll()
                 // Start blocking read loop on its own queue
-                self.startReadLoop(fd: Int(fd))
+                self.startReadLoop(fd: Int(fd), epoch: self.connectionEpoch)
                 // Kick off pairing
                 if self.credentialStore.hasCredentials(for: deviceCopy.id) {
                     Log.companion.report("Companion: starting pair-verify")
@@ -363,6 +365,7 @@ final class CompanionConnection: ObservableObject {
         userInitiatedDisconnect = true
         keepaliveTimer?.cancel()
         keepaliveTimer = nil
+        connectionEpoch &+= 1
         let fd = socketFD
         socketFD = -1
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
@@ -377,6 +380,8 @@ final class CompanionConnection: ObservableObject {
         attentionState = nil
         lastPlaybackStateTimestamp = 0
         nowPlaying = nil
+        airPlayTunnel?.close()
+        airPlayTunnel = nil
     }
 
     // MARK: - Remote Commands (post-session)
@@ -862,7 +867,7 @@ final class CompanionConnection: ObservableObject {
     // MARK: - Receiving
 
     /// Blocking read loop — runs entirely on readQueue, never touches main thread directly.
-    private func startReadLoop(fd: Int) {
+    private func startReadLoop(fd: Int, epoch: Int) {
         readQueue.async { [weak self] in
             var buf = [UInt8](repeating: 0, count: 65536)
             while true {
@@ -874,7 +879,7 @@ final class CompanionConnection: ObservableObject {
                                  "errno \(err): \(String(cString: strerror(err)))"
                     Log.companion.report("Companion: read loop ended — \(reason)")
                     DispatchQueue.main.async {
-                        guard let self, self.socketFD >= 0 else { return }
+                        guard let self, self.connectionEpoch == epoch else { return }
                         if err != 0 {
                             self.state = .error("Read error: \(reason)")
                         } else {
@@ -886,7 +891,7 @@ final class CompanionConnection: ObservableObject {
                 let chunk = Data(buf[..<n])
                 Log.companion.trace("Companion ← \(n) bytes")
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self, self.connectionEpoch == epoch else { return }
                     self.receiveBuffer.append(chunk)
                     self.processBuffer()
                 }

@@ -53,6 +53,13 @@ public enum AirPlayTunnel {
         /// device capabilities. Must be kept alive (and responded to) so the
         /// ATV sends MRP now-playing pushes on the data channel.
         public let event: AirPlayEventChannel
+
+        /// Cancel all three underlying NWConnections. Idempotent via NWConnection.cancel.
+        public func close() {
+            rtsp.close()
+            mrp.close()
+            event.close()
+        }
     }
 
     // MARK: - Open (control only, for pair-verify gate)
@@ -79,6 +86,11 @@ public enum AirPlayTunnel {
                             connectTimeout: TimeInterval = 5) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
+        // Hoist so the catch can cancel whichever channels were already started
+        // before the failing step — the outer catch only had rtsp.close().
+        var eventChannel: AirPlayEventChannel?
+        var dataConn: NWConnection?
+        var mrp: MRPDataChannel?
         do {
 
         // SETUP #1 — event channel. The RTSP URI format MUST be
@@ -97,6 +109,10 @@ public enum AirPlayTunnel {
         guard let plist1 = decodePlist(r1.body),
               let eventPort = plist1["eventPort"] as? Int else {
             throw OpenError.setup("SETUP #1 response missing eventPort")
+        }
+        guard let eventPortValue = NWEndpoint.Port(rawValue: UInt16(exactly: eventPort) ?? 0),
+              eventPort > 0 else {
+            throw OpenError.setup("SETUP #1 returned invalid eventPort=\(eventPort)")
         }
         Log.pairing.report("AirPlayTunnel: SETUP #1 → eventPort=\(eventPort)")
 
@@ -127,7 +143,7 @@ public enum AirPlayTunnel {
         )
         let eventEndpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: UInt16(eventPort))!
+            port: eventPortValue
         )
         let eventConn = NWConnection(to: eventEndpoint, using: .tcp)
         let eventGroup = DispatchGroup()
@@ -153,8 +169,9 @@ public enum AirPlayTunnel {
             writeKey: evWriteKey.withUnsafeBytes { Data($0) },
             readKey:  evReadKey.withUnsafeBytes  { Data($0) }
         )
-        let eventChannel = AirPlayEventChannel(connection: eventConn, session: evSession)
-        eventChannel.start()
+        let eventCh = AirPlayEventChannel(connection: eventConn, session: evSession)
+        eventCh.start()
+        eventChannel = eventCh
 
         // RECORD.
         let rRecord = try rtsp.request(method: "RECORD", uri: rtspURI)
@@ -190,19 +207,24 @@ public enum AirPlayTunnel {
               let dataPort = streams.first?["dataPort"] as? Int else {
             throw OpenError.setup("SETUP #2 response missing dataPort")
         }
+        guard let dataPortValue = NWEndpoint.Port(rawValue: UInt16(exactly: dataPort) ?? 0),
+              dataPort > 0 else {
+            throw OpenError.setup("SETUP #2 returned invalid dataPort=\(dataPort)")
+        }
         Log.pairing.report("AirPlayTunnel: SETUP #2 → dataPort=\(dataPort)")
 
         // Connect new TCP socket to dataPort.
         let dataEndpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: UInt16(dataPort))!
+            port: dataPortValue
         )
-        let dataConn = NWConnection(to: dataEndpoint, using: .tcp)
+        let _dataConn = NWConnection(to: dataEndpoint, using: .tcp)
+        dataConn = _dataConn
         let dataQueue = DispatchGroup()
         dataQueue.enter()
         var dataConnReady = false
         var dataLeft = false
-        dataConn.stateUpdateHandler = { state in
+        _dataConn.stateUpdateHandler = { state in
             switch state {
             case .ready:
                 dataConnReady = true
@@ -212,7 +234,7 @@ public enum AirPlayTunnel {
             default: break
             }
         }
-        dataConn.start(queue: DispatchQueue(label: "MRPDataChannel.connect"))
+        _dataConn.start(queue: DispatchQueue(label: "MRPDataChannel.connect"))
         guard dataQueue.wait(timeout: .now() + 10) == .success, dataConnReady else {
             throw OpenError.dataConnect("TCP connect to \(host):\(dataPort) timed out or failed")
         }
@@ -236,14 +258,15 @@ public enum AirPlayTunnel {
             writeKey: outKey.withUnsafeBytes { Data($0) },
             readKey:  inKey.withUnsafeBytes  { Data($0) }
         )
-        let mrp = MRPDataChannel(connection: dataConn, session: dataSession)
+        let mrpChannel = MRPDataChannel(connection: _dataConn, session: dataSession)
         // Install the message callback BEFORE starting the receive loop and
         // sending init messages — the ATV may send its DEVICE_INFO response
         // and now-playing burst immediately after receiving our DEVICE_INFO,
         // which would arrive while open() is still executing (before the caller
         // can set onMessage on the returned Tunnel).
-        mrp.onMessage = onMessage
-        mrp.start()
+        mrpChannel.onMessage = onMessage
+        mrpChannel.start()
+        mrp = mrpChannel
         Log.pairing.report("AirPlayTunnel: MRP data channel up")
 
         // MRP init sequence. Use the Companion client ID if provided — the ATV
@@ -252,20 +275,23 @@ public enum AirPlayTunnel {
         // but does not push state (confirmed by comparing with pyatv's wire trace).
         let uid = mrpClientID ?? UUID().uuidString.uppercased()
         do {
-            try mrp.send(MRPMessage.deviceInfo(uniqueIdentifier: uid))
+            try mrpChannel.send(MRPMessage.deviceInfo(uniqueIdentifier: uid))
             Log.pairing.report("AirPlayTunnel: sent DEVICE_INFO")
-            try mrp.send(MRPMessage.setConnectionState())
+            try mrpChannel.send(MRPMessage.setConnectionState())
             Log.pairing.report("AirPlayTunnel: sent SET_CONNECTION_STATE")
-            try mrp.send(MRPMessage.clientUpdatesConfig())
+            try mrpChannel.send(MRPMessage.clientUpdatesConfig())
             Log.pairing.report("AirPlayTunnel: sent CLIENT_UPDATES_CONFIG")
-            try mrp.send(MRPMessage.getKeyboardSession())
+            try mrpChannel.send(MRPMessage.getKeyboardSession())
             Log.pairing.report("AirPlayTunnel: sent GET_KEYBOARD_SESSION")
         } catch {
             throw OpenError.mrpInit("\(error)")
         }
 
-        return Tunnel(rtsp: rtsp, mrp: mrp, event: eventChannel)
+        return Tunnel(rtsp: rtsp, mrp: mrpChannel, event: eventCh)
         } catch {
+            mrp?.close()
+            if mrp == nil { dataConn?.cancel() }
+            eventChannel?.close()
             rtsp.close()
             throw error
         }
@@ -290,14 +316,16 @@ public enum AirPlayTunnel {
         }
 
         let session = HAPSession(writeKey: keys.writeKey, readKey: keys.readKey)
-        // `rtsp` must be referenced from the sink we pass to detach, but it
-        // needs the connection detach returns — break the cycle with a
-        // pre-declared var captured weakly by the sink.
-        var rtsp: EncryptedAirPlayRTSP!
-        let connection = http.detach { data, err, isComplete in
-            rtsp?.handle(data: data, err: err, isComplete: isComplete)
+        // The sink we hand to detach must call into rtsp, but rtsp needs the
+        // connection that detach returns. Route through a WeakBox so the sink
+        // references rtsp weakly — otherwise rtsp → http (retainHTTP) → sink
+        // → rtsp forms a retain cycle and the tunnel never frees.
+        let box = RTSPWeakBox()
+        let connection = http.detach { [box] data, err, isComplete in
+            box.value?.handle(data: data, err: err, isComplete: isComplete)
         }
-        rtsp = EncryptedAirPlayRTSP(connection: connection, session: session, host: host)
+        let rtsp = EncryptedAirPlayRTSP(connection: connection, session: session, host: host)
+        box.value = rtsp
         // Keep the AirPlayHTTP alive — its receiveLoop is what actually reads
         // bytes off the wire and forwards them to our sink. Without this the
         // local `http` deallocates when `openHTTP` returns, its `[weak self]`
@@ -340,4 +368,11 @@ public enum AirPlayTunnel {
         guard !data.isEmpty else { return nil }
         return try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
     }
+}
+
+/// Weak holder used by `openHTTP` to break a retain cycle between the
+/// `EncryptedAirPlayRTSP` instance and the HTTP detach sink that forwards
+/// bytes back into it.
+private final class RTSPWeakBox {
+    weak var value: EncryptedAirPlayRTSP?
 }

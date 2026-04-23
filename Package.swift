@@ -56,6 +56,11 @@ let package = Package(
             name: "AppleTVProtocolTests",
             dependencies: ["AppleTVProtocol"],
             path: "Tests/AppleTVProtocolTests"
+        ),
+        .testTarget(
+            name: "AppleTVIPCTests",
+            dependencies: ["AppleTVIPC"],
+            path: "Tests/AppleTVIPCTests"
         )
     ]
 )
