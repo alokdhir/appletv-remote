@@ -139,6 +139,22 @@ final class OPACKTests: XCTestCase {
         XCTAssertEqual(decoded?["k"] as? Int, 0x1_0000_0000)
     }
 
+    func testUInt64AboveInt64MaxEncodesAsUnsigned() {
+        // UInt64 values > Int64.max must not be emitted as a negative 0x36 frame.
+        // Expected: tag 0x33 + 8-byte little-endian 0x8000_0000_0000_0000
+        let value: UInt64 = 0x8000_0000_0000_0000
+        let bytes = OPACK.pack(value)
+        XCTAssertEqual(bytes, Data([0x33,
+                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]))
+    }
+
+    func testUInt64MaxEncodesAsUnsigned() {
+        let value: UInt64 = UInt64.max
+        let bytes = OPACK.pack(value)
+        XCTAssertEqual(bytes, Data([0x33,
+                                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]))
+    }
+
     func testRoundTripNegative() {
         let packed = OPACK.pack(["k": -42])
         let decoded = OPACK.decodeDict(packed)

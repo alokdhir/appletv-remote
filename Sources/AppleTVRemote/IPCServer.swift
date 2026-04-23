@@ -224,6 +224,16 @@ final class IPCServer {
     private func handle(frame: IPCFrame, clientID: ClientID) {
         guard case .request(let req) = frame else { return }
         guard let client = clients[clientID] else { return }
+
+        // If the client requested verbose mode, forward log output as events.
+        var logToken: LogForwarder?
+        if req.verbose == true {
+            logToken = LogForwarder { [weak client] line in
+                client?.send(.event(IPCEvent(event: .log, message: line)))
+            }
+        }
+        _ = logToken   // keep alive for duration of scope
+
         do {
             switch req.cmd {
             case .ping:
@@ -232,15 +242,16 @@ final class IPCServer {
                 client.send(.response(IPCResponse(id: req.id, ok: true, devices: listDevices())))
             case .status:
                 if connection.nowPlaying == nil, connection.state == .connected {
-                    Task { @MainActor [weak self, weak client] in
+                    Task { @MainActor [weak self, weak client, logToken] in
                         guard let self, let client else { return }
-                        let deadline = Date().addingTimeInterval(4.0)
-                        while Date() < deadline {
-                            if self.connection.nowPlaying != nil { break }
-                            try? await Task.sleep(for: .milliseconds(100))
-                        }
+                        _ = await self.connection.$nowPlaying
+                            .first(where: { $0 != nil })
+                            .timeout(.seconds(4), scheduler: DispatchQueue.main)
+                            .values
+                            .first(where: { _ in true })
                         client.send(.response(IPCResponse(id: req.id, ok: true,
                                                            status: self.currentStatus())))
+                        _ = logToken
                     }
                 } else {
                     client.send(.response(IPCResponse(id: req.id, ok: true, status: currentStatus())))
@@ -280,11 +291,12 @@ final class IPCServer {
 
     private func listDevices() -> [IPCDevice] {
         let defaultID = DefaultDevice.id
+        let store = CredentialStore()
         return discovery.devices.map { d in
             IPCDevice(id: d.id,
                       name: d.name,
                       host: d.host,
-                      paired: CredentialStore().hasCredentials(for: d.id),
+                      paired: store.hasCredentials(for: d.id),
                       autoConnect: autoConnect.isEnabled(d.id),
                       isDefault: d.id == defaultID,
                       resolved: d.host != nil)
@@ -361,7 +373,7 @@ final class IPCServer {
                 connection.sendSwipe(dir)
             }
         } else {
-            let cmd = remoteCommand(for: key)
+            guard let cmd = remoteCommand(for: key) else { return }
             if longPress {
                 connection.sendLongPress(cmd)
             } else {
@@ -388,19 +400,22 @@ final class IPCServer {
             return
         }
         // Not connected — treat power as wake: connect and send Wake HID.
-        // Route through handleKey so the response waits until connected.
+        let resolved = discovery.devices.filter { $0.host != nil }
         let target: AppleTVDevice? = connection.currentDevice
-            ?? discovery.devices.first(where: { $0.id == DefaultDevice.id })
-            ?? discovery.devices.first(where: { $0.host != nil })
+            ?? resolved.first(where: { $0.id == DefaultDevice.id })
         guard let device = target else {
-            client.send(.response(.failure(id, "No device available to wake")))
+            let candidates = resolved.map { $0.id }.joined(separator: ", ")
+            let msg = candidates.isEmpty
+                ? "No device available to wake"
+                : "No default device set; resolved devices: \(candidates)"
+            client.send(.response(.failure(id, msg)))
             return
         }
         connection.wakeAndPowerOn(to: device)
         client.send(.response(.ok(id)))
     }
 
-    private func remoteCommand(for key: IPCKey) -> RemoteCommand {
+    private func remoteCommand(for key: IPCKey) -> RemoteCommand? {
         switch key {
         case .up:         return .up
         case .down:       return .down
@@ -413,8 +428,7 @@ final class IPCServer {
         case .volumeUp:   return .volumeUp
         case .volumeDown: return .volumeDown
         case .swipeUp, .swipeDown, .swipeLeft, .swipeRight:
-            // Swipe keys are handled before this path via swipeDirection(for:).
-            return .up
+            return nil
         }
     }
 }

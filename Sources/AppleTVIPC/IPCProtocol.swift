@@ -77,11 +77,13 @@ public struct IPCRequest: Codable, Sendable {
     public let id: String
     public let cmd: IPCCommand
     public let args: [String: String]?
+    public let verbose: Bool?
 
-    public init(id: String, cmd: IPCCommand, args: [String: String]? = nil) {
+    public init(id: String, cmd: IPCCommand, args: [String: String]? = nil, verbose: Bool? = nil) {
         self.id = id
         self.cmd = cmd
         self.args = args
+        self.verbose = verbose
     }
 }
 
@@ -186,6 +188,7 @@ public enum IPCEventKind: String, Codable, Sendable {
     case connected
     case disconnected
     case error
+    case log
 }
 
 public struct IPCEvent: Codable, Sendable {

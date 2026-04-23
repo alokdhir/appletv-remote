@@ -195,9 +195,4 @@ public final class HAPPairing: @unchecked Sendable {
 
 // MARK: - Helpers
 
-private extension Data {
-    var hexString: String {
-        map { String(format: "%02x", $0) }.joined()
-    }
-}
 

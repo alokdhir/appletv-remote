@@ -138,6 +138,7 @@ public final class HAPSession: @unchecked Sendable {
                     authenticating: Data(lengthAAD)
                 )
             } catch {
+                inbound = Data(inbound[tagEnd...])
                 throw FramingError.authenticationFailed
             }
             readCounter &+= 1

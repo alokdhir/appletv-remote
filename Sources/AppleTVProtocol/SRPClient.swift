@@ -63,6 +63,12 @@ public struct SRPClient {
         publicKey = SRPClient.g.power(a, modulus: SRPClient.N)
     }
 
+    /// Initialise with a fixed private key — for testing only.
+    public init(privateKey: BigUInt) {
+        self.privateKey = privateKey
+        self.publicKey  = SRPClient.g.power(privateKey, modulus: SRPClient.N)
+    }
+
     // MARK: - Session key computation
 
     public struct SessionResult {

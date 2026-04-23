@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 import AppleTVIPC
 import AppleTVProtocol
+import AppleTVLogging
 
 // `atv` — command-line companion to the AppleTVRemote.app, connecting to its
 // IPC Unix-domain socket. Commands mirror the app's remote UI; when the app
@@ -216,8 +217,15 @@ extension IPCConnection {
     func request(_ cmd: IPCCommand, args: [String: String]? = nil,
                  onEvent: (IPCEvent) -> Void = { _ in }) throws -> IPCResponse {
         let id = String(UUID().uuidString.prefix(8))
-        try send(.request(IPCRequest(id: id, cmd: cmd, args: args)))
-        return try awaitResponse(id: id, onEvent: onEvent)
+        try send(.request(IPCRequest(id: id, cmd: cmd, args: args,
+                                     verbose: Log.verbose ? true : nil)))
+        return try awaitResponse(id: id, onEvent: { event in
+            if event.event == .log {
+                fputs("\(event.message ?? "")\n", stderr)
+            } else {
+                onEvent(event)
+            }
+        })
     }
 }
 
@@ -376,7 +384,9 @@ func cmdStatus(_ conn: IPCConnection) throws {
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
             let r = try conn.request(.status)
-            if let s = r.status, s.connectionState != "Disconnected" { break }
+            if let s = r.status,
+               s.connectionState != "Disconnected",
+               !s.connectionState.hasPrefix("Error") { break }
             usleep(300_000)
         }
     }
@@ -665,7 +675,7 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
                                          mrpClientID: airPlayClientID,
                                          onMessage: msgCallback) }
     catch { die("tunnel open failed: \(error)") }
-    defer { tunnel.rtsp.close(); tunnel.mrp.close() }
+    defer { tunnel.close() }
     print(green("✓ MRP data channel up — waiting for messages (10s)…"))
 
     // Wait up to 15 seconds collecting all messages.
@@ -828,6 +838,7 @@ func runStandalone(args: [String], device: String?) throws {
 //                         pair-verify + HID locally in this process
 //   --device <name>       select target device for standalone mode (otherwise
 //                         the single discovered device; error if multiple)
+//   --verbose             mirror all trace/report/fail log output to stderr
 var rawArgs = Array(CommandLine.arguments.dropFirst())
 var useStandalone = false
 var standaloneDevice: String?
@@ -843,6 +854,8 @@ do {
             guard i + 1 < rawArgs.count else { die("--device requires a value") }
             standaloneDevice = rawArgs[i + 1]
             i += 1
+        } else if a == "--verbose" {
+            Log.verbose = true
         } else {
             filtered.append(a)
         }
@@ -851,6 +864,8 @@ do {
     rawArgs = filtered
 }
 let args = rawArgs
+
+
 
 func usage() -> Never {
     // Fixed left-column width so descriptions always line up, regardless of
@@ -908,6 +923,10 @@ func usage() -> Never {
       Requires credentials from a previous pair-setup via the app.
       Auto-falls-back to standalone when run over SSH without a GUI session.
     """))
+    print("")
+    print(cyan("Global flags") + ":")
+    print(row("--verbose",                            "Mirror all debug output to stderr"))
+    print(row("--standalone",                         "Run without the app (single-shot HID)"))
     print("")
     print(cyan("Install completions:"))
     print(row("zsh",  #"eval "$(atv completion zsh)""#))

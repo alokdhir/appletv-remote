@@ -27,7 +27,7 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 | `RemoteControlView.swift` | D-pad, playback, volume, now-playing card |
 | `Protocol/MRPConnection.swift` | `NWConnection` TCP connection; varint-framed message receive loop |
 | `Protocol/MRPMessage.swift` | Hand-encoded protobuf MRP wire messages (no protobuf runtime dependency) |
-| `Protocol/CredentialStore.swift` | Pairing credentials persisted in macOS Keychain |
+| `Protocol/CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
 
 ### Key protocol notes
 

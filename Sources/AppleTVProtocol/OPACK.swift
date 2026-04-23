@@ -52,7 +52,12 @@ public enum OPACK {
         case let u as UInt32:
             encodeUInt32(u, into: &out)
         case let u as UInt64:
-            encodeInt(Int(bitPattern: UInt(u)), into: &out)
+            if u <= UInt64(Int64.max) {
+                encodeInt(Int(u), into: &out)
+            } else {
+                out.append(0x33)
+                appendLittleEndian(u, byteCount: 8, into: &out)
+            }
         case let d as Data:
             encodeBytes(d, into: &out)
         case let b as Bool:
@@ -74,7 +79,8 @@ public enum OPACK {
             out.append(UInt8(0xD0 + arr.count))
             for item in arr { packValue(item, into: &out) }
         default:
-            out.append(0x04)  // null
+            assertionFailure("OPACK.packValue: unsupported type \(type(of: value))")
+            out.append(0x04)  // null — safe fallback in release builds
         }
     }
 

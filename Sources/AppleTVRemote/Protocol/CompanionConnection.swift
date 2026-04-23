@@ -380,6 +380,9 @@ final class CompanionConnection: ObservableObject {
         attentionState = nil
         lastPlaybackStateTimestamp = 0
         nowPlaying = nil
+        txnCounter = 0
+        sendNonce = 0
+        recvNonce = 0
         airPlayTunnel?.close()
         airPlayTunnel = nil
     }

@@ -12,10 +12,6 @@ import AppleTVLogging
 ///   PV_Next  ← (ATV sends M2: ATV ephemeral key + encrypted identity)
 ///   PV_Next  → (client sends M3: encrypted client identity)
 ///   PV_Next  ← (ATV sends M4: success/error)
-private extension Data {
-    var hex: String { map { String(format: "%02x", $0) }.joined(separator: " ") }
-}
-
 public final class CompanionPairVerify {
 
     public enum VerifyError: Error {
@@ -84,7 +80,7 @@ public final class CompanionPairVerify {
         // the HAP pair-setup identity we stored. Skipping server signature verification is safe for
         // a personal app: the client still authenticates to the ATV via the M3 Ed25519 signature,
         // and the ECDH shared secret is not derivable without the ATV's ephemeral private key.
-        Log.pairing.trace("PV M2: atvID \(String(data: atvID, encoding: .utf8) ?? atvID.hex) (server sig check skipped)")
+        Log.pairing.trace("PV M2: atvID \(String(data: atvID, encoding: .utf8) ?? atvID.hexString) (server sig check skipped)")
 
         // Build M3: sign our identity, encrypt, send
         let ltsk  = try Curve25519.Signing.PrivateKey(rawRepresentation: creds.ltsk)

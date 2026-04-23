@@ -5,6 +5,10 @@ import AppleTVLogging
 ///
 /// Stored at: ~/Library/Application Support/AppleTVRemote/<deviceID>.json
 /// No Keychain access required — avoids macOS password prompts for unsigned apps.
+///
+/// Concurrent access (app + atv CLI) is serialised with per-file advisory locks
+/// (flock(2) on a companion .lock file). Reads acquire a shared lock; writes
+/// acquire an exclusive lock. Lock files are never deleted so their fd stays valid.
 public struct CredentialStore {
 
     public init() {}
@@ -28,6 +32,22 @@ public struct CredentialStore {
         return Self.appDir.appendingPathComponent("\(safe).airplay.json")
     }
 
+    private func lockURL(for path: String) -> URL {
+        Self.appDir.appendingPathComponent(
+            (URL(fileURLWithPath: path).lastPathComponent) + ".lock")
+    }
+
+    // MARK: - File locking
+
+    /// Execute `body` under an exclusive (write) flock on `path`.
+    private func withExclusiveLock<T>(on path: String, body: () throws -> T) rethrows -> T {
+        let lockPath = lockURL(for: path).path
+        let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
+        defer { if fd >= 0 { close(fd) } }
+        if fd >= 0 { flock(fd, LOCK_EX) }
+        return try body()
+    }
+
     // MARK: - Check
 
     public func hasCredentials(for deviceID: String) -> Bool {
@@ -45,11 +65,14 @@ public struct CredentialStore {
             Log.credentials.fail("CredentialStore: encode failed for \(deviceID)")
             return
         }
-        do {
-            try data.write(to: url(for: deviceID), options: .atomic)
-            Log.credentials.report("CredentialStore: saved credentials for \(deviceID)")
-        } catch {
-            Log.credentials.fail("CredentialStore: save failed: \(error)")
+        let path = url(for: deviceID).path
+        withExclusiveLock(on: path) {
+            do {
+                try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+                Log.credentials.report("CredentialStore: saved credentials for \(deviceID)")
+            } catch {
+                Log.credentials.fail("CredentialStore: save failed: \(error)")
+            }
         }
     }
 
@@ -63,8 +86,11 @@ public struct CredentialStore {
     // MARK: - Delete
 
     public func delete(deviceID: String) {
-        try? FileManager.default.removeItem(at: url(for: deviceID))
-        Log.credentials.report("CredentialStore: deleted credentials for \(deviceID)")
+        let path = url(for: deviceID).path
+        withExclusiveLock(on: path) {
+            try? FileManager.default.removeItem(atPath: path)
+            Log.credentials.report("CredentialStore: deleted credentials for \(deviceID)")
+        }
     }
 
     // MARK: - AirPlay
@@ -74,11 +100,14 @@ public struct CredentialStore {
             Log.credentials.fail("CredentialStore: airplay encode failed for \(deviceID)")
             return
         }
-        do {
-            try data.write(to: airPlayURL(for: deviceID), options: .atomic)
-            Log.credentials.report("CredentialStore: saved airplay credentials for \(deviceID)")
-        } catch {
-            Log.credentials.fail("CredentialStore: airplay save failed: \(error)")
+        let path = airPlayURL(for: deviceID).path
+        withExclusiveLock(on: path) {
+            do {
+                try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+                Log.credentials.report("CredentialStore: saved airplay credentials for \(deviceID)")
+            } catch {
+                Log.credentials.fail("CredentialStore: airplay save failed: \(error)")
+            }
         }
     }
 
@@ -88,8 +117,11 @@ public struct CredentialStore {
     }
 
     public func deleteAirPlay(deviceID: String) {
-        try? FileManager.default.removeItem(at: airPlayURL(for: deviceID))
-        Log.credentials.report("CredentialStore: deleted airplay credentials for \(deviceID)")
+        let path = airPlayURL(for: deviceID).path
+        withExclusiveLock(on: path) {
+            try? FileManager.default.removeItem(atPath: path)
+            Log.credentials.report("CredentialStore: deleted airplay credentials for \(deviceID)")
+        }
     }
 }
 

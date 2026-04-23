@@ -13,4 +13,7 @@ extension Data {
         precondition(bytes.count <= 12, "nonce string too long: \(string)")
         return Data(repeating: 0, count: 12 - bytes.count) + bytes
     }
+
+    /// Lowercase hex string with no separators, e.g. "deadbeef".
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }
