@@ -904,6 +904,7 @@ func usage() -> Never {
     print(row("menu",                    "Menu / Back"))
     print(row("vol+ | vol-",             "Volume up / down"))
     print(row("power",                   "Toggle (wake if asleep, sleep if on)"))
+    print(row("text <string>",            "Send text to active text field"))
     print(row("disconnect",              "Drop the connection"))
     print(row("ping",                    "Round-trip ping to the app"))
     print(row("version",                 "Print atv version (1.0-<build timestamp>)"))
@@ -1126,6 +1127,12 @@ do {
     case "vol+":        try cmdKey(conn, key: .volumeUp)
     case "vol-":        try cmdKey(conn, key: .volumeDown)
     case "power":       try cmdPower(conn)
+    case "text":
+        guard args.count >= 2 else { die("text requires a string argument") }
+        let text = args[1...].joined(separator: " ")
+        let r = try conn.request(.text, args: ["text": text])
+        expectOk(r)
+        print(green("✓ sent text"))
     case "disconnect":
         let r = try conn.request(.disconnect)
         expectOk(r)

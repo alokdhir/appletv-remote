@@ -45,6 +45,7 @@ public enum IPCCommand: String, Codable, Sendable, CaseIterable {
     case longPress    = "long-press"
     case power
     case disconnect
+    case text
 }
 
 /// Button names carried as `args.key`. String-backed so the wire format is
@@ -141,11 +142,14 @@ public struct IPCStatus: Codable, Sendable {
     /// Companion FetchAttentionState result. 1 = idle/screensaver, 2 = app focused.
     /// Nil until the first keepalive fires (25 s after connect).
     public let attentionState: Int?
+    /// True when the ATV has an active text field waiting for keyboard input.
+    public let keyboardActive: Bool
 
     public init(deviceID: String?, deviceName: String?, host: String?,
                 connectionState: String, isReconnecting: Bool,
                 nowPlaying: IPCNowPlaying? = nil,
-                attentionState: Int? = nil) {
+                attentionState: Int? = nil,
+                keyboardActive: Bool = false) {
         self.deviceID = deviceID
         self.deviceName = deviceName
         self.host = host
@@ -153,6 +157,19 @@ public struct IPCStatus: Codable, Sendable {
         self.isReconnecting = isReconnecting
         self.nowPlaying = nowPlaying
         self.attentionState = attentionState
+        self.keyboardActive = keyboardActive
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deviceID        = try c.decodeIfPresent(String.self,        forKey: .deviceID)
+        deviceName      = try c.decodeIfPresent(String.self,        forKey: .deviceName)
+        host            = try c.decodeIfPresent(String.self,        forKey: .host)
+        connectionState = try c.decode(String.self,                 forKey: .connectionState)
+        isReconnecting  = try c.decode(Bool.self,                   forKey: .isReconnecting)
+        nowPlaying      = try c.decodeIfPresent(IPCNowPlaying.self, forKey: .nowPlaying)
+        attentionState  = try c.decodeIfPresent(Int.self,           forKey: .attentionState)
+        keyboardActive  = try c.decodeIfPresent(Bool.self,          forKey: .keyboardActive) ?? false
     }
 }
 

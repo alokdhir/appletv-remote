@@ -1,6 +1,8 @@
 import SwiftUI
+import SwiftUI
 import AppKit
 import AppleTVProtocol
+import AppleTVLogging
 
 struct RemoteControlView: View {
     let device: AppleTVDevice
@@ -9,7 +11,10 @@ struct RemoteControlView: View {
     @EnvironmentObject var reconnector: AutoReconnector
     @State private var pairingPin = ""
     @State private var cancelEnabled = false
+    @State private var showKeyboardInput = false
+    @State private var keyboardInputText = ""
     @FocusState private var pinFocused: Bool
+    @FocusState private var keyboardInputFocused: Bool
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
 
     var body: some View {
@@ -52,6 +57,24 @@ struct RemoteControlView: View {
                     errorView(msg)
                 }
             }
+        }
+        .sheet(isPresented: $showKeyboardInput, onDismiss: { keyboardInputText = "" }) {
+            keyboardInputSheet
+        }
+        .onChange(of: connection.keyboardActive) { active in
+            guard active else { return }
+            if NSApp.mainWindow?.isKeyWindow == true {
+                showKeyboardInput = true
+            } else {
+                KeyboardNotificationManager.shared.notify(
+                    deviceName: connection.currentDevice?.name ?? "Apple TV"
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: KeyboardNotificationManager.openKeyboardSheetNotification)
+        ) { _ in
+            showKeyboardInput = true
         }
     }
 
@@ -202,6 +225,13 @@ struct RemoteControlView: View {
                         connection.send(.volumeUp)
                     }
                 }
+
+                // Keyboard — always visible, enabled only when ATV wants text input
+                LabeledRemoteButton(sfSymbol: "keyboard", label: "Keyboard") {
+                    showKeyboardInput = true
+                }
+                .disabled(!connection.keyboardActive)
+                .opacity(connection.keyboardActive ? 1.0 : 0.4)
             }
             .padding(24)
         }
@@ -246,6 +276,46 @@ struct RemoteControlView: View {
     private func submitPin() {
         guard !pairingPin.isEmpty else { return }
         connection.submitPairingPin(pairingPin)
+    }
+
+    // MARK: - Keyboard input sheet
+
+    private var keyboardInputSheet: some View {
+        VStack(spacing: 16) {
+            Text("Keyboard Input")
+                .font(.headline)
+            Text(connection.currentDevice?.name ?? "Apple TV")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField("Type here…", text: $keyboardInputText)
+                .textFieldStyle(.roundedBorder)
+                .focused($keyboardInputFocused)
+                .onSubmit { submitKeyboardText() }
+                .onAppear { keyboardInputFocused = true }
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showKeyboardInput = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Send") { submitKeyboardText() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(keyboardInputText.isEmpty)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 280)
+    }
+
+    private func submitKeyboardText() {
+        guard !keyboardInputText.isEmpty else { return }
+        let text = keyboardInputText
+        showKeyboardInput = false
+        connection.sendText(text) { error in
+            if let error {
+                Log.companion.fail("Keyboard input failed: \(error)")
+            }
+        }
     }
 }
 

@@ -47,6 +47,14 @@ final class CompanionConnection: ObservableObject {
     // the subscription (it hasn't finished setting up the session yet).
     private var sessionStartTxn: UInt32?
 
+    // Pending response callbacks keyed by txn. Used for _tiStop/_tiStart
+    // round-trips where we need the ATV's response before proceeding.
+    private var pendingCallbacks: [UInt32: ([String: Any]) -> Void] = [:]
+
+    /// Most recent _tiD payload from _tiStart response.
+    /// Non-nil when the ATV has an active text field; nil otherwise.
+    private var currentTextInputData: Data?
+
     // Heartbeat — the ATV closes idle Companion sockets at ~38 s.
     // FetchAttentionState is a real Request the ATV actually replies to,
     // so the reply traffic refreshes its idle timer. _systemInfo is ignored
@@ -77,6 +85,10 @@ final class CompanionConnection: ObservableObject {
     /// 1 = screensaver/idle, 2 = app in foreground, 3 = some apps use other values.
     /// Nil until first keepalive response.
     @Published var attentionState: Int?
+
+    /// True when the ATV has an active text field waiting for keyboard input.
+    /// Set by _tiStarted / _tiStopped Companion events.
+    @Published var keyboardActive: Bool = false
 
     /// Live AirPlay MRP tunnel — opened after Companion session is established.
     /// Provides real-time now-playing pushes (title, artist, position) that the
@@ -378,6 +390,9 @@ final class CompanionConnection: ObservableObject {
         sendWakeOnConnect = false
         sessionStartTxn = nil
         attentionState = nil
+        keyboardActive = false
+        pendingCallbacks.removeAll()
+        currentTextInputData = nil
         lastPlaybackStateTimestamp = 0
         nowPlaying = nil
         txnCounter = 0
@@ -454,6 +469,29 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Session Init
 
+    /// Send text to the active text field on the Apple TV.
+    ///
+    /// Flow: _tiStop → _tiStart (parse session UUID from response) → _tiC event.
+    /// Calls `completion` on the main actor with nil on success or an Error on failure.
+    func sendText(_ text: String, completion: @escaping (Error?) -> Void) {
+        guard state == .connected else {
+            completion(TextInputError.notConnected)
+            return
+        }
+        guard keyboardActive, let tiD = currentTextInputData else {
+            completion(TextInputError.noActiveTextField)
+            return
+        }
+        guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
+            completion(TextInputError.sessionUUIDMissing)
+            return
+        }
+        let payload = RTITextOperations.inputPayload(sessionUUID: uuid, text: text)
+        let cmdTxn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: cmdTxn))
+        Log.companion.report("Companion: sent text input (\(text.count) chars)")
+        completion(nil)
+    }
     private func startAirPlayMRP() {
         guard let device = currentDevice,
               let host = device.host,
@@ -521,6 +559,16 @@ final class CompanionConnection: ObservableObject {
         sendEncrypted(OPACK.encodeSessionStart(txn: txn3, localSID: localSID))
 
         let txn4 = txnCounter; txnCounter &+= 1
+        pendingCallbacks[txn4] = { [weak self] response in
+            guard let self else { return }
+            let tiD = (response["_c"] as? [String: Any])?["_tiD"] as? Data
+            self.currentTextInputData = tiD
+            let wasActive = self.keyboardActive
+            self.keyboardActive = tiD != nil
+            if self.keyboardActive && !wasActive {
+                Log.companion.report("Companion: keyboard active (text field focused at connect)")
+            }
+        }
         sendEncrypted(OPACK.encodeTextInputStart(txn: txn4))
 
         // _interest subscriptions are sent from handleOPACKMessage once we
@@ -538,7 +586,7 @@ final class CompanionConnection: ObservableObject {
     private func startKeepalive() {
         keepaliveTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 25.0, repeating: 25.0)
+        timer.schedule(deadline: .now() + 3.0, repeating: 3.0)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .connected else {
                 self?.keepaliveTimer?.cancel()
@@ -547,6 +595,19 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter; self.txnCounter &+= 1
             self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: txn))
+            // Poll _tiStart to detect keyboard focus changes mid-session.
+            let tiTxn = self.txnCounter; self.txnCounter &+= 1
+            self.pendingCallbacks[tiTxn] = { [weak self] response in
+                guard let self else { return }
+                let tiD = (response["_c"] as? [String: Any])?["_tiD"] as? Data
+                self.currentTextInputData = tiD
+                let newActive = tiD != nil
+                if newActive != self.keyboardActive {
+                    self.keyboardActive = newActive
+                    Log.companion.report("Companion: keyboardActive=\(newActive)")
+                }
+            }
+            self.sendEncrypted(OPACK.encodeTextInputStart(txn: tiTxn))
         }
         timer.resume()
         keepaliveTimer = timer
@@ -743,6 +804,12 @@ final class CompanionConnection: ObservableObject {
             Log.companion.trace("Companion → _pong txn=\(txn) ✓")
         case "_pong":
             break
+        case "_tiStarted":
+            keyboardActive = true
+            Log.companion.report("Companion: keyboard active (text field focused)")
+        case "_tiStopped":
+            keyboardActive = false
+            Log.companion.report("Companion: keyboard inactive (text field lost focus)")
         case "_iMC":
             // Media-control push event. Payload is in `_c`.
             updateNowPlaying(from: msg)
@@ -755,13 +822,18 @@ final class CompanionConnection: ObservableObject {
             }
         default:
             let msgType = msg["_t"] as? Int ?? 0
+            // Fire any pending response callback for this txn.
+            if let cb = pendingCallbacks.removeValue(forKey: txn) {
+                cb(msg)
+            }
             // Detect _sessionStart response (has no _i, matched by txn).
             if let sst = sessionStartTxn, txn == sst, msgType == 3 {
                 sessionStartTxn = nil
                 Log.companion.report("Companion: session confirmed, subscribing to events")
                 let t = txnCounter; txnCounter &+= 1
                 sendEncrypted(OPACK.encodeInterest(
-                    events: ["_iMC", "SystemStatus", "TVSystemStatus"], txn: t))
+                    events: ["_iMC", "SystemStatus", "TVSystemStatus",
+                             "_tiStarted", "_tiStopped"], txn: t))
             }
             // Detect FetchAttentionState response (no _i, has _c.state).
             if msgType == 3,
@@ -971,5 +1043,21 @@ public struct NowPlayingInfo: Equatable, Sendable {
             r[k] = String(describing: v)
         }
         self.raw = r
+    }
+}
+
+// MARK: - Text input errors
+
+enum TextInputError: LocalizedError {
+    case notConnected
+    case noActiveTextField
+    case sessionUUIDMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:       return "Not connected to an Apple TV"
+        case .noActiveTextField:  return "No text input active on Apple TV"
+        case .sessionUUIDMissing: return "Text input session UUID missing from ATV response"
+        }
     }
 }

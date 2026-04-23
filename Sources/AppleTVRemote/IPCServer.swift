@@ -281,6 +281,22 @@ final class IPCServer {
                 connection.userInitiatedDisconnect = true
                 connection.disconnect()
                 client.send(.response(.ok(req.id)))
+            case .text:
+                guard let text = req.args?["text"], !text.isEmpty else {
+                    throw IPCError.badArgs("text requires args.text")
+                }
+                guard connection.keyboardActive else {
+                    let name = connection.currentDevice?.name ?? "Apple TV"
+                    throw IPCError.badState("No text input active on \(name)")
+                }
+                let reqID = req.id
+                connection.sendText(text) { error in
+                    if let error {
+                        client.send(.response(.failure(reqID, error.localizedDescription)))
+                    } else {
+                        client.send(.response(.ok(reqID)))
+                    }
+                }
             }
         } catch {
             client.send(.response(.failure(req.id, error.localizedDescription)))
@@ -319,7 +335,8 @@ final class IPCServer {
                          connectionState: connection.state.displayText,
                          isReconnecting: reconnector.isReconnecting,
                          nowPlaying: np,
-                         attentionState: connection.attentionState)
+                         attentionState: connection.attentionState,
+                         keyboardActive: connection.keyboardActive)
     }
 
     private func resolveDevice(_ nameOrID: String) -> AppleTVDevice? {

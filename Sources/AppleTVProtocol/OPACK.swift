@@ -251,6 +251,31 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode `_tiStop` — tears down the active text input session.
+    /// Sent as a request (_t:2) before a fresh _tiStart.
+    public static func encodeTextInputStop(txn: UInt32) -> Data {
+        pack([
+            "_i": "_tiStop",
+            "_t": 2,
+            "_x": txn,
+            "_c": [String: Any](),
+        ] as [String: Any])
+    }
+
+    /// Encode `_tiC` — fire-and-forget event (_t:1) that sends text to the ATV.
+    /// `tiD` is the RTI binary plist payload from RTITextOperations.
+    public static func encodeTextInputCommand(tiD: Data, txn: UInt32) -> Data {
+        pack([
+            "_i": "_tiC",
+            "_t": 1,
+            "_x": txn,
+            "_c": [
+                "_tiV": 1,
+                "_tiD": tiD,
+            ] as [String: Any],
+        ] as [String: Any])
+    }
+
     /// Encode a `FetchAttentionState` Request — a cheap status poll pyatv
     /// uses as the closest thing to a heartbeat. The ATV responds with
     /// `_c.state` (an Int), which gives us the reply traffic needed to
