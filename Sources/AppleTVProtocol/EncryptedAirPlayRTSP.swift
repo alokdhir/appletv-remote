@@ -66,14 +66,14 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
     /// after pair-verify — only the separate event/data channels use HAP
     /// encryption. Flipping this to false confirms that hypothesis without
     /// a full refactor.
-    public static var encryptionEnabled = true
+    public var encryptionEnabled = true
 
     /// When true, every send / receive / decrypt step is mirrored to stderr
     /// so CLI debugging can see the wire activity that os_log hides.
-    public static var verbose = false
+    public var verbose = false
 
     private func trace(_ s: @autoclosure () -> String) {
-        if Self.verbose {
+        if self.verbose {
             FileHandle.standardError.write(Data("[rtsp \(host)] \(s())\n".utf8))
         }
     }
@@ -139,7 +139,7 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
     public func handle(data: Data?, err: Error?, isComplete: Bool) {
         if let data, !data.isEmpty {
             trace("rx \(data.count)B from wire")
-            if Self.encryptionEnabled {
+            if self.encryptionEnabled {
                 do {
                     let plain = try session.feed(data)
                     if !plain.isEmpty {
@@ -220,7 +220,7 @@ public final class EncryptedAirPlayRTSP: @unchecked Sendable {
 
         trace("tx plaintext \(frame.count)B:\n\(String(data: Data(req.utf8), encoding: .utf8) ?? "<non-utf8>")")
         let onWire: Data
-        if Self.encryptionEnabled {
+        if self.encryptionEnabled {
             do { onWire = try session.encrypt(frame) }
             catch let e as HAPSession.FramingError { throw RTSPError.framing(e) }
             catch { throw error }
