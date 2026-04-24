@@ -91,7 +91,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             pop.performClose(nil)
         } else {
             // Activate before showing so the popover renders with active (non-washed-out) colours.
-            NSApp.activate(ignoringOtherApps: true)
+            // ignoringOtherApps:false avoids briefly raising the main window.
+            NSApp.activate(ignoringOtherApps: false)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             DispatchQueue.main.async {
                 let popWin = pop.contentViewController?.view.window
