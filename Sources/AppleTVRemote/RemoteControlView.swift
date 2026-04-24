@@ -74,18 +74,19 @@ struct RemoteControlView: View {
             guard active else {
                 keyboardNotifyTask?.cancel()
                 keyboardNotifyTask = nil
-                KeyboardNotificationManager.shared.cancelAttention()
+                KeyboardNotificationManager.shared.resetNotify()
                 return
             }
             keyboardNotifyTask?.cancel()
-            KeyboardNotificationManager.shared.resetBounce()
+            KeyboardNotificationManager.shared.resetNotify()
+            let deviceName = connection.currentDevice?.name ?? "Apple TV"
             keyboardNotifyTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
                 if NSApp.mainWindow?.isKeyWindow == true {
                     showKeyboardInput = true
                 } else {
-                    KeyboardNotificationManager.shared.bounce()
+                    KeyboardNotificationManager.shared.notify(deviceName: deviceName)
                 }
             }
         }
