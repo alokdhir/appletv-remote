@@ -1166,6 +1166,8 @@ do {
         let r = try conn.request(.disconnect)
         expectOk(r)
         print(green("✓ disconnected"))
+    case "apps":
+        try runStandalone(args: dispatchArgs, device: standaloneDevice)
     default:
         die("unknown command: \(args[0])")   // show original, not the no-op pass-through
     }

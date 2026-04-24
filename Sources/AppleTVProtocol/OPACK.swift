@@ -52,7 +52,7 @@ public enum OPACK {
         case let i as Int:
             encodeInt(i, into: &out)
         case let u as UInt32:
-            encodeUInt32(u, into: &out)
+            encodeInt(Int(u), into: &out)
         case let u as UInt64:
             if u <= UInt64(Int64.max) {
                 encodeInt(Int(u), into: &out)
@@ -158,7 +158,7 @@ public enum OPACK {
     }
 
     /// Encode `_systemInfo` request — tells the ATV who we are.
-    public static func encodeSystemInfo(clientID: String, txn: UInt32) -> Data {
+    public static func encodeSystemInfo(clientID: String, rpID: String, name: String, txn: UInt32) -> Data {
         pack([
             "_i": "_systemInfo",
             "_t": 2,
@@ -175,10 +175,9 @@ public enum OPACK {
                 "_bf":   0,
                 "_cf":   512,
                 "_clFl": 128,
-                // pyatv sends `_i: None` in `_systemInfo` — NOT the clientID.
-                // This is a separate optional "rp_id" field; ATV gates
-                // FetchLaunchableApplicationsEvent response on correct shape
-                // here, so mismatching drops the request silently.
+                // pyatv sends `_i: None` (null) in `_systemInfo` — NOT the rpID.
+                // The ATV's own rp_id comes back in the response; this field in the
+                // request is intentionally null per pyatv's wire format.
                 "_i":    NSNull(),
                 "_idsID": Data(clientID.utf8),
                 "_pubID": "FF:70:79:61:74:76",
@@ -189,7 +188,7 @@ public enum OPACK {
                 // ATV stores the client name during pairing and gates some features
                 // (e.g. FetchLaunchableApplicationsEvent) on connect-time name match.
                 // TEMP: impersonating pyatv for Option-D test — pyatv's default name.
-                "name":  "pyatv",
+                "name":  name,
             ] as [String: Any],
         ] as [String: Any])
     }
@@ -364,11 +363,25 @@ public enum OPACK {
 
     /// Decode a top-level OPACK dict into [String: Any].
     /// Supports string, float, int, bytes, bool, and nested dict values.
+    /// Handles both fixed-count dicts (0xE0+N for N≤14) and open-ended dicts
+    /// (0xEF with a 0x03 terminator, used by the ATV for app lists).
     public static func decodeDict(_ data: Data) -> [String: Any]? {
         var cursor = data.startIndex
-        guard let count = readDictHeader(data, cursor: &cursor) else { return nil }
+        guard cursor < data.endIndex else { return nil }
+        let tag = data[cursor]
+        guard tag >= 0xE0, tag <= 0xEF else { return nil }
+        data.formIndex(after: &cursor)
+        let count = Int(tag - 0xE0)
+        let isOpen = count == 0xF  // 0xEF = open-ended, terminated by 0x03
         var result = [String: Any]()
-        for _ in 0..<count {
+        var iterations = 0
+        while true {
+            if isOpen {
+                // Check for terminator 0x03
+                if cursor < data.endIndex, data[cursor] == 0x03 { break }
+            } else {
+                if iterations >= count { break }
+            }
             guard let key = readString(data, cursor: &cursor) else { break }
             if let s = peekString(data, cursor: &cursor) {
                 result[key] = s
@@ -383,6 +396,7 @@ public enum OPACK {
             } else {
                 skipValue(data, cursor: &cursor)
             }
+            iterations += 1
         }
         return result
     }
@@ -480,11 +494,24 @@ public enum OPACK {
         guard cursor < data.endIndex else { return nil }
         let tag = data[cursor]
         guard tag >= 0xE0, tag <= 0xEF else { return nil }
-        if let d = decodeDict(data[cursor...]) { // decode sub-slice
-            // advance cursor past the nested dict by re-parsing
-            _ = readDictHeader(data, cursor: &cursor)
+        if let d = decodeDict(data[cursor...]) {
+            // advance cursor: re-decode to know how many bytes were consumed
+            data.formIndex(after: &cursor)  // skip the tag byte
             let count = Int(tag - 0xE0)
-            for _ in 0..<(count * 2) { skipValue(data, cursor: &cursor) }
+            let isOpen = count == 0xF
+            var iterations = 0
+            while true {
+                if isOpen {
+                    if cursor < data.endIndex, data[cursor] == 0x03 {
+                        data.formIndex(after: &cursor); break
+                    }
+                } else {
+                    if iterations >= count { break }
+                }
+                skipValue(data, cursor: &cursor)  // key
+                skipValue(data, cursor: &cursor)  // value
+                iterations += 1
+            }
             return d
         }
         cursor = saved; return nil
@@ -566,11 +593,15 @@ public enum OPACK {
 
     private static func encodeString(_ s: String, into out: inout Data) {
         let b = Data(s.utf8)
-        if b.count <= 0x1F {
+        if b.count <= 0x20 {
             out.append(UInt8(0x40 + b.count))
-        } else {
-            out.append(0x60)
+        } else if b.count <= 0xFF {
+            out.append(0x61)
             out.append(UInt8(b.count & 0xFF))
+        } else {
+            out.append(0x62)
+            out.append(UInt8(b.count & 0xFF))
+            out.append(UInt8((b.count >> 8) & 0xFF))
         }
         out.append(contentsOf: b)
     }
@@ -614,11 +645,15 @@ public enum OPACK {
 
         var length: Int
         switch tag {
-        case 0x40...0x5F:
+        case 0x40...0x60:
             length = Int(tag - 0x40)
-        case 0x60:
+        case 0x61:
             guard cursor < data.endIndex else { return nil }
             length = Int(data[cursor]); data.formIndex(after: &cursor)
+        case 0x62:
+            guard data.distance(from: cursor, to: data.endIndex) >= 2 else { return nil }
+            length = Int(data[cursor]) | (Int(data[data.index(cursor, offsetBy: 1)]) << 8)
+            data.formIndex(&cursor, offsetBy: 2)
         default:
             return nil
         }
@@ -679,9 +714,14 @@ public enum OPACK {
         case 0x31:                advance(&cursor, by: 2, in: data)
         case 0x32, 0x35:          advance(&cursor, by: 4, in: data)
         case 0x33, 0x36:          advance(&cursor, by: 8, in: data)
-        case 0x40...0x5F:         advance(&cursor, by: Int(tag - 0x40), in: data)
-        case 0x60:
+        case 0x40...0x60:         advance(&cursor, by: Int(tag - 0x40), in: data)
+        case 0x61:
             if cursor < data.endIndex { let n = Int(data[cursor]); data.formIndex(after: &cursor); advance(&cursor, by: n, in: data) }
+        case 0x62:
+            if data.distance(from: cursor, to: data.endIndex) >= 2 {
+                let n = Int(data[cursor]) | Int(data[data.index(cursor, offsetBy: 1)]) << 8
+                data.formIndex(&cursor, offsetBy: 2); advance(&cursor, by: n, in: data)
+            }
         case 0x70...0x8F:         advance(&cursor, by: Int(tag - 0x70), in: data)
         case 0x90, 0x91:
             if cursor < data.endIndex { let n = Int(data[cursor]); data.formIndex(after: &cursor); advance(&cursor, by: n, in: data) }
@@ -702,8 +742,17 @@ public enum OPACK {
             let count = Int(tag - 0xD0)
             for _ in 0..<count { skipValue(data, cursor: &cursor) }
         case 0xE0...0xEF:
-            let count = Int(tag - 0xE0) * 2  // key + value per entry
-            for _ in 0..<count { skipValue(data, cursor: &cursor) }
+            let count = Int(tag - 0xE0)
+            if count == 0xF {
+                // open-ended dict: skip key-value pairs until 0x03 terminator
+                while cursor < data.endIndex, data[cursor] != 0x03 {
+                    skipValue(data, cursor: &cursor)  // key
+                    skipValue(data, cursor: &cursor)  // value
+                }
+                if cursor < data.endIndex { data.formIndex(after: &cursor) }  // consume 0x03
+            } else {
+                for _ in 0..<(count * 2) { skipValue(data, cursor: &cursor) }
+            }
         default: break
         }
     }

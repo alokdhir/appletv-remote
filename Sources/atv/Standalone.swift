@@ -162,7 +162,7 @@ final class StandaloneSession {
     private var decryptKey: SymmetricKey?
     private var sendNonce: UInt64 = 0
     private var recvNonce: UInt64 = 0
-    private var txn: UInt32 = 0
+    private var txn: UInt32 = UInt32.random(in: 1...65535)
     private let creds: PairingCredentials
     private let device: AppleTVDevice
 
@@ -201,9 +201,12 @@ final class StandaloneSession {
             Darwin.close(s)
             throw StandaloneError.tcpConnectFailed("\(host):\(port) — \(err)")
         }
-        // Receive timeout — 15s gives the ATV time to respond to slow messages.
-        var tv = timeval(tv_sec: 15, tv_usec: 0)
+        // Receive timeout — 30s gives the ATV time to respond to slow messages.
+        var tv = timeval(tv_sec: 30, tv_usec: 0)
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        // Disable Nagle to prevent small writes being coalesced
+        var one: Int32 = 1
+        setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
         fd = s
     }
 
@@ -211,19 +214,14 @@ final class StandaloneSession {
 
     func pairVerify() throws {
         let verify = CompanionPairVerify(credentials: creds)
-        // M1 — must be OPACK-wrapped with {"_pd": tlv8, "_auTy": 4}
         try writeFrame(.pvStart, payload: OPACK.wrapPvStartData(verify.m1Payload()))
-        // M2 — ATV sends OPACK dict; extract raw TLV8 before processing
         let m2Raw = try readFrame(expected: .pvNext)
         let m2 = OPACK.extractPairingData(from: m2Raw) ?? m2Raw
         let m3 = try verify.processM2(m2)
-        // M3 — wrap raw TLV8 in {"_pd": ...}
         try writeFrame(.pvNext, payload: OPACK.wrapPairingData(m3))
-        // M4 — extract TLV8 then verify
         let m4Raw = try readFrame(expected: .pvNext)
         let m4 = OPACK.extractPairingData(from: m4Raw) ?? m4Raw
         try verify.verifyM4(m4)
-        // Derive session keys
         guard let enc = verify.sessionEncryptKey, let dec = verify.sessionDecryptKey else {
             throw StandaloneError.protocolFailure("pair-verify did not produce session keys")
         }
@@ -237,7 +235,7 @@ final class StandaloneSession {
     /// which are only useful for long-lived sessions).
     func startSession() throws {
         let t1 = nextTxn()
-        try sendEncrypted(OPACK.encodeSystemInfo(clientID: creds.clientID, txn: t1))
+        try sendEncrypted(OPACK.encodeSystemInfo(clientID: creds.clientID, rpID: creds.rpID, name: creds.name, txn: t1))
         let t2 = nextTxn()
         try sendEncrypted(OPACK.encodeTouchStart(txn: t2))
         let t3 = nextTxn()
@@ -252,40 +250,26 @@ final class StandaloneSession {
 
     /// pyatv-style setup — send each handshake message and await its response.
     /// Used by the `apps` debug path. Prints wire trace to stderr.
-    func startSessionPyatv(trace: Bool = true) throws {
+    func startSessionPyatv(trace: Bool = false) throws {
         func step(_ label: String, _ payload: Data) throws -> [String: Any] {
-            if trace {
-                let hex = payload.map { String(format: "%02x", $0) }.joined()
-                FileHandle.standardError.write(Data("→ \(label) (\(payload.count)B OPACK): \(hex)\n".utf8))
-            }
             try sendEncrypted(payload)
             let resp = try recvEncryptedDict()
             if trace { FileHandle.standardError.write(Data("← \(label) ← \(dictPreview(resp))\n".utf8)) }
             return resp
         }
-        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, txn: nextTxn()))
+        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, rpID: creds.rpID, name: creds.name, txn: nextTxn()))
         _ = try step("_touchStart",   OPACK.encodeTouchStart(txn: nextTxn()))
         _ = try step("_sessionStart", OPACK.encodeSessionStart(txn: nextTxn(), localSID: UInt32.random(in: 0..<UInt32.max)))
         _ = try step("_tiStart",      OPACK.encodeTextInputStart(txn: nextTxn()))
-        // pyatv subscribes _iMC, fetches attn, subscribes SystemStatus + TVSystemStatus, then FetchLaunchable
-        try sendEncrypted(OPACK.encodeInterest(events: ["_iMC"], txn: nextTxn()))
-        _ = try step("FetchAttentionState", OPACK.encodeFetchAttentionState(txn: nextTxn()))
-        try sendEncrypted(OPACK.encodeInterest(events: ["SystemStatus"], txn: nextTxn()))
-        try sendEncrypted(OPACK.encodeInterest(events: ["TVSystemStatus"], txn: nextTxn()))
     }
 
     /// Send FetchLaunchable, wait for response, decode app list.
-    func fetchApps(trace: Bool = true) throws -> [(id: String, name: String)] {
+    func fetchApps(trace: Bool = false) throws -> [(id: String, name: String)] {
         let txnVal = nextTxn()
-        if trace { FileHandle.standardError.write(Data("→ FetchLaunchable (txn=\(txnVal))\n".utf8)) }
         try sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txnVal))
-        // ATV may push unrelated events first; keep reading until we see a
-        // response dict with _rT=3 (response) or one that contains an apps dict.
         for _ in 0..<8 {
             let resp = try recvEncryptedDict()
-            if trace { FileHandle.standardError.write(Data("← \(dictPreview(resp))\n".utf8)) }
             if let c = resp["_c"] as? [String: Any], c.count > 1 {
-                // Treat any dict response whose _c has >1 entries as candidate app list
                 var out: [(String, String)] = []
                 for (bundle, name) in c {
                     if let n = name as? String { out.append((bundle, n)) }
@@ -402,6 +386,7 @@ final class StandaloneSession {
     private func readFrame(expected: CompanionFrame.FrameType) throws -> Data {
         while true {
             if let frame = CompanionFrame.read(from: &buffer) {
+                FileHandle.standardError.write(Data("  ← frame type=0x\(String(frame.type.rawValue, radix: 16)) payload[\(frame.payload.count)]\n".utf8))
                 guard frame.type == expected else {
                     throw StandaloneError.protocolFailure("unexpected frame 0x\(String(frame.type.rawValue, radix: 16)), wanted 0x\(String(expected.rawValue, radix: 16))")
                 }
@@ -431,7 +416,10 @@ final class StandaloneSession {
             UInt8( payloadLen        & 0xFF),
         ])
         let sealed = try ChaChaPoly.seal(opackData, using: key, nonce: nonce, authenticating: aad)
-        try writeFrame(.eOPACK, payload: sealed.ciphertext + sealed.tag)
+        let encPayload = sealed.ciphertext + sealed.tag
+        let encHex = encPayload.map { String(format: "%02x", $0) }.joined()
+        FileHandle.standardError.write(Data("  → enc header: \(aad.map { String(format: "%02x", $0) }.joined()) payload[\(encPayload.count)]: \(encHex)\n".utf8))
+        try writeFrame(.eOPACK, payload: encPayload)
     }
 
     private func nonceData(_ counter: UInt64) -> Data {

@@ -132,12 +132,36 @@ public struct PairingCredentials: Codable {
     public let ltpk: Data            // Long-term public key (Ed25519 public key bytes)
     public let deviceLTPK: Data      // Apple TV's long-term public key
     public let deviceID: String      // Apple TV's pairing identifier
+    /// Random 6-byte hex string sent as `_i` in `_systemInfo` (pyatv's `rp_id`).
+    /// Generated once at pair-setup time and stable per device.
+    public let rpID: String
+    /// Name sent in HAP pair-setup M5 tag=0x11 and `_systemInfo` `name` field.
+    /// Must match what was used at pair-setup time.
+    public let name: String
 
-    public init(clientID: String, ltsk: Data, ltpk: Data, deviceLTPK: Data, deviceID: String) {
+    public init(clientID: String, ltsk: Data, ltpk: Data, deviceLTPK: Data, deviceID: String,
+                rpID: String? = nil, name: String = "Mac Remote") {
         self.clientID = clientID
         self.ltsk = ltsk
         self.ltpk = ltpk
         self.deviceLTPK = deviceLTPK
         self.deviceID = deviceID
+        self.rpID = rpID ?? PairingCredentials.newRpID()
+        self.name = name
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clientID   = try c.decode(String.self, forKey: .clientID)
+        ltsk       = try c.decode(Data.self,   forKey: .ltsk)
+        ltpk       = try c.decode(Data.self,   forKey: .ltpk)
+        deviceLTPK = try c.decode(Data.self,   forKey: .deviceLTPK)
+        deviceID   = try c.decode(String.self, forKey: .deviceID)
+        rpID       = (try? c.decode(String.self, forKey: .rpID)) ?? PairingCredentials.newRpID()
+        name       = (try? c.decode(String.self, forKey: .name)) ?? "Mac Remote"
+    }
+
+    private static func newRpID() -> String {
+        (0..<6).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 }
