@@ -46,7 +46,7 @@ struct AppleTVRemoteApp: App {
     private func setUp() {
         appDelegate.onFinishLaunching = nil  // clear after first real call
         discovery.startDiscovery()
-        MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect)
+        MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect, reconnector: reconnector)
         reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
         if ipcServer == nil {
             let server = IPCServer(connection: connection,

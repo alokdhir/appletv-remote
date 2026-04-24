@@ -21,7 +21,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     /// steal focus from the main window we just raised).
     private var suppressPopoverDeactivate = false
 
-    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore) {
+    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore, reconnector: AutoReconnector) {
         guard statusItem == nil else { return }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -43,6 +43,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .environmentObject(autoConnect)
+                .environmentObject(reconnector)
                 .preferredColorScheme(.dark)
         )
         vc.sizingOptions = .preferredContentSize
@@ -194,12 +195,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 // MARK: - Menu bar remote view
 
 struct MenuBarRemoteView: View {
-    @EnvironmentObject var discovery:  DeviceDiscovery
-    @EnvironmentObject var connection: CompanionConnection
+    @EnvironmentObject var discovery:   DeviceDiscovery
+    @EnvironmentObject var connection:  CompanionConnection
+    @EnvironmentObject var reconnector: AutoReconnector
 
     var body: some View {
         Group {
-            if connection.state == .connected {
+            if connection.state == .connected ||
+               (reconnector.hasEverConnected && !connection.userInitiatedDisconnect) {
                 connectedView
             } else {
                 disconnectedView
