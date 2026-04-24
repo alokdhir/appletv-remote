@@ -28,7 +28,14 @@ struct RemoteControlView: View {
             // would otherwise flash the connect prompt for ~350 ms on every
             // idle-socket reconnect. The status bar shows "Reconnecting…" so
             // the user still knows what's happening.
-            if reconnector.isReconnecting, connection.state != .awaitingPairingPin {
+            //
+            // We key on hasEverConnected (not isReconnecting) because
+            // isReconnecting is set one Combine frame after the state change,
+            // leaving a single SwiftUI render where state==.disconnected and
+            // isReconnecting==false — exactly the flash we want to suppress.
+            if reconnector.hasEverConnected,
+               !connection.userInitiatedDisconnect,
+               connection.state != .awaitingPairingPin {
                 remoteLayout
             } else {
                 switch connection.state {

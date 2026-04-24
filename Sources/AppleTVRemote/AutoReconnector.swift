@@ -21,6 +21,10 @@ final class AutoReconnector: ObservableObject {
     /// only surface "Reconnecting…" in the status bar instead of flashing back
     /// to the connect prompt.
     @Published var isReconnecting: Bool = false
+    /// True once the first successful `.connected` has been observed.
+    /// Published so the view can suppress the connect-prompt flash on
+    /// transient disconnects before `isReconnecting` is set.
+    @Published var hasEverConnected = false
 
     deinit {
         retryTask?.cancel()
@@ -31,11 +35,6 @@ final class AutoReconnector: ObservableObject {
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0
     private let maxRetries  = 3
-    /// Only start surfacing the "reconnecting" UI after we've been connected
-    /// at least once. Otherwise the transient `.disconnected` inside the very
-    /// first `wakeAndConnect` call flips `isReconnecting` true and hides the
-    /// Connecting spinner / initial error behind the remote layout.
-    private var hasEverConnected = false
     // Short debounce — the ATV drops idle Companion sockets at ~30 s, and a
     // pair-verify reconnect only takes ~70 ms. Waiting 5 s here was the main
     // source of the user-visible "blip" on every idle-close cycle.
