@@ -35,24 +35,23 @@ final class KeyboardNotificationManager: NSObject, UNUserNotificationCenterDeleg
     /// Idempotent: subsequent calls while a bounce is already active are ignored.
     func bounce() {
         DispatchQueue.main.async {
-            Log.app.report("bounce() called — token=\(self.attentionRequestToken) isActive=\(NSApp.isActive)")
+            if Log.verbose { Log.app.report("bounce() called — token=\(self.attentionRequestToken) isActive=\(NSApp.isActive)") }
             if NSApp.isActive {
-                // App is already active — open the sheet directly instead of bouncing.
                 NotificationCenter.default.post(name: Self.openKeyboardSheetNotification, object: nil)
                 return
             }
             guard self.attentionRequestToken == -1 else {
-                Log.app.report("bounce() skipped — already bouncing")
+                if Log.verbose { Log.app.report("bounce() skipped — already bouncing") }
                 return
             }
             self.attentionRequestToken = NSApp.requestUserAttention(.informationalRequest)
-            Log.app.report("bounce() fired — new token=\(self.attentionRequestToken)")
+            if Log.verbose { Log.app.report("bounce() fired — token=\(self.attentionRequestToken)") }
         }
     }
 
     func resetBounce() {
         DispatchQueue.main.async {
-            Log.app.report("resetBounce() called — token=\(self.attentionRequestToken)")
+            if Log.verbose { Log.app.report("resetBounce() called — token=\(self.attentionRequestToken)") }
             NSApp.cancelUserAttentionRequest(self.attentionRequestToken)
             self.attentionRequestToken = -1
         }
