@@ -20,10 +20,10 @@ public enum Log {
     /// When true, all trace/report/fail messages are also written to stderr.
     public static var verbose: Bool = false
 
-    /// Optional sink called (in addition to os_log and stderr) for every message.
-    /// Set by `LogForwarder`; nil when no forwarder is active.
-    /// Access must be serialised — callers hold the main actor lock or use `logLock`.
-    public static var _sink: ((String) -> Void)? = nil
+    /// Active log sinks, keyed by forwarder identity.
+    /// Fan-out: every active LogForwarder receives every message.
+    /// Access must be serialised via `_lock`.
+    public static var _sinks: [UUID: (String) -> Void] = [:]
     public static let _lock = NSLock()
 
     public static let companion   = Logger(subsystem: subsystem, category: "companion")
@@ -40,7 +40,8 @@ public extension Logger {
     func trace(_ message: String) {
         self.debug("\(message, privacy: .public)")
         if Log.verbose { fputs("[trace] \(message)\n", stderr) }
-        Log._lock.withLock { Log._sink?("[trace] \(message)") }
+        let sinks = Log._lock.withLock { Array(Log._sinks.values) }
+        sinks.forEach { $0("[trace] \(message)") }
     }
 
     /// Routine state transitions and user-visible progress.
@@ -48,24 +49,28 @@ public extension Logger {
     func report(_ message: String) {
         self.notice("\(message, privacy: .public)")
         if Log.verbose { fputs("[info]  \(message)\n", stderr) }
-        Log._lock.withLock { Log._sink?("[info]  \(message)") }
+        let sinks = Log._lock.withLock { Array(Log._sinks.values) }
+        sinks.forEach { $0("[info]  \(message)") }
     }
 
     /// Errors and unexpected conditions. Always visible; persisted.
     func fail(_ message: String) {
         self.error("\(message, privacy: .public)")
         if Log.verbose { fputs("[error] \(message)\n", stderr) }
-        Log._lock.withLock { Log._sink?("[error] \(message)") }
+        let sinks = Log._lock.withLock { Array(Log._sinks.values) }
+        sinks.forEach { $0("[error] \(message)") }
     }
 }
 
 /// RAII log forwarder. Installs a sink on `Log` for its lifetime; removes it on deinit.
-/// Only one forwarder can be active at a time (last writer wins).
+/// Multiple forwarders can be active simultaneously — all receive every message.
 public final class LogForwarder {
+    private let key: UUID
     public init(_ sink: @escaping (String) -> Void) {
-        Log._lock.withLock { Log._sink = sink }
+        key = UUID()
+        Log._lock.withLock { Log._sinks[key] = sink }
     }
     deinit {
-        Log._lock.withLock { Log._sink = nil }
+        Log._lock.withLock { Log._sinks[key] = nil }
     }
 }

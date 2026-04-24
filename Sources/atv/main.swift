@@ -905,6 +905,7 @@ func usage() -> Never {
     print(row("vol+ | vol-",             "Volume up / down"))
     print(row("power",                   "Toggle (wake if asleep, sleep if on)"))
     print(row("text <string>",            "Send text to active text field"))
+    print(row("text --clear",             "Clear the active text field"))
     print(row("disconnect",              "Drop the connection"))
     print(row("ping",                    "Round-trip ping to the app"))
     print(row("version",                 "Print atv version (1.0-<build timestamp>)"))
@@ -1128,11 +1129,38 @@ do {
     case "vol-":        try cmdKey(conn, key: .volumeDown)
     case "power":       try cmdPower(conn)
     case "text":
-        guard args.count >= 2 else { die("text requires a string argument") }
-        let text = args[1...].joined(separator: " ")
-        let r = try conn.request(.text, args: ["text": text])
-        expectOk(r)
-        print(green("✓ sent text"))
+        let isClear = args.contains("--clear")
+        if isClear {
+            let maxAttempts = 10
+            var sent = false
+            for attempt in 1...maxAttempts {
+                let r = try conn.request(.clearText)
+                if r.ok { sent = true; break }
+                if r.error == "not connected", attempt < maxAttempts {
+                    usleep(200_000)
+                    continue
+                }
+                die(r.error ?? "unknown error")
+            }
+            if sent { print(green("✓ cleared text")) }
+        } else {
+            guard args.count >= 2 else { die("text requires a string argument or --clear") }
+            let text = args[1...].filter { $0 != "--clear" }.joined(separator: " ")
+            guard !text.isEmpty else { die("text requires a non-empty string argument") }
+            // Retry through the reconnect window, same pattern as cmdKey.
+            let maxAttempts = 10
+            var sent = false
+            for attempt in 1...maxAttempts {
+                let r = try conn.request(.text, args: ["text": text])
+                if r.ok { sent = true; break }
+                if r.error == "not connected", attempt < maxAttempts {
+                    usleep(200_000)
+                    continue
+                }
+                die(r.error ?? "unknown error")
+            }
+            if sent { print(green("✓ sent text")) }
+        }
     case "disconnect":
         let r = try conn.request(.disconnect)
         expectOk(r)

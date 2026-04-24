@@ -6,6 +6,11 @@ import Foundation
 /// `PropertyListSerialization` serialises `["CF$UID": N]` dicts as regular
 /// dictionaries, which the ATV's archiver cannot decode as UID references.
 /// This writer produces byte-level–compatible output with Python's `plistlib`.
+///
+/// Object-reference size is chosen automatically at `build()` time:
+///   ≤ 255 objects  → 1-byte refs
+///   ≤ 65535 objects → 2-byte refs
+/// Beyond 65535 objects `build()` precondition-fails.
 struct BinaryPlistWriter {
 
     // MARK: - Public value types
@@ -15,9 +20,17 @@ struct BinaryPlistWriter {
         let index: Int
     }
 
+    // MARK: - Internal object representation
+
+    private enum Obj {
+        case raw([UInt8])                        // scalars: int, string, data, UID
+        case array([Int])                        // indices of elements
+        case dict([Int], [Int])                  // parallel key-indices, value-indices
+    }
+
     // MARK: - State
 
-    private var objects: [[UInt8]] = []
+    private var objects: [Obj] = []
 
     // MARK: - Adding objects
 
@@ -27,32 +40,43 @@ struct BinaryPlistWriter {
         return addString("$null")
     }
 
+    /// Encode a non-negative integer.
+    /// - Precondition: `value >= 0`. Binary plist signed encoding (tag 0x13)
+    ///   is not implemented — NSKeyedArchiver payloads use only non-negative ints.
     @discardableResult
     mutating func addInt(_ value: Int) -> ObjRef {
+        precondition(value >= 0, "BinaryPlistWriter.addInt: negative values not supported")
         let bytes: [UInt8]
-        if value >= 0 && value <= 0xFF {
+        if value <= 0xFF {
             bytes = [0x10, UInt8(value)]
-        } else if value >= 0 && value <= 0xFFFF {
+        } else if value <= 0xFFFF {
             let v = UInt16(value)
             bytes = [0x11, UInt8(v >> 8), UInt8(v & 0xFF)]
         } else {
-            let v = UInt32(bitPattern: Int32(truncatingIfNeeded: value))
+            let v = UInt32(value)
             bytes = [0x12,
                      UInt8(v >> 24), UInt8((v >> 16) & 0xFF),
                      UInt8((v >> 8) & 0xFF), UInt8(v & 0xFF)]
         }
-        return append(bytes)
+        return append(.raw(bytes))
     }
 
     /// Encode a UID reference — the binary plist `0x8N` type that
     /// NSKeyedArchiver / RTIKeyedArchiver uses for object cross-references.
+    /// Supports values up to 0xFFFFFFFF (4-byte UID).
     @discardableResult
     mutating func addUID(_ value: UInt32) -> ObjRef {
+        let bytes: [UInt8]
         if value <= 0xFF {
-            return append([0x80, UInt8(value)])
+            bytes = [0x80, UInt8(value)]
+        } else if value <= 0xFFFF {
+            bytes = [0x81, UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)]
         } else {
-            return append([0x81, UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)])
+            bytes = [0x83,
+                     UInt8((value >> 24) & 0xFF), UInt8((value >> 16) & 0xFF),
+                     UInt8((value >> 8)  & 0xFF), UInt8(value & 0xFF)]
         }
+        return append(.raw(bytes))
     }
 
     @discardableResult
@@ -71,7 +95,6 @@ struct BinaryPlistWriter {
                     utf16.append(UInt8((v >> 8) & 0xFF))
                     utf16.append(UInt8(v & 0xFF))
                 } else {
-                    // Encode as UTF-16 surrogate pair
                     let vp = v - 0x10000
                     let hi = UInt16(0xD800 + (vp >> 10))
                     let lo = UInt16(0xDC00 + (vp & 0x3FF))
@@ -82,48 +105,56 @@ struct BinaryPlistWriter {
             let charCount = utf16.count / 2
             bytes = lengthPrefixed(tag: 0x60, count: charCount) + utf16
         }
-        return append(bytes)
+        return append(.raw(bytes))
     }
 
     @discardableResult
     mutating func addData(_ d: Data) -> ObjRef {
         let payload = Array(d)
         let bytes = lengthPrefixed(tag: 0x40, count: payload.count) + payload
-        return append(bytes)
+        return append(.raw(bytes))
     }
 
     /// Add an array whose elements are already-added object references.
     @discardableResult
     mutating func addArray(_ refs: [ObjRef]) -> ObjRef {
-        var bytes = lengthPrefixed(tag: 0xA0, count: refs.count)
-        for r in refs { bytes += objRefBytes(r.index) }
-        return append(bytes)
+        return append(.array(refs.map { $0.index }))
     }
 
     /// Add a dictionary. Keys and values must be already-added object references,
     /// passed as `(key, value)` pairs.
     @discardableResult
     mutating func addDict(_ kvPairs: [(ObjRef, ObjRef)]) -> ObjRef {
-        var bytes = lengthPrefixed(tag: 0xD0, count: kvPairs.count)
-        for (k, _) in kvPairs { bytes += objRefBytes(k.index) }
-        for (_, v) in kvPairs { bytes += objRefBytes(v.index) }
-        return append(bytes)
+        return append(.dict(kvPairs.map { $0.0.index }, kvPairs.map { $0.1.index }))
     }
 
     // MARK: - Serialise
 
     /// Serialise all objects into a binary plist with `topObject` as the root.
+    /// Supports up to 65535 objects (2-byte refs). Precondition-fails beyond that.
     func build(topObject: ObjRef) -> Data {
-        precondition(objects.count <= 0xFF, "BinaryPlistWriter: too many objects (\(objects.count)) for 1-byte refs")
-        let refSize = 1
+        precondition(objects.count <= 0xFFFF,
+                     "BinaryPlistWriter: too many objects (\(objects.count)); max 65535")
+        let refSize = objects.count <= 0xFF ? 1 : 2
 
-        // Lay out object bytes and record offsets.
+        // Render each object to bytes now that refSize is known.
         var body = Data()
         var offsets: [Int] = []
         let headerLen = 8  // "bplist00"
+
         for obj in objects {
             offsets.append(headerLen + body.count)
-            body.append(contentsOf: obj)
+            switch obj {
+            case .raw(let bytes):
+                body.append(contentsOf: bytes)
+            case .array(let indices):
+                body.append(contentsOf: lengthPrefixed(tag: 0xA0, count: indices.count))
+                for idx in indices { body.append(contentsOf: refBytes(idx, size: refSize)) }
+            case .dict(let keys, let vals):
+                body.append(contentsOf: lengthPrefixed(tag: 0xD0, count: keys.count))
+                for idx in keys { body.append(contentsOf: refBytes(idx, size: refSize)) }
+                for idx in vals { body.append(contentsOf: refBytes(idx, size: refSize)) }
+            }
         }
 
         let offsetTableStart = headerLen + body.count
@@ -152,24 +183,23 @@ struct BinaryPlistWriter {
     // MARK: - Private helpers
 
     @discardableResult
-    private mutating func append(_ bytes: [UInt8]) -> ObjRef {
-        objects.append(bytes)
+    private mutating func append(_ obj: Obj) -> ObjRef {
+        objects.append(obj)
         return ObjRef(index: objects.count - 1)
     }
 
-    private func objRefBytes(_ idx: Int) -> [UInt8] {
-        // objRefSize is always 1 for our use-case (RTI payloads have ~50 objects max).
-        // If this writer is ever used for larger plists, the add* methods would need
-        // to be called with a known final refSize so refs are encoded correctly.
-        precondition(idx <= 0xFF, "BinaryPlistWriter: object index \(idx) exceeds 1-byte ref limit")
-        return [UInt8(idx)]
+    private func refBytes(_ idx: Int, size: Int) -> [UInt8] {
+        if size == 1 {
+            return [UInt8(idx & 0xFF)]
+        } else {
+            return [UInt8((idx >> 8) & 0xFF), UInt8(idx & 0xFF)]
+        }
     }
 
     private func lengthPrefixed(tag: UInt8, count: Int) -> [UInt8] {
         if count < 15 {
             return [tag | UInt8(count)]
         } else {
-            // count encoded as a nested int object (inline)
             var header: [UInt8] = [tag | 0x0F]
             if count <= 0xFF {
                 header += [0x10, UInt8(count)]

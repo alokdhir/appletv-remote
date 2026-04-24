@@ -21,8 +21,6 @@ final class KeyboardNotificationManager: NSObject, UNUserNotificationCenterDeleg
     private static let categoryID   = "keyboard-input"
     private static let actionOpenID  = "open"
 
-    private var permissionGranted = false
-
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -46,12 +44,19 @@ final class KeyboardNotificationManager: NSObject, UNUserNotificationCenterDeleg
     // MARK: - Private
 
     private func requestPermissionIfNeeded(completion: @escaping (Bool) -> Void) {
-        if permissionGranted { completion(true); return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
-            [weak self] granted, _ in
-            self?.permissionGranted = granted
-            if granted { self?.registerCategory() }
-            completion(granted)
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                completion(true)
+            case .notDetermined:
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
+                    [weak self] granted, _ in
+                    if granted { self?.registerCategory() }
+                    completion(granted)
+                }
+            default:
+                completion(false)
+            }
         }
     }
 

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication style
+
+Short sentences. Only necessary words. No preamble, no recap, no filler.
+
 ## Building
 
 ```bash
@@ -10,6 +14,27 @@ swift build -c release
 ```
 
 The project requires macOS 13+ and Xcode 26 / Swift 6.
+
+## Install paths
+
+Production binaries (what actually runs for the user):
+
+- App: `/Applications/AppleTVRemote.app/Contents/MacOS/AppleTVRemote`
+- CLI: `/usr/local/bin/atv`
+
+`swift build` writes to `.build/{debug,release}/` — it does NOT install.
+After building, copy binaries into place and restart the app:
+
+```bash
+swift build -c release
+cp -f .build/release/AppleTVRemote /Applications/AppleTVRemote.app/Contents/MacOS/AppleTVRemote
+cp -f .build/release/atv /usr/local/bin/atv
+pkill -x AppleTVRemote   # user relaunches from /Applications
+```
+
+If a test seems to contradict recent code changes, verify the running binary
+is fresh (`ps -o lstart= -p $(pgrep -x AppleTVRemote)` vs. mtime of the app
+binary) before debugging further — stale installs are the usual culprit.
 
 ## Architecture
 

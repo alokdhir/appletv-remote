@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftUI
 import AppKit
 import AppleTVProtocol
 import AppleTVLogging
@@ -13,6 +12,7 @@ struct RemoteControlView: View {
     @State private var cancelEnabled = false
     @State private var showKeyboardInput = false
     @State private var keyboardInputText = ""
+    @State private var keyboardNotifyTask: Task<Void, Never>?
     @FocusState private var pinFocused: Bool
     @FocusState private var keyboardInputFocused: Bool
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
@@ -58,17 +58,27 @@ struct RemoteControlView: View {
                 }
             }
         }
-        .sheet(isPresented: $showKeyboardInput, onDismiss: { keyboardInputText = "" }) {
+        .sheet(isPresented: $showKeyboardInput, onDismiss: {
+            keyboardInputText = ""
+        }) {
             keyboardInputSheet
         }
         .onChange(of: connection.keyboardActive) { active in
-            guard active else { return }
-            if NSApp.mainWindow?.isKeyWindow == true {
-                showKeyboardInput = true
-            } else {
-                KeyboardNotificationManager.shared.notify(
-                    deviceName: connection.currentDevice?.name ?? "Apple TV"
-                )
+            guard active else {
+                keyboardNotifyTask?.cancel()
+                keyboardNotifyTask = nil
+                return
+            }
+            keyboardNotifyTask?.cancel()
+            let deviceName = connection.currentDevice?.name ?? "Apple TV"
+            keyboardNotifyTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                if NSApp.mainWindow?.isKeyWindow == true {
+                    showKeyboardInput = true
+                } else {
+                    KeyboardNotificationManager.shared.notify(deviceName: deviceName)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(
@@ -312,12 +322,13 @@ struct RemoteControlView: View {
     private func submitKeyboardText() {
         guard !keyboardInputText.isEmpty else { return }
         let text = keyboardInputText
-        showKeyboardInput = false
         connection.sendText(text) { error in
             if let error {
                 Log.companion.fail("Keyboard input failed: \(error)")
             }
         }
+        keyboardInputText = ""
+        showKeyboardInput = false
     }
 
     private func clearKeyboardText() {

@@ -603,7 +603,7 @@ final class CompanionConnection: ObservableObject {
     private func startKeepalive() {
         keepaliveTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 3.0, repeating: 3.0)
+        timer.schedule(deadline: .now() + 25.0, repeating: 25.0)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .connected else {
                 self?.keepaliveTimer?.cancel()
@@ -612,19 +612,8 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter; self.txnCounter &+= 1
             self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: txn))
-            // Poll _tiStart to detect keyboard focus changes mid-session.
-            let tiTxn = self.txnCounter; self.txnCounter &+= 1
-            self.pendingCallbacks[tiTxn] = { [weak self] response in
-                guard let self else { return }
-                let tiD = (response["_c"] as? [String: Any])?["_tiD"] as? Data
-                self.currentTextInputData = tiD
-                let newActive = tiD != nil
-                if newActive != self.keyboardActive {
-                    self.keyboardActive = newActive
-                    Log.companion.report("Companion: keyboardActive=\(newActive)")
-                }
-            }
-            self.sendEncrypted(OPACK.encodeTextInputStart(txn: tiTxn))
+            // Keyboard focus is tracked via _tiStarted / _tiStopped push
+            // events (subscribed via _interest). No need to poll _tiStart.
         }
         timer.resume()
         keepaliveTimer = timer
@@ -822,10 +811,26 @@ final class CompanionConnection: ObservableObject {
         case "_pong":
             break
         case "_tiStarted":
+            // Capture the text-input archive from the push if present.
+            // Some tvOS builds omit `_tiD` from the push and require a
+            // follow-up `_tiStart` request to fetch it — handle both.
+            let c = msg["_c"] as? [String: Any]
+            if let tiD = c?["_tiD"] as? Data {
+                currentTextInputData = tiD
+            }
             keyboardActive = true
             Log.companion.report("Companion: keyboard active (text field focused)")
+            if currentTextInputData == nil {
+                let tiTxn = txnCounter; txnCounter &+= 1
+                pendingCallbacks[tiTxn] = { [weak self] resp in
+                    guard let self else { return }
+                    self.currentTextInputData = (resp["_c"] as? [String: Any])?["_tiD"] as? Data
+                }
+                sendEncrypted(OPACK.encodeTextInputStart(txn: tiTxn))
+            }
         case "_tiStopped":
             keyboardActive = false
+            currentTextInputData = nil
             Log.companion.report("Companion: keyboard inactive (text field lost focus)")
         case "_iMC":
             // Media-control push event. Payload is in `_c`.

@@ -46,6 +46,7 @@ public enum IPCCommand: String, Codable, Sendable, CaseIterable {
     case power
     case disconnect
     case text
+    case clearText    = "clear-text"
 }
 
 /// Button names carried as `args.key`. String-backed so the wire format is

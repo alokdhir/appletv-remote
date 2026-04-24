@@ -225,14 +225,11 @@ final class IPCServer {
         guard case .request(let req) = frame else { return }
         guard let client = clients[clientID] else { return }
 
-        // If the client requested verbose mode, forward log output as events.
-        var logToken: LogForwarder?
+        // If the client requested verbose mode, install a forwarder on the
+        // client itself so it survives async completions (pairing, text send).
         if req.verbose == true {
-            logToken = LogForwarder { [weak client] line in
-                client?.send(.event(IPCEvent(event: .log, message: line)))
-            }
+            client.installLogForwarder()
         }
-        _ = logToken   // keep alive for duration of scope
 
         do {
             switch req.cmd {
@@ -242,7 +239,7 @@ final class IPCServer {
                 client.send(.response(IPCResponse(id: req.id, ok: true, devices: listDevices())))
             case .status:
                 if connection.nowPlaying == nil, connection.state == .connected {
-                    Task { @MainActor [weak self, weak client, logToken] in
+                    Task { @MainActor [weak self, weak client] in
                         guard let self, let client else { return }
                         _ = await self.connection.$nowPlaying
                             .first(where: { $0 != nil })
@@ -251,7 +248,6 @@ final class IPCServer {
                             .first(where: { _ in true })
                         client.send(.response(IPCResponse(id: req.id, ok: true,
                                                            status: self.currentStatus())))
-                        _ = logToken
                     }
                 } else {
                     client.send(.response(IPCResponse(id: req.id, ok: true, status: currentStatus())))
@@ -285,12 +281,34 @@ final class IPCServer {
                 guard let text = req.args?["text"], !text.isEmpty else {
                     throw IPCError.badArgs("text requires args.text")
                 }
+                // Check state before keyboardActive so the CLI sees the
+                // standard "not connected" wire string and can retry through
+                // the reconnect window, same as cmdKey.
+                guard connection.state == .connected else {
+                    throw IPCError.notConnected
+                }
                 guard connection.keyboardActive else {
                     let name = connection.currentDevice?.name ?? "Apple TV"
                     throw IPCError.badState("No text input active on \(name)")
                 }
                 let reqID = req.id
                 connection.sendText(text) { error in
+                    if let error {
+                        client.send(.response(.failure(reqID, error.localizedDescription)))
+                    } else {
+                        client.send(.response(.ok(reqID)))
+                    }
+                }
+            case .clearText:
+                guard connection.state == .connected else {
+                    throw IPCError.notConnected
+                }
+                guard connection.keyboardActive else {
+                    let name = connection.currentDevice?.name ?? "Apple TV"
+                    throw IPCError.badState("No text input active on \(name)")
+                }
+                let reqID = req.id
+                connection.sendClearText { error in
                     if let error {
                         client.send(.response(.failure(reqID, error.localizedDescription)))
                     } else {
@@ -467,6 +485,7 @@ private final class IPCClient: @unchecked Sendable {
     private var isClosed = false
     private let onFrame: (IPCFrame, ClientID) -> Void
     private let onClose: (ClientID) -> Void
+    private var logForwarder: LogForwarder?
 
     init(id: ClientID,
          fd: Int32,
@@ -526,9 +545,19 @@ private final class IPCClient: @unchecked Sendable {
         }
     }
 
+    /// Install a LogForwarder that routes log messages to this client as .log events.
+    /// Idempotent — calling twice is harmless. Forwarder is removed when the client closes.
+    func installLogForwarder() {
+        guard logForwarder == nil else { return }
+        logForwarder = LogForwarder { [weak self] line in
+            self?.send(.event(IPCEvent(event: .log, message: line)))
+        }
+    }
+
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        logForwarder = nil
         readSource?.cancel()
         readSource = nil
         onClose(id)
