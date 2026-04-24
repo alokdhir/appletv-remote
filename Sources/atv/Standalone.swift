@@ -201,8 +201,8 @@ final class StandaloneSession {
             Darwin.close(s)
             throw StandaloneError.tcpConnectFailed("\(host):\(port) — \(err)")
         }
-        // Modest receive timeout so we don't hang forever if the ATV stops responding.
-        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        // Receive timeout — 15s gives the ATV time to respond to slow messages.
+        var tv = timeval(tv_sec: 15, tv_usec: 0)
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         fd = s
     }
@@ -248,6 +248,93 @@ final class StandaloneSession {
         // we fire HID. On fast LANs this is usually already satisfied by the
         // pair-verify round trips, but 50ms of slack costs us nothing.
         Thread.sleep(forTimeInterval: 0.05)
+    }
+
+    /// pyatv-style setup — send each handshake message and await its response.
+    /// Used by the `apps` debug path. Prints wire trace to stderr.
+    func startSessionPyatv(trace: Bool = true) throws {
+        func step(_ label: String, _ payload: Data) throws -> [String: Any] {
+            if trace {
+                let hex = payload.map { String(format: "%02x", $0) }.joined()
+                FileHandle.standardError.write(Data("→ \(label) (\(payload.count)B OPACK): \(hex)\n".utf8))
+            }
+            try sendEncrypted(payload)
+            let resp = try recvEncryptedDict()
+            if trace { FileHandle.standardError.write(Data("← \(label) ← \(dictPreview(resp))\n".utf8)) }
+            return resp
+        }
+        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, txn: nextTxn()))
+        _ = try step("_touchStart",   OPACK.encodeTouchStart(txn: nextTxn()))
+        _ = try step("_sessionStart", OPACK.encodeSessionStart(txn: nextTxn(), localSID: UInt32.random(in: 0..<UInt32.max)))
+        _ = try step("_tiStart",      OPACK.encodeTextInputStart(txn: nextTxn()))
+        // pyatv subscribes _iMC, fetches attn, subscribes SystemStatus + TVSystemStatus, then FetchLaunchable
+        try sendEncrypted(OPACK.encodeInterest(events: ["_iMC"], txn: nextTxn()))
+        _ = try step("FetchAttentionState", OPACK.encodeFetchAttentionState(txn: nextTxn()))
+        try sendEncrypted(OPACK.encodeInterest(events: ["SystemStatus"], txn: nextTxn()))
+        try sendEncrypted(OPACK.encodeInterest(events: ["TVSystemStatus"], txn: nextTxn()))
+    }
+
+    /// Send FetchLaunchable, wait for response, decode app list.
+    func fetchApps(trace: Bool = true) throws -> [(id: String, name: String)] {
+        let txnVal = nextTxn()
+        if trace { FileHandle.standardError.write(Data("→ FetchLaunchable (txn=\(txnVal))\n".utf8)) }
+        try sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txnVal))
+        // ATV may push unrelated events first; keep reading until we see a
+        // response dict with _rT=3 (response) or one that contains an apps dict.
+        for _ in 0..<8 {
+            let resp = try recvEncryptedDict()
+            if trace { FileHandle.standardError.write(Data("← \(dictPreview(resp))\n".utf8)) }
+            if let c = resp["_c"] as? [String: Any], c.count > 1 {
+                // Treat any dict response whose _c has >1 entries as candidate app list
+                var out: [(String, String)] = []
+                for (bundle, name) in c {
+                    if let n = name as? String { out.append((bundle, n)) }
+                }
+                if !out.isEmpty { return out.sorted { $0.1.lowercased() < $1.1.lowercased() } }
+            }
+        }
+        throw StandaloneError.protocolFailure("no app-list response after 8 frames")
+    }
+
+    /// Read one eOPACK frame, decrypt, OPACK-decode to [String: Any].
+    private func recvEncryptedDict() throws -> [String: Any] {
+        let plain = try recvEncryptedRaw()
+        guard let dict = OPACK.decodeDict(plain) else {
+            throw StandaloneError.protocolFailure("OPACK decode failed (\(plain.count) B plaintext)")
+        }
+        return dict
+    }
+
+    /// Read one eOPACK frame, decrypt, return plaintext bytes.
+    private func recvEncryptedRaw() throws -> Data {
+        guard let key = decryptKey else {
+            throw StandaloneError.protocolFailure("no decrypt key")
+        }
+        let framePayload = try readFrame(expected: .eOPACK)
+        let nonce = try ChaChaPoly.Nonce(data: nonceData(recvNonce))
+        recvNonce &+= 1
+        let payloadLen = framePayload.count
+        let aad = Data([
+            CompanionFrame.FrameType.eOPACK.rawValue,
+            UInt8((payloadLen >> 16) & 0xFF),
+            UInt8((payloadLen >>  8) & 0xFF),
+            UInt8( payloadLen        & 0xFF),
+        ])
+        let box = try ChaChaPoly.SealedBox(combined: nonce.withUnsafeBytes { Data($0) } + framePayload)
+        let plain = try ChaChaPoly.open(box, using: key, authenticating: aad)
+        return plain
+    }
+
+    private func dictPreview(_ d: [String: Any]) -> String {
+        let keys = d.keys.sorted().prefix(6).map { k -> String in
+            let v = d[k]!
+            if let s = v as? String { return "\(k)=\(s.prefix(30))" }
+            if let i = v as? Int { return "\(k)=\(i)" }
+            if let b = v as? Data { return "\(k)=<\(b.count)B>" }
+            if let dd = v as? [String: Any] { return "\(k)={\(dd.count) keys}" }
+            return "\(k)=?"
+        }.joined(separator: " ")
+        return "{\(keys)\(d.count > 6 ? " …" : "")}"
     }
 
     // MARK: HID send
@@ -296,19 +383,17 @@ final class StandaloneSession {
     // MARK: Frame I/O
 
     private func writeFrame(_ type: CompanionFrame.FrameType, payload: Data) throws {
-        let frame = CompanionFrame(type: type, payload: payload).encoded
-        try writeAll(frame)
-    }
-
-    private func writeAll(_ data: Data) throws {
-        try data.withUnsafeBytes { raw in
+        var frame = Data([type.rawValue,
+                          UInt8((payload.count >> 16) & 0xFF),
+                          UInt8((payload.count >>  8) & 0xFF),
+                          UInt8( payload.count        & 0xFF)])
+        frame.append(payload)
+        try frame.withUnsafeBytes { raw in
             guard let p = raw.baseAddress else { return }
             var sent = 0
-            while sent < data.count {
-                let n = Darwin.write(fd, p.advanced(by: sent), data.count - sent)
-                if n <= 0 {
-                    throw StandaloneError.protocolFailure("write failed: \(String(cString: strerror(errno)))")
-                }
+            while sent < frame.count {
+                let n = Darwin.write(fd, p.advanced(by: sent), frame.count - sent)
+                if n <= 0 { throw StandaloneError.protocolFailure("write failed: \(String(cString: strerror(errno)))") }
                 sent += n
             }
         }
@@ -388,6 +473,27 @@ func standaloneSendKey(deviceName: String?, command: RemoteCommand) throws {
     try session.pairVerify()
     try session.startSession()
     try session.sendHID(command)
+}
+
+/// Debug: pair-verify + pyatv-style handshake + fetch app list + print.
+/// Uses the same credential store as the app, so whatever creds are in
+/// ~/Library/Application Support/AppleTVRemote/<name>.json are what's used.
+func standaloneFetchApps(deviceName: String?) throws {
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
+    let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)
+    let store = CredentialStore()
+    guard store.hasCredentials(for: device.id), let creds = store.load(deviceID: device.id) else {
+        throw StandaloneError.noCredentials(device.name)
+    }
+    FileHandle.standardError.write(Data("Using device \(device.name) @ \(device.host ?? "?"):\(device.port ?? 0)\n".utf8))
+    FileHandle.standardError.write(Data("clientID=\(creds.clientID)\n".utf8))
+    let session = StandaloneSession(device: device, credentials: creds)
+    try session.open()
+    try session.pairVerify()
+    try session.startSessionPyatv(trace: true)
+    let apps = try session.fetchApps(trace: true)
+    print("─────────── \(apps.count) apps ───────────")
+    for a in apps { print("  \(a.name)  \(dim(a.id))") }
 }
 
 func standaloneSwipe(deviceName: String?, direction: SwipeDirection) throws {

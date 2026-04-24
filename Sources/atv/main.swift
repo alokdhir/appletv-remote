@@ -782,7 +782,7 @@ let knownCommands: [String] = [
     "click", "pp", "home", "menu",
     "ff", "rew",               // aliases: ff = r (right), rew = l (left)
     "vol+", "vol-",
-    "power", "disconnect", "ping", "completion",
+    "power", "disconnect", "ping", "completion", "apps",
     "pair-airplay", "airplay-verify", "airplay-tunnel", "airplay-mrp",
     "version", "help",
 ]
@@ -824,6 +824,7 @@ func runStandalone(args: [String], device: String?) throws {
     case "home":       try standaloneSendKey(deviceName: device, command: .home)
     case "vol+":       try standaloneSendKey(deviceName: device, command: .volumeUp)
     case "vol-":       try standaloneSendKey(deviceName: device, command: .volumeDown)
+    case "apps":       try standaloneFetchApps(deviceName: device)
     case "status", "select", "pair", "ping", "disconnect", "power":
         die("--standalone does not support '\(cmd)' — run AppleTVRemote.app for that")
     default:

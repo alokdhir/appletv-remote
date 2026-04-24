@@ -45,6 +45,8 @@ public enum OPACK {
 
     private static func packValue(_ value: Any, into out: inout Data) {
         switch value {
+        case is NSNull:
+            out.append(0x04)  // OPACK null tag (pyatv support/opack.py)
         case let s as String:
             encodeString(s, into: &out)
         case let i as Int:
@@ -161,17 +163,33 @@ public enum OPACK {
             "_i": "_systemInfo",
             "_t": 2,
             "_x": txn,
+            // `_pubID`, `model`, `name` mimic pyatv's defaults. ATV appears
+            // to gate some features (e.g. FetchLaunchableApplicationsEvent)
+            // on client identity fields; pyatv-matching values are known to
+            // be accepted.
+            //
+            // `_pubID` = "FF:" + hex of "pyatv" (see pyatv settings.py
+            // DEFAULT_DEVICE_ID). It is a MAC-address-shaped identifier,
+            // NOT a UUID.
             "_c": [
                 "_bf":   0,
                 "_cf":   512,
                 "_clFl": 128,
-                "_i":    clientID,
+                // pyatv sends `_i: None` in `_systemInfo` — NOT the clientID.
+                // This is a separate optional "rp_id" field; ATV gates
+                // FetchLaunchableApplicationsEvent response on correct shape
+                // here, so mismatching drops the request silently.
+                "_i":    NSNull(),
                 "_idsID": Data(clientID.utf8),
-                "_pubID": clientID,
+                "_pubID": "FF:70:79:61:74:76",
                 "_sf":   256,
                 "_sv":   "170.18",
-                "model": "MacBookPro",
-                "name":  "Mac Remote",
+                "model": "iPhone10,6",
+                // MUST match the name sent in HAP pair-setup M5 (HAPPairing.swift).
+                // ATV stores the client name during pairing and gates some features
+                // (e.g. FetchLaunchableApplicationsEvent) on connect-time name match.
+                // TEMP: impersonating pyatv for Option-D test — pyatv's default name.
+                "name":  "pyatv",
             ] as [String: Any],
         ] as [String: Any])
     }

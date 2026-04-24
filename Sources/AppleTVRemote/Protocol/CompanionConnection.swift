@@ -886,17 +886,24 @@ final class CompanionConnection: ObservableObject {
             if let sst = sessionStartTxn, txn == sst, msgType == 3 {
                 sessionStartTxn = nil
                 Log.companion.report("Companion: session confirmed, subscribing to events")
-                let t = txnCounter; txnCounter &+= 1
-                sendEncrypted(OPACK.encodeInterest(
-                    events: ["_iMC", "SystemStatus", "TVSystemStatus",
-                             "_tiStarted", "_tiStopped"], txn: t))
-                // Mirror pyatv's sequence: FetchAttentionState immediately after
-                // _interest, then FetchLaunchableApplicationsEvent after its response.
+                // Mirror pyatv's wire sequence exactly: one event per _interest,
+                // _iMC first, then FetchAttentionState, then the other events,
+                // then FetchLaunchableApplicationsEvent. Bulk _interest with
+                // unrecognized event names appears to break FetchLaunchable.
+                let t1 = txnCounter; txnCounter &+= 1
+                sendEncrypted(OPACK.encodeInterest(events: ["_iMC"], txn: t1))
+
                 let attnTxn = self.txnCounter; self.txnCounter &+= 1
                 self.pendingCallbacks[attnTxn] = { [weak self] resp in
                     guard let self else { return }
                     let st = (resp["_c"] as? [String: Any])?["state"] as? Int
                     if let st { self.attentionState = st }
+                    // Subscribe remaining events, then fetch apps.
+                    for evt in ["SystemStatus", "TVSystemStatus",
+                                "_tiStarted", "_tiStopped"] {
+                        let t = self.txnCounter; self.txnCounter &+= 1
+                        self.sendEncrypted(OPACK.encodeInterest(events: [evt], txn: t))
+                    }
                     if self.appList.isEmpty { self.fetchApps() }
                 }
                 self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: attnTxn))
