@@ -90,6 +90,10 @@ final class CompanionConnection: ObservableObject {
     /// Set by _tiStarted / _tiStopped Companion events.
     @Published var keyboardActive: Bool = false
 
+    /// Apps available for launch on the ATV, fetched after each session start.
+    /// Each entry is (id: bundleID, name: displayName).
+    @Published var appList: [(id: String, name: String)] = []
+
     /// Live AirPlay MRP tunnel — opened after Companion session is established.
     /// Provides real-time now-playing pushes (title, artist, position) that the
     /// Companion `_iMC` channel only delivers reactively on state changes.
@@ -509,6 +513,36 @@ final class CompanionConnection: ObservableObject {
         completion(nil)
     }
 
+    /// Fetch the list of launchable apps from the ATV and store in `appList`.
+    func fetchApps() {
+        let txn = txnCounter; txnCounter &+= 1
+        Log.companion.report("Companion: fetchApps txn=\(txn)")
+        pendingCallbacks[txn] = { [weak self] response in
+            guard let self else { return }
+            let cVal = response["_c"]
+            Log.companion.report("Companion: fetchApps callback fired, _c type=\(type(of: cVal))")
+            guard let content = response["_c"] as? [String: Any] else {
+                Log.companion.report("Companion: fetchApps — unexpected response format")
+                return
+            }
+            let apps = content.compactMap { (key, value) -> (id: String, name: String)? in
+                guard let name = value as? String else { return nil }
+                return (id: key, name: name)
+            }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            self.appList = apps
+            Log.companion.report("Companion: fetched \(apps.count) apps")
+        }
+        sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txn))
+    }
+
+    /// Launch an app on the ATV by bundle ID.
+    func launchApp(bundleID: String) {
+        guard state == .connected else { return }
+        let txn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeLaunchApp(bundleID: bundleID, txn: txn))
+        Log.companion.report("Companion: launching app \(bundleID)")
+    }
+
     private func startAirPlayMRP() {
         guard let device = currentDevice,
               let host = device.host,
@@ -856,6 +890,16 @@ final class CompanionConnection: ObservableObject {
                 sendEncrypted(OPACK.encodeInterest(
                     events: ["_iMC", "SystemStatus", "TVSystemStatus",
                              "_tiStarted", "_tiStopped"], txn: t))
+                // Mirror pyatv's sequence: FetchAttentionState immediately after
+                // _interest, then FetchLaunchableApplicationsEvent after its response.
+                let attnTxn = self.txnCounter; self.txnCounter &+= 1
+                self.pendingCallbacks[attnTxn] = { [weak self] resp in
+                    guard let self else { return }
+                    let st = (resp["_c"] as? [String: Any])?["state"] as? Int
+                    if let st { self.attentionState = st }
+                    if self.appList.isEmpty { self.fetchApps() }
+                }
+                self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: attnTxn))
             }
             // Detect FetchAttentionState response (no _i, has _c.state).
             if msgType == 3,

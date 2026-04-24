@@ -290,6 +290,26 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Fetch list of launchable apps from the ATV.
+    public static func encodeFetchLaunchableApplicationsEvent(txn: UInt32) -> Data {
+        pack([
+            "_i": "FetchLaunchableApplicationsEvent",
+            "_t": 2,
+            "_x": txn,
+            "_c": [String: Any](),
+        ] as [String: Any])
+    }
+
+    /// Launch an app by bundle ID.
+    public static func encodeLaunchApp(bundleID: String, txn: UInt32) -> Data {
+        pack([
+            "_i": "_launchApp",
+            "_t": 2,
+            "_x": txn,
+            "_c": ["_bundleID": bundleID],
+        ] as [String: Any])
+    }
+
     /// Encode `_sessionStart` request.
     public static func encodeSessionStart(txn: UInt32, localSID: UInt32) -> Data {
         pack([

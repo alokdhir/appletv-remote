@@ -12,6 +12,8 @@ struct AppleTVRemoteApp: App {
     @StateObject private var reconnector = AutoReconnector()
     @State       private var ipcServer:  IPCServer?
     @State       private var autoConnectObserver: AnyCancellable?
+    @State       private var appListObserver: AnyCancellable?
+    @State       private var iconRefreshTimer: Timer?
 
     var body: some Scene {
         // Register setUp on the delegate here — body evaluates before
@@ -68,6 +70,21 @@ struct AppleTVRemoteApp: App {
                         connection.wakeAndConnect(to: device)
                     }
                 }
+        }
+        if appListObserver == nil {
+            appListObserver = connection.$appList
+                .receive(on: DispatchQueue.main)
+                .sink { apps in
+                    guard !apps.isEmpty else { return }
+                    let ids = apps.map { $0.id }
+                    AppIconCache.shared.refresh(bundleIDs: ids)
+                }
+        }
+        if iconRefreshTimer == nil {
+            iconRefreshTimer = Timer.scheduledTimer(withTimeInterval: 12 * 60 * 60, repeats: true) { [weak connection] _ in
+                guard let ids = connection?.appList.map({ $0.id }), !ids.isEmpty else { return }
+                AppIconCache.shared.refreshIfStale(bundleIDs: ids)
+            }
         }
     }
 }

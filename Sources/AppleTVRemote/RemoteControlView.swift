@@ -13,6 +13,7 @@ struct RemoteControlView: View {
     @State private var showKeyboardInput = false
     @State private var keyboardInputText = ""
     @State private var keyboardNotifyTask: Task<Void, Never>?
+    @State private var showAppLauncher = false
     @FocusState private var pinFocused: Bool
     @FocusState private var keyboardInputFocused: Bool
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
@@ -36,7 +37,15 @@ struct RemoteControlView: View {
             if reconnector.hasEverConnected,
                !connection.userInitiatedDisconnect,
                connection.state != .awaitingPairingPin {
-                remoteLayout
+                if showAppLauncher {
+                    AppLauncherView(
+                        connection: connection,
+                        iconCache: AppIconCache.shared,
+                        showAppLauncher: $showAppLauncher
+                    )
+                } else {
+                    remoteLayout
+                }
             } else {
                 switch connection.state {
                 case .disconnected:
@@ -102,20 +111,11 @@ struct RemoteControlView: View {
 
     private var statusBar: some View {
         HStack {
-            Circle()
-                .fill(reconnector.isReconnecting ? .yellow : statusColor)
-                .frame(width: 8, height: 8)
-            Text(reconnector.isReconnecting ? "Reconnecting…" : connection.state.displayText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
             Button {
                 withAnimation(.easeInOut(duration: 0.22)) {
                     sidebarCollapsed.toggle()
                 }
             } label: {
-                // Same icon in both states, matching Apple's convention in Finder /
-                // Mail / Notes. The tooltip differentiates.
                 Image(systemName: "sidebar.left")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -123,6 +123,27 @@ struct RemoteControlView: View {
             }
             .buttonStyle(.plain)
             .help(sidebarCollapsed ? "Show devices" : "Hide devices")
+            Circle()
+                .fill(reconnector.isReconnecting ? .yellow : statusColor)
+                .frame(width: 8, height: 8)
+            Text(reconnector.isReconnecting ? "Reconnecting…" : connection.state.displayText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if connection.state == .connected {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showAppLauncher.toggle()
+                    }
+                } label: {
+                    Image(systemName: showAppLauncher ? "appletvremote.gen2" : "square.grid.3x3")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(showAppLauncher ? "Show remote" : "Show apps")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
