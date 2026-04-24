@@ -977,6 +977,8 @@ final class CompanionConnection: ObservableObject {
                     Log.companion.report("Companion: read loop ended — \(reason)")
                     DispatchQueue.main.async {
                         guard let self, self.connectionEpoch == epoch else { return }
+                        self.keyboardActive = false
+                        self.currentTextInputData = nil
                         if err != 0 {
                             self.state = .error("Read error: \(reason)")
                         } else {

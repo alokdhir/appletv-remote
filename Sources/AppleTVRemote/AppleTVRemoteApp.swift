@@ -45,6 +45,7 @@ struct AppleTVRemoteApp: App {
     /// Idempotent: safe to call again from .onAppear.
     private func setUp() {
         appDelegate.onFinishLaunching = nil  // clear after first real call
+        appDelegate.connection = connection
         discovery.startDiscovery()
         MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect, reconnector: reconnector)
         reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
@@ -97,6 +98,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// un-miniaturize or surface some other window on top.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         MenuBarController.shared.openMainWindow()
+        if connection?.keyboardActive == true {
+            KeyboardNotificationManager.shared.cancelAttention()
+            NotificationCenter.default.post(
+                name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
+        }
         return false
     }
+
+    weak var connection: CompanionConnection?
 }

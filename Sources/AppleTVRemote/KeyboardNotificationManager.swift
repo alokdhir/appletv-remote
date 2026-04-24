@@ -21,6 +21,8 @@ final class KeyboardNotificationManager: NSObject, UNUserNotificationCenterDeleg
     private static let categoryID   = "keyboard-input"
     private static let actionOpenID  = "open"
 
+    private var attentionRequestToken: Int = -1
+
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -28,16 +30,51 @@ final class KeyboardNotificationManager: NSObject, UNUserNotificationCenterDeleg
 
     // MARK: - Public API
 
+    /// Bounce the dock icon to signal the ATV wants keyboard input.
+    /// No UNUserNotificationCenter involved — works regardless of signing.
+    /// Idempotent: subsequent calls while a bounce is already active are ignored.
+    func bounce() {
+        DispatchQueue.main.async {
+            Log.app.report("bounce() called — token=\(self.attentionRequestToken) isActive=\(NSApp.isActive)")
+            if NSApp.isActive {
+                // App is already active — open the sheet directly instead of bouncing.
+                NotificationCenter.default.post(name: Self.openKeyboardSheetNotification, object: nil)
+                return
+            }
+            guard self.attentionRequestToken == -1 else {
+                Log.app.report("bounce() skipped — already bouncing")
+                return
+            }
+            self.attentionRequestToken = NSApp.requestUserAttention(.informationalRequest)
+            Log.app.report("bounce() fired — new token=\(self.attentionRequestToken)")
+        }
+    }
+
+    func resetBounce() {
+        DispatchQueue.main.async {
+            Log.app.report("resetBounce() called — token=\(self.attentionRequestToken)")
+            NSApp.cancelUserAttentionRequest(self.attentionRequestToken)
+            self.attentionRequestToken = -1
+        }
+    }
+
     func notify(deviceName: String) {
         requestPermissionIfNeeded { [weak self] granted in
             guard granted else {
-                // Fallback: just raise the window; user will see the keyboard button lit up
                 DispatchQueue.main.async {
-                    MenuBarController.shared.openMainWindow()
+                    guard let self else { return }
+                    self.attentionRequestToken = NSApp.requestUserAttention(.informationalRequest)
                 }
                 return
             }
             self?.fireNotification(deviceName: deviceName)
+        }
+    }
+
+    func cancelAttention() {
+        DispatchQueue.main.async {
+            NSApp.cancelUserAttentionRequest(self.attentionRequestToken)
+            self.attentionRequestToken = -1
         }
     }
 
