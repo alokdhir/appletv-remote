@@ -11,6 +11,7 @@ struct AppLauncherView: View {
     @State private var searchText = ""
     @State private var focusedIndex: Int = 0
     @FocusState private var searchFocused: Bool
+    @State private var stableCols: Int = 3
 
     private let cellSize: CGFloat = 76   // icon 64 + padding 6×2
     private let spacing: CGFloat = 12
@@ -66,8 +67,8 @@ struct AppLauncherView: View {
                 let user = filteredApps.filter { !$0.id.hasPrefix("com.apple.") }
                 let ordered = core + user
                 GeometryReader { geo in
-                    let cols = columnCount(for: geo.size.width - 24)  // 24 = horizontal padding
-                    let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols)
+                    let rawCols = columnCount(for: geo.size.width - 24)
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: stableCols)
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(spacing: 12) {
@@ -83,7 +84,7 @@ struct AppLauncherView: View {
                             }
                             .animation(.easeInOut(duration: 0.2), value: filteredApps.map(\.id))
                             .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
-                            .animation(.easeInOut(duration: 0.25), value: cols)
+                            .animation(.easeInOut(duration: 0.25), value: stableCols)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                         }
@@ -95,9 +96,15 @@ struct AppLauncherView: View {
                     }
                     .background(
                         KeyMonitor { [self] keyCode in
-                            handleKey(keyCode, apps: ordered, cols: cols)
+                            handleKey(keyCode, apps: ordered, cols: stableCols)
                         }
                     )
+                    .onChange(of: rawCols) { newCols in
+                        // Debounce: ignore transient changes during sidebar animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            stableCols = columnCount(for: geo.size.width - 24)
+                        }
+                    }
                 }
             }
         }
