@@ -26,6 +26,21 @@ final class AppIconCache: ObservableObject {
         config.timeoutIntervalForRequest = 10
         session = URLSession(configuration: config)
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        seedBundledIcons()
+    }
+
+    /// Copy any PNGs from Resources/AppIcons/ into the icon cache dir.
+    /// Bundled icons are never overwritten — drop a new PNG into the bundle to update.
+    private func seedBundledIcons() {
+        guard let iconsDir = Bundle.module.url(forResource: "AppIcons", withExtension: nil) else { return }
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: iconsDir, includingPropertiesForKeys: nil) else { return }
+        for src in files where src.pathExtension.lowercased() == "png" {
+            let bundleID = src.deletingPathExtension().lastPathComponent
+            let dest = iconURL(for: bundleID)
+            guard !fm.fileExists(atPath: dest.path) else { continue }
+            try? fm.copyItem(at: src, to: dest)
+        }
     }
 
     // MARK: - Public API
@@ -92,29 +107,21 @@ final class AppIconCache: ObservableObject {
     }
 
     private func fetchIcon(bundleID: String, to dest: URL) async throws {
-        // iTunes lookup to get the artwork URL.
         var components = URLComponents(string: "https://itunes.apple.com/lookup")!
         components.queryItems = [
             URLQueryItem(name: "bundleId", value: bundleID),
             URLQueryItem(name: "entity", value: "software"),
         ]
         guard let lookupURL = components.url else { return }
-
         let (data, _) = try await session.data(from: lookupURL)
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               let first = results.first,
-              var artworkURLString = first["artworkUrl100"] as? String else {
-            return
-        }
+              var artworkURLString = first["artworkUrl100"] as? String else { return }
 
-        // Upscale to 200×200 by replacing the size token in the CDN URL.
         artworkURLString = artworkURLString.replacingOccurrences(of: "100x100bb", with: "200x200bb")
-
         guard let artworkURL = URL(string: artworkURLString) else { return }
         let (imageData, _) = try await session.data(from: artworkURL)
-
-        // Convert to PNG and write to cache.
         guard let image = NSImage(data: imageData),
               let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),

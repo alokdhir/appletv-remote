@@ -4,6 +4,7 @@ import Combine
 import ServiceManagement
 import AppleTVLogging
 import AppleTVProtocol
+import AppleTVIPC
 
 // MARK: - Menu bar controller
 
@@ -15,6 +16,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var popover:          NSPopover?
     private var stateCancellable: AnyCancellable?
     weak var mainWindow:          NSWindow?
+    private weak var connection:  CompanionConnection?
 
     /// Set while `openMainWindow()` is transitioning from popover → main window.
     /// Tells `popoverDidClose` to skip its deactivate (which would otherwise
@@ -23,6 +25,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore, reconnector: AutoReconnector) {
         guard statusItem == nil else { return }
+        self.connection = connection
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
@@ -141,6 +144,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // Refresh App List (only when connected)
+        if connection?.state == .connected {
+            let refresh = NSMenuItem(title: "Refresh App List",
+                                    action: #selector(refreshAppList), keyEquivalent: "")
+            refresh.target = self
+            menu.addItem(refresh)
+            menu.addItem(.separator())
+        }
+
         // Launch at Startup
         let launch = NSMenuItem(title: "Launch at Startup",
                                 action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
@@ -171,8 +183,19 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     @objc private func showAbout(_ sender: Any?) {
         NSApp.activate(ignoringOtherApps: true)
+        let stamp: String = {
+            let path = Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments[0]
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+                  let mtime = attrs[.modificationDate] as? Date else { return "unknown" }
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyyMMddHHmm"
+            fmt.timeZone = TimeZone.current
+            return fmt.string(from: mtime)
+        }()
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Apple TV Remote",
+            .applicationVersion: "\(AppVersion.major)-\(stamp)",
+            .version: "",
             .credits: NSAttributedString(
                 string: "Control your Apple TV from the menu bar.",
                 attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
@@ -190,6 +213,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         } catch {
             Log.app.fail("Launch at startup toggle failed: \(error)")
         }
+    }
+
+    @objc private func refreshAppList(_ sender: Any?) {
+        connection?.fetchApps()
     }
 }
 

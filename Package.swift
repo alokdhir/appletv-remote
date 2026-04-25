@@ -40,7 +40,8 @@ let package = Package(
             path: "Sources/AppleTVRemote",
             exclude: ["Resources/Info.plist"],
             resources: [
-                .process("Resources/Assets.xcassets")
+                .process("Resources/Assets.xcassets"),
+                .copy("Resources/AppIcons")
             ]
         ),
         .executableTarget(

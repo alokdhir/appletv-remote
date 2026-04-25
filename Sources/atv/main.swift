@@ -45,7 +45,7 @@ func die(_ message: String, code: Int32 = 1) -> Never {
 
 // MARK: - Version
 
-/// Prints "1.0-YYYYMMDDHHMM" where the suffix is the binary's mtime in the
+/// Prints "1.1-YYYYMMDDHHMM" where the suffix is the binary's mtime in the
 /// local timezone. No build-system hooks needed — relinking updates it.
 func printVersion() {
     let exePath = CommandLine.arguments.first.flatMap {
@@ -59,7 +59,7 @@ func printVersion() {
         fmt.timeZone = TimeZone.current
         return fmt.string(from: mtime)
     }()
-    print("1.0-\(stamp)")
+    print("\(AppVersion.major)-\(stamp)")
 }
 
 // MARK: - IPC client (blocking, single-connection)
@@ -929,7 +929,7 @@ func usage() -> Never {
     print(row("text --clear",             "Clear the active text field"))
     print(row("disconnect",              "Drop the connection"))
     print(row("ping",                    "Round-trip ping to the app"))
-    print(row("version",                 "Print atv version (1.0-<build timestamp>)"))
+    print(row("version",                 "Print atv version (1.1-<build timestamp>)"))
     print(row("completion <bash|zsh>",   "Emit shell completion script to stdout"))
     print("")
     print(cyan("Command chaining") + " (navigation + playback commands):")
