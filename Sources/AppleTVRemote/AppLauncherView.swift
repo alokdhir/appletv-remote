@@ -80,6 +80,7 @@ struct AppLauncherView: View {
                                     appGrid(apps: user, offset: core.count, columns: columns)
                                 }
                             }
+                            .animation(.easeInOut(duration: 0.2), value: filteredApps.map(\.id))
                             .animation(.easeInOut(duration: 0.25), value: cols)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
