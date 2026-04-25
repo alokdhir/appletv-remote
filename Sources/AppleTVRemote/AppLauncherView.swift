@@ -99,6 +99,7 @@ struct AppLauncherView: View {
             ForEach(Array(apps.enumerated()), id: \.element.id) { i, app in
                 let idx = offset + i
                 AppCell(app: app, iconCache: iconCache, isFocused: idx == focusedIndex) {
+                    guard !PopoverActivationGuard.shared.isActivationClick else { return }
                     connection.launchApp(bundleID: app.id)
                     withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
                 }

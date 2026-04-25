@@ -27,6 +27,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         guard statusItem == nil else { return }
         self.connection = connection
 
+        // Stamp activation time so SwiftUI views can suppress the first click
+        // that activates the popover window (acceptsFirstMouse is always true
+        // in NSPopover and can't be overridden without private API).
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { _ in
+            PopoverActivationGuard.shared.stamp()
+        }
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         guard let button = item.button else { return }
