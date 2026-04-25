@@ -27,7 +27,6 @@ public final class CompanionPairVerify {
     private var sessionKey: SymmetricKey?
     public private(set) var sessionEncryptKey: SymmetricKey?
     public private(set) var sessionDecryptKey: SymmetricKey?
-    public private(set) var debugSharedSecret: Data?  // raw ECDH bytes for testing
 
     public init(credentials: PairingCredentials) {
         self.creds = credentials
@@ -125,7 +124,6 @@ public final class CompanionPairVerify {
     private func deriveSessionKeys(shared: SharedSecret) {
         // Companion uses empty salt and "ClientEncrypt-main"/"ServerEncrypt-main" info.
         // (NOT "Control-Salt"/"Control-Write/Read-Encryption-Key" — those are MRP/HAP-BLE)
-        debugSharedSecret = shared.withUnsafeBytes { Data($0) }
         sessionEncryptKey = shared.hkdfDerivedSymmetricKey(
             using: SHA512.self,
             salt: Data(),

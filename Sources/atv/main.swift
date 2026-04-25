@@ -782,7 +782,7 @@ let knownCommands: [String] = [
     "click", "pp", "home", "menu",
     "ff", "rew",               // aliases: ff = r (right), rew = l (left)
     "vol+", "vol-",
-    "power", "disconnect", "ping", "completion", "apps",
+    "power", "disconnect", "ping", "completion", "apps", "launch",
     "pair-airplay", "airplay-verify", "airplay-tunnel", "airplay-mrp",
     "version", "help",
 ]
@@ -825,6 +825,9 @@ func runStandalone(args: [String], device: String?) throws {
     case "vol+":       try standaloneSendKey(deviceName: device, command: .volumeUp)
     case "vol-":       try standaloneSendKey(deviceName: device, command: .volumeDown)
     case "apps":       try standaloneFetchApps(deviceName: device)
+    case "launch":
+        guard args.count >= 2 else { die("launch requires a bundle ID") }
+        try standaloneLaunchApp(deviceName: device, bundleID: args[1])
     case "status", "select", "pair", "ping", "disconnect", "power":
         die("--standalone does not support '\(cmd)' — run AppleTVRemote.app for that")
     default:
@@ -1167,6 +1170,9 @@ do {
         expectOk(r)
         print(green("✓ disconnected"))
     case "apps":
+        try runStandalone(args: dispatchArgs, device: standaloneDevice)
+    case "launch":
+        guard args.count >= 2 else { die("launch requires a bundle ID") }
         try runStandalone(args: dispatchArgs, device: standaloneDevice)
     default:
         die("unknown command: \(args[0])")   // show original, not the no-op pass-through

@@ -202,7 +202,7 @@ final class StandaloneSession {
             throw StandaloneError.tcpConnectFailed("\(host):\(port) — \(err)")
         }
         // Receive timeout — 30s gives the ATV time to respond to slow messages.
-        var tv = timeval(tv_sec: 30, tv_usec: 0)
+        var tv = timeval(tv_sec: 4, tv_usec: 0)
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         // Disable Nagle to prevent small writes being coalesced
         var one: Int32 = 1
@@ -278,6 +278,12 @@ final class StandaloneSession {
             }
         }
         throw StandaloneError.protocolFailure("no app-list response after 8 frames")
+    }
+
+    func launchApp(bundleID: String) throws {
+        try sendEncrypted(OPACK.encodeLaunchApp(bundleID: bundleID, txn: nextTxn()))
+        // _launchApp sends a response; read and discard it
+        _ = try recvEncryptedDict()
     }
 
     /// Read one eOPACK frame, decrypt, OPACK-decode to [String: Any].
@@ -386,7 +392,6 @@ final class StandaloneSession {
     private func readFrame(expected: CompanionFrame.FrameType) throws -> Data {
         while true {
             if let frame = CompanionFrame.read(from: &buffer) {
-                FileHandle.standardError.write(Data("  ← frame type=0x\(String(frame.type.rawValue, radix: 16)) payload[\(frame.payload.count)]\n".utf8))
                 guard frame.type == expected else {
                     throw StandaloneError.protocolFailure("unexpected frame 0x\(String(frame.type.rawValue, radix: 16)), wanted 0x\(String(expected.rawValue, radix: 16))")
                 }
@@ -416,10 +421,7 @@ final class StandaloneSession {
             UInt8( payloadLen        & 0xFF),
         ])
         let sealed = try ChaChaPoly.seal(opackData, using: key, nonce: nonce, authenticating: aad)
-        let encPayload = sealed.ciphertext + sealed.tag
-        let encHex = encPayload.map { String(format: "%02x", $0) }.joined()
-        FileHandle.standardError.write(Data("  → enc header: \(aad.map { String(format: "%02x", $0) }.joined()) payload[\(encPayload.count)]: \(encHex)\n".utf8))
-        try writeFrame(.eOPACK, payload: encPayload)
+        try writeFrame(.eOPACK, payload: sealed.ciphertext + sealed.tag)
     }
 
     private func nonceData(_ counter: UInt64) -> Data {
@@ -478,10 +480,25 @@ func standaloneFetchApps(deviceName: String?) throws {
     let session = StandaloneSession(device: device, credentials: creds)
     try session.open()
     try session.pairVerify()
-    try session.startSessionPyatv(trace: true)
-    let apps = try session.fetchApps(trace: true)
+    try session.startSessionPyatv()
+    let apps = try session.fetchApps()
     print("─────────── \(apps.count) apps ───────────")
     for a in apps { print("  \(a.name)  \(dim(a.id))") }
+}
+
+func standaloneLaunchApp(deviceName: String?, bundleID: String) throws {
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
+    let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)
+    let store = CredentialStore()
+    guard store.hasCredentials(for: device.id), let creds = store.load(deviceID: device.id) else {
+        throw StandaloneError.noCredentials(device.name)
+    }
+    let session = StandaloneSession(device: device, credentials: creds)
+    try session.open()
+    try session.pairVerify()
+    try session.startSessionPyatv()
+    try session.launchApp(bundleID: bundleID)
+    print(green("✓ launched \(bundleID)"))
 }
 
 func standaloneSwipe(deviceName: String?, direction: SwipeDirection) throws {
