@@ -82,6 +82,7 @@ struct AppLauncherView: View {
                                 }
                             }
                             .animation(.easeInOut(duration: 0.2), value: filteredApps.map(\.id))
+                            .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
                             .animation(.easeInOut(duration: 0.25), value: cols)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
