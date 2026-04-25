@@ -444,6 +444,7 @@ private final class KeyCatcherView: NSView {
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "m": return .menu
         case "h": return .home
+        case " ", "p": return .playPause
         default:  return nil
         }
     }
