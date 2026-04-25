@@ -206,7 +206,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             .applicationVersion: "\(AppVersion.major)-\(stamp)",
             .version: "",
             .credits: NSAttributedString(
-                string: "Control your Apple TV from the menu bar.",
+                string: "Control your AppleTV(s) from your Mac.",
                 attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
             )
         ])
