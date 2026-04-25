@@ -49,7 +49,6 @@ cp -f .build/release/AppleTVRemote /Applications/AppleTVRemote.app/Contents/MacO
 cp -rf .build/release/AppleTVRemote_AppleTVRemote.bundle /Applications/AppleTVRemote.app/Contents/Resources/
 cp -f .build/release/atv /usr/local/bin/atv
 codesign --force --deep --sign - /Applications/AppleTVRemote.app
-pkill -x AppleTVRemote   # then relaunch from /Applications
 ```
 
 > **Note:** Always copy both the binary *and* the `.bundle` — the bundle contains
