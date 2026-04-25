@@ -4,8 +4,9 @@ import AppleTVLogging
 
 /// Fetches and caches app icons from the iTunes Search API.
 ///
-/// Icons are stored as PNG files in ~/Library/Caches/com.adhir.appletv-remote/icons/<bundleID>.png.
-/// The cache is considered stale after 12 hours; refresh is triggered at app launch and on a timer.
+/// Bundled icons (Resources/AppIcons/<bundleID>.png) are served directly from
+/// the app bundle and are always authoritative — no copying into the cache dir.
+/// Network-fetched icons are stored in ~/Library/Caches/…/icons/<bundleID>.png.
 @MainActor
 final class AppIconCache: ObservableObject {
 
@@ -26,30 +27,22 @@ final class AppIconCache: ObservableObject {
         config.timeoutIntervalForRequest = 10
         session = URLSession(configuration: config)
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        seedBundledIcons()
-    }
-
-    /// Copy any PNGs from Resources/AppIcons/ into the icon cache dir.
-    /// Bundled icons are never overwritten — drop a new PNG into the bundle to update.
-    private func seedBundledIcons() {
-        guard let iconsDir = Bundle.module.url(forResource: "AppIcons", withExtension: nil) else { return }
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: iconsDir, includingPropertiesForKeys: nil) else { return }
-        for src in files where src.pathExtension.lowercased() == "png" {
-            let bundleID = src.deletingPathExtension().lastPathComponent
-            let dest = iconURL(for: bundleID)
-            guard !fm.fileExists(atPath: dest.path) else { continue }
-            try? fm.copyItem(at: src, to: dest)
-        }
     }
 
     // MARK: - Public API
 
-    /// Return the cached icon for a bundle ID, or nil if not yet fetched.
+    /// Return the icon for a bundle ID.
+    /// Bundled icons (in Resources/AppIcons/) take precedence over the network cache.
     func icon(for bundleID: String) -> NSImage? {
-        let url = iconURL(for: bundleID)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return NSImage(contentsOf: url)
+        // 1. Check app bundle first — authoritative, survives cache clears.
+        if let url = Bundle.module.url(forResource: bundleID, withExtension: "png",
+                                       subdirectory: "AppIcons") {
+            return NSImage(contentsOf: url)
+        }
+        // 2. Fall back to network-fetched cache.
+        let cached = cacheDir.appendingPathComponent("\(bundleID).png")
+        guard FileManager.default.fileExists(atPath: cached.path) else { return nil }
+        return NSImage(contentsOf: cached)
     }
 
     /// Fetch icons for any bundle IDs not already cached, then refresh stale ones.
@@ -67,12 +60,7 @@ final class AppIconCache: ObservableObject {
 
     // MARK: - Private
 
-    private func iconURL(for bundleID: String) -> URL {
-        cacheDir.appendingPathComponent("\(bundleID).png")
-    }
-
     private func isStale() -> Bool {
-        // Check the mtime of any cached file; if none exist, consider stale.
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: cacheDir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
             return true
@@ -86,7 +74,10 @@ final class AppIconCache: ObservableObject {
     private func fetchIcons(bundleIDs: [String]) async {
         for bundleID in bundleIDs {
             guard !Task.isCancelled else { return }
-            let dest = iconURL(for: bundleID)
+            // Skip icons that are bundled in the app — they never need network fetch.
+            if Bundle.module.url(forResource: bundleID, withExtension: "png",
+                                 subdirectory: "AppIcons") != nil { continue }
+            let dest = cacheDir.appendingPathComponent("\(bundleID).png")
             // Skip if cached and fresh.
             if let mtime = (try? dest.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
                Date().timeIntervalSince(mtime) < stalenessInterval {
@@ -101,7 +92,6 @@ final class AppIconCache: ObservableObject {
                     Log.app.report("AppIconCache: failed to fetch icon for \(bundleID): \(error.localizedDescription)")
                 }
             }
-            // Respect iTunes API rate limit (~20 req/min).
             try? await Task.sleep(for: .milliseconds(100))
         }
     }
