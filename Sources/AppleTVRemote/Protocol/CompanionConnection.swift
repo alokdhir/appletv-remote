@@ -518,7 +518,17 @@ final class CompanionConnection: ObservableObject {
     func fetchApps(completion: ((Result<[(id: String, name: String)], Error>) -> Void)? = nil) {
         let txn = txnCounter; txnCounter &+= 1
         Log.companion.report("Companion: fetchApps txn=\(txn)")
+        // Cancellable timeout — cancelled when the callback fires so the two
+        // can never race and call completion twice.
+        let timeoutItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.pendingCallbacks.removeValue(forKey: txn) != nil {
+                Log.companion.report("Companion: fetchApps timed out (no response from ATV)")
+                completion?(.failure(CompanionError.unexpectedResponse))
+            }
+        }
         pendingCallbacks[txn] = { [weak self] response in
+            timeoutItem.cancel()
             guard let self else { return }
             let cVal = response["_c"]
             Log.companion.report("Companion: fetchApps callback fired, _c type=\(type(of: cVal))")
@@ -536,16 +546,7 @@ final class CompanionConnection: ObservableObject {
             completion?(.success(apps))
         }
         sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txn))
-        // Timeout: if the ATV doesn't respond in 5s, remove the pending callback
-        // so it doesn't leak. This can happen if the ATV ignores FetchLaunchable
-        // (e.g. after Xcode pairing disrupts Companion credentials).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self else { return }
-            if self.pendingCallbacks.removeValue(forKey: txn) != nil {
-                Log.companion.report("Companion: fetchApps timed out (no response from ATV)")
-                completion?(.failure(CompanionError.unexpectedResponse))
-            }
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: timeoutItem)
     }
 
     /// Launch an app on the ATV by bundle ID.
@@ -825,11 +826,12 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func handleOPACKMessage(_ data: Data) {
-        // For large messages (e.g. _systemInfo response ~7KB with deeply nested
-        // binary plists), full recursive decoding causes O(n) skipValue calls.
-        // Use shallow decode for routing — we only need _i, _t, _x at top level.
-        // For messages that need _c (app list, _iMC), the callbacks re-decode it.
-        guard let msg = data.count > 2000
+        // The _systemInfo response is ~7KB with deeply nested binary plists in _c.
+        // Fully decoding it causes O(n) skipValue traversal on the main thread.
+        // Strategy: shallow-decode all large messages to extract _i/_t/_x for routing,
+        // then re-decode _c on demand only for the messages that need it.
+        let isLarge = data.count > 2000
+        guard let msg = isLarge
             ? OPACK.decodeDictShallow(data)
             : OPACK.decodeDict(data)
         else {
@@ -839,6 +841,17 @@ final class CompanionConnection: ObservableObject {
         let identifier = msg["_i"] as? String ?? ""
         // _x is decoded as Int by decodeDict; cast via Int before UInt32
         let txn        = (msg["_x"] as? Int).map { UInt32($0) } ?? 0
+
+        // For large messages decoded shallowly, _c is nil. Provide a lazy
+        // full-decode fallback so _iMC and pending callbacks can access _c.
+        // _systemInfo is the only message where full-decode is expensive and
+        // _c is not needed — for all other large messages full-decode is safe.
+        func fullMsg() -> [String: Any] {
+            if isLarge, identifier != "_systemInfo" {
+                return OPACK.decodeDict(data) ?? msg
+            }
+            return msg
+        }
 
         // Log every message so we can see what the ATV sends
         if Log.companion.isEnabled(type: .debug) {
@@ -891,7 +904,7 @@ final class CompanionConnection: ObservableObject {
             Log.companion.report("Companion: keyboard inactive (text field lost focus)")
         case "_iMC":
             // Media-control push event. Payload is in `_c`.
-            updateNowPlaying(from: msg)
+            updateNowPlaying(from: fullMsg())
         case "FetchAttentionState":
             // Some ATV firmwares include _i in the response; handle here too.
             if let inner = msg["_c"] as? [String: Any],
@@ -903,7 +916,7 @@ final class CompanionConnection: ObservableObject {
             let msgType = msg["_t"] as? Int ?? 0
             // Fire any pending response callback for this txn.
             if let cb = pendingCallbacks.removeValue(forKey: txn) {
-                cb(msg)
+                cb(fullMsg())
             }
             // Detect _sessionStart response (has no _i, matched by txn).
             if let sst = sessionStartTxn, txn == sst, msgType == 3 {

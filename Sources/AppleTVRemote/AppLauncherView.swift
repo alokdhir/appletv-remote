@@ -223,6 +223,9 @@ private struct KeyMonitor: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            // Always remove existing monitor before installing a new one
+            // to avoid leaking if the view moves between windows.
+            if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
             if window != nil {
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     let code = event.keyCode

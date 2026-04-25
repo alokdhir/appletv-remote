@@ -1,18 +1,28 @@
 import Foundation
+import AppKit
 
 /// Stamps the time whenever the app becomes active. SwiftUI views check this
 /// to suppress the first tap that activates the popover window, matching the
 /// standard AppKit `acceptsFirstMouse = false` behavior that NSPopover bypasses.
+///
+/// @MainActor ensures lastActivation is only read/written on the main thread,
+/// eliminating the data race between AppKit notifications and SwiftUI renders.
+@MainActor
 final class PopoverActivationGuard {
     static let shared = PopoverActivationGuard()
-    private init() {}
 
     private(set) var lastActivation: Date = .distantPast
-    private let window: TimeInterval = 0.35
+    private let guardWindow: TimeInterval = 0.35
 
-    func stamp() { lastActivation = Date() }
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            self?.lastActivation = Date()
+        }
+    }
 
     var isActivationClick: Bool {
-        Date().timeIntervalSince(lastActivation) < window
+        Date().timeIntervalSince(lastActivation) < guardWindow
     }
 }

@@ -1,6 +1,6 @@
 # Apple TV Remote
 
-A macOS menu bar app that discovers and controls Apple TVs on the local network via the **Companion** and **Media Remote Protocol (MRP)** protocols. Includes a full-featured main window with device sidebar and remote control UI, and a scriptable `atv` CLI companion tool.
+A macOS app that discovers and controls Apple TVs on the local network via the **Companion** and **Media Remote Protocol (MRP)** protocols. Includes a full-featured main window with device sidebar and remote control UI, and a scriptable `atv` CLI companion tool.
 
 ## Features
 
@@ -92,9 +92,7 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 ~/Library/Application Support/AppleTVRemote/<device-id>.airplay.json # AirPlay
 ```
 
-**Why not Keychain?** The app is unsigned for local development. The JSON files are user-only by default via `NSFileManager`.
-
-**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext. For a production app, migrate to Keychain with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext.
 
 ## Architecture
 

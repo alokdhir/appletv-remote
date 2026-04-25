@@ -19,6 +19,10 @@ final class AppIconCache: ObservableObject {
     private let session: URLSession
     private let stalenessInterval: TimeInterval = 12 * 60 * 60
     private var refreshTask: Task<Void, Never>?
+    /// In-memory NSImage cache so icon(for:) doesn't hit disk on every render.
+    private var memCache: [String: NSImage] = [:]
+    /// Bundle IDs for which iTunes returned no results — skip on future fetches.
+    private var notFoundIDs: Set<String> = []
 
     private init() {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -33,16 +37,22 @@ final class AppIconCache: ObservableObject {
 
     /// Return the icon for a bundle ID.
     /// Bundled icons (in Resources/AppIcons/) take precedence over the network cache.
+    /// Results are kept in a memory cache so SwiftUI render passes don't hit disk.
     func icon(for bundleID: String) -> NSImage? {
+        if let cached = memCache[bundleID] { return cached }
         // 1. Check app bundle first — authoritative, survives cache clears.
         if let url = Bundle.module.url(forResource: bundleID, withExtension: "png",
-                                       subdirectory: "AppIcons") {
-            return NSImage(contentsOf: url)
+                                       subdirectory: "AppIcons"),
+           let img = NSImage(contentsOf: url) {
+            memCache[bundleID] = img
+            return img
         }
         // 2. Fall back to network-fetched cache.
         let cached = cacheDir.appendingPathComponent("\(bundleID).png")
-        guard FileManager.default.fileExists(atPath: cached.path) else { return nil }
-        return NSImage(contentsOf: cached)
+        guard FileManager.default.fileExists(atPath: cached.path),
+              let img = NSImage(contentsOf: cached) else { return nil }
+        memCache[bundleID] = img
+        return img
     }
 
     /// Fetch icons for any bundle IDs not already cached, then refresh stale ones.
@@ -77,6 +87,8 @@ final class AppIconCache: ObservableObject {
             // Skip icons that are bundled in the app — they never need network fetch.
             if Bundle.module.url(forResource: bundleID, withExtension: "png",
                                  subdirectory: "AppIcons") != nil { continue }
+            // Skip IDs known to have no iTunes result this session.
+            if notFoundIDs.contains(bundleID) { continue }
             let dest = cacheDir.appendingPathComponent("\(bundleID).png")
             // Skip if cached and fresh.
             if let mtime = (try? dest.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
@@ -85,7 +97,10 @@ final class AppIconCache: ObservableObject {
             }
             do {
                 try await fetchIcon(bundleID: bundleID, to: dest)
-                await MainActor.run { version += 1 }
+                await MainActor.run {
+                    memCache.removeValue(forKey: bundleID)  // evict stale mem entry
+                    version += 1
+                }
                 Log.app.report("AppIconCache: cached icon for \(bundleID)")
             } catch {
                 if !Task.isCancelled {
@@ -107,7 +122,11 @@ final class AppIconCache: ObservableObject {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               let first = results.first,
-              var artworkURLString = first["artworkUrl100"] as? String else { return }
+              var artworkURLString = first["artworkUrl100"] as? String else {
+            // iTunes returned no results — record so we don't retry this session.
+            await MainActor.run { notFoundIDs.insert(bundleID) }
+            return
+        }
 
         artworkURLString = artworkURLString.replacingOccurrences(of: "100x100bb", with: "200x200bb")
         guard let artworkURL = URL(string: artworkURLString) else { return }

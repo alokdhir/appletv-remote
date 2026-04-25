@@ -422,6 +422,7 @@ public enum OPACK {
             }
             let before = cursor
             guard let key = readString(data, cursor: &cursor) else { break }
+            let beforeValue = cursor
             if let s = peekString(data, cursor: &cursor) {
                 result[key] = s
             } else if let i = peekInt(data, cursor: &cursor) {
@@ -431,9 +432,10 @@ public enum OPACK {
             } else if let b = peekBytes(data, cursor: &cursor) {
                 result[key] = b
             } else {
-                skipValue(data, cursor: &cursor)  // skip nested dicts/arrays
+                skipValue(data, cursor: &cursor)  // skip nested dicts/arrays — shallow
             }
-            if cursor == before { break }
+            if cursor == beforeValue { break }  // value didn't advance — corrupt/unknown tag
+            if cursor == before { break }  // guard against full no-progress
             iterations += 1
         }
         return result
@@ -739,8 +741,9 @@ public enum OPACK {
         return result
     }
 
-    private static func skipValue(_ data: Data, cursor: inout Data.Index) {
+    private static func skipValue(_ data: Data, cursor: inout Data.Index, depth: Int = 0) {
         guard cursor < data.endIndex else { return }
+        guard depth < 32 else { cursor = data.endIndex; return }  // depth cap against stack overflow
         let tag = data[cursor]
         data.formIndex(after: &cursor)
         switch tag {
@@ -778,20 +781,20 @@ public enum OPACK {
             }
         case 0xD0...0xDF:
             let count = Int(tag - 0xD0)
-            for _ in 0..<count { skipValue(data, cursor: &cursor) }
+            for _ in 0..<count { skipValue(data, cursor: &cursor, depth: depth + 1) }
         case 0xE0...0xEF:
             let count = Int(tag - 0xE0)
             if count == 0xF {
                 // open-ended dict: skip key-value pairs until 0x03 terminator
                 while cursor < data.endIndex, data[cursor] != 0x03 {
                     let before = cursor
-                    skipValue(data, cursor: &cursor)  // key
-                    skipValue(data, cursor: &cursor)  // value
+                    skipValue(data, cursor: &cursor, depth: depth + 1)  // key
+                    skipValue(data, cursor: &cursor, depth: depth + 1)  // value
                     if cursor == before { break }     // guard: stuck cursor → corrupt data
                 }
                 if cursor < data.endIndex { data.formIndex(after: &cursor) }  // consume 0x03
             } else {
-                for _ in 0..<(count * 2) { skipValue(data, cursor: &cursor) }
+                for _ in 0..<(count * 2) { skipValue(data, cursor: &cursor, depth: depth + 1) }
             }
         default: break
         }
