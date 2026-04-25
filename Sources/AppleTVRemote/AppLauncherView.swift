@@ -10,6 +10,7 @@ struct AppLauncherView: View {
 
     @State private var searchText = ""
     @State private var focusedIndex: Int = 0
+    @FocusState private var searchFocused: Bool
 
     private let cellSize: CGFloat = 76   // icon 64 + padding 6×2
     private let spacing: CGFloat = 12
@@ -34,6 +35,7 @@ struct AppLauncherView: View {
                 TextField("Search apps", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .focused($searchFocused)
                     .onChange(of: searchText) { _ in focusedIndex = 0 }
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
@@ -120,8 +122,12 @@ struct AppLauncherView: View {
         }
     }
 
-    // Key codes: left=123 right=124 down=125 up=126 return=36 r=15
+    // Key codes: left=123 right=124 down=125 up=126 return=36 r=15 tab=48
     private func handleKey(_ keyCode: UInt16, apps: [(id: String, name: String)], cols: Int) {
+        if keyCode == 48 {  // Tab → focus search (ignored if already focused)
+            if !searchFocused { searchFocused = true }
+            return
+        }
         if keyCode == 15 {
             withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
             return
@@ -178,7 +184,16 @@ private struct KeyMonitor: NSViewRepresentable {
                         }
                         return event
                     }
-                    if [36, 123, 124, 125, 126].contains(code) {
+                    // Tab focuses search unless already in a text field
+                    if code == 48 {
+                        let inField = (event.window?.firstResponder as? NSText) != nil
+                        if !inField {
+                            DispatchQueue.main.async { self?.onKey?(code) }
+                            return nil
+                        }
+                        return event
+                    }
+                    if [36, 48, 123, 124, 125, 126].contains(code) {
                         DispatchQueue.main.async { self?.onKey?(code) }
                         return nil
                     }
