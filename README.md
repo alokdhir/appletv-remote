@@ -140,7 +140,7 @@ This project would not have been possible without **[pyatv](https://github.com/p
 
 pyatv is an open-source Python library that reverse-engineered and documented Apple's proprietary Apple TV protocols — including the Companion protocol, OPACK binary format, HAP-style pairing, and the AirPlay MRP tunnel. It served as the primary protocol reference throughout the development of this project.
 
-We are deeply grateful to the pyatv team for their meticulous work documenting undocumented protocols and making that knowledge freely available.
+Many thanks to the pyatv project and contributors for their work documenting undocumented protocols and making that knowledge freely available.
 
 > pyatv is licensed under the MIT License.
 > https://github.com/postlund/pyatv
