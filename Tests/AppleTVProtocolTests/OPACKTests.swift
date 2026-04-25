@@ -160,4 +160,47 @@ final class OPACKTests: XCTestCase {
         let decoded = OPACK.decodeDict(packed)
         XCTAssertEqual(decoded?["k"] as? Int, -42)
     }
+
+    // MARK: - Open-ended dict (0xEF + 0x03 terminator) — regression for infinite loop
+
+    func testOpenEndedDictDecodes() {
+        // Manually construct an 0xEF open-ended dict with 2 entries + 0x03 terminator
+        var data = Data()
+        data.append(0xEF)                    // open-ended dict
+        data.append(0x41); data.append(0x61) // key "a"
+        data.append(0x09)                    // value: small int 1
+        data.append(0x41); data.append(0x62) // key "b"
+        data.append(0x0A)                    // value: small int 2
+        data.append(0x03)                    // terminator
+        let decoded = OPACK.decodeDict(data)
+        XCTAssertEqual(decoded?["a"] as? Int, 1)
+        XCTAssertEqual(decoded?["b"] as? Int, 2)
+    }
+
+    func testSkipValueOnUnknownTagDoesNotInfiniteLoop() {
+        // An 0xEF open-ended dict containing an unknown tag (0xFF) used to spin
+        // forever because skipValue hit default:break without advancing the cursor.
+        var data = Data()
+        data.append(0xEF)                    // open-ended dict
+        data.append(0x41); data.append(0x61) // key "a"
+        data.append(0xFF)                    // unknown/unhandled tag — stuck cursor
+        data.append(0x03)                    // terminator (may never be reached without guard)
+        // Must terminate without hanging
+        let decoded = OPACK.decodeDict(data)
+        // We don't care about the result, just that it returns
+        XCTAssertNotNil(decoded)
+    }
+
+    func testDecodeDictShallowSkipsNestedDicts() {
+        // Build a dict with a nested dict value
+        let inner = OPACK.pack(["x": 1])
+        var data = Data([0xE2])              // outer dict, 2 entries
+        data.append(0x41); data.append(0x61) // key "a"
+        data.append(contentsOf: inner)       // nested dict
+        data.append(0x41); data.append(0x62) // key "b"
+        data.append(0x09)                    // value: small int 1
+        let decoded = OPACK.decodeDictShallow(data)
+        XCTAssertNil(decoded?["a"])          // nested dict skipped
+        XCTAssertEqual(decoded?["b"] as? Int, 1)
+    }
 }
