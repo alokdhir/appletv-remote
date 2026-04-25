@@ -184,14 +184,13 @@ private struct KeyMonitor: NSViewRepresentable {
                         }
                         return event
                     }
-                    // Tab focuses search unless already in a text field
+                    // Tab focuses search; consumed entirely (no focus iteration)
                     if code == 48 {
                         let inField = (event.window?.firstResponder as? NSText) != nil
                         if !inField {
                             DispatchQueue.main.async { self?.onKey?(code) }
-                            return nil
                         }
-                        return event
+                        return nil  // always consume Tab
                     }
                     if [36, 48, 123, 124, 125, 126].contains(code) {
                         DispatchQueue.main.async { self?.onKey?(code) }
