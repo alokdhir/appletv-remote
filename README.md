@@ -19,13 +19,28 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 
 ## Building
 
+### Swift (recommended — builds everything)
+
 ```bash
 # Debug build (fast, for development)
 swift build
 
 # Release build (optimised, for daily use)
 swift build -c release
+
+# Run tests
+swift test
 ```
+
+Builds the GUI app, the `atv` CLI, all modules, and tests.
+
+### Xcode
+
+```bash
+xcodebuild -project AppleTVRemote.xcodeproj -scheme AppleTVRemote -configuration Release
+```
+
+Builds only the `AppleTVRemote.app` GUI target. Use this path for archiving, signing, and notarizing for distribution.
 
 ### Installing after a release build
 
