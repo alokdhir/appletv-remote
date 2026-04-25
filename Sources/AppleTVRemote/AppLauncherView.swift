@@ -37,7 +37,7 @@ struct AppLauncherView: View {
                     .focused($searchFocused)
                     .onChange(of: searchText) { _ in focusedIndex = 0 }
                 if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { searchText = "" } } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                             .font(.system(size: 12))
