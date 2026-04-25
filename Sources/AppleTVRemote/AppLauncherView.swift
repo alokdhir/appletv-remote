@@ -11,8 +11,12 @@ struct AppLauncherView: View {
     @State private var searchText = ""
     @State private var focusedIndex: Int = 0
 
-    private let columnCount = 3
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    private let cellSize: CGFloat = 76   // icon 64 + padding 6×2
+    private let spacing: CGFloat = 12
+
+    private func columnCount(for width: CGFloat) -> Int {
+        max(3, Int((width + spacing) / (cellSize + spacing)))
+    }
 
     private var filteredApps: [(id: String, name: String)] {
         guard !searchText.isEmpty else { return connection.appList }
@@ -60,41 +64,45 @@ struct AppLauncherView: View {
                 let core = filteredApps.filter { $0.id.hasPrefix("com.apple.") }
                 let user = filteredApps.filter { !$0.id.hasPrefix("com.apple.") }
                 let ordered = core + user
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 12) {
-                            if !core.isEmpty {
-                                appGrid(apps: core, offset: 0)
+                GeometryReader { geo in
+                    let cols = columnCount(for: geo.size.width - 24)  // 24 = horizontal padding
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 12) {
+                                if !core.isEmpty {
+                                    appGrid(apps: core, offset: 0, columns: columns)
+                                }
+                                if !core.isEmpty && !user.isEmpty {
+                                    Divider().opacity(0.4).padding(.horizontal, 24)
+                                }
+                                if !user.isEmpty {
+                                    appGrid(apps: user, offset: core.count, columns: columns)
+                                }
                             }
-                            if !core.isEmpty && !user.isEmpty {
-                                Divider().opacity(0.4).padding(.horizontal, 24)
-                            }
-                            if !user.isEmpty {
-                                appGrid(apps: user, offset: core.count)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                        .onChange(of: focusedIndex) { idx in
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                proxy.scrollTo(idx, anchor: .center)
                             }
                         }
-                        .animation(.easeInOut(duration: 0.2), value: filteredApps.map(\.id))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
                     }
-                    .onChange(of: focusedIndex) { idx in
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            proxy.scrollTo(idx, anchor: .center)
+                    .background(
+                        KeyMonitor { [self] keyCode in
+                            handleKey(keyCode, apps: ordered, cols: cols)
                         }
-                    }
+                    )
                 }
-                .background(
-                    KeyMonitor { [self] keyCode in
-                        handleKey(keyCode, apps: ordered)
-                    }
-                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private func appGrid(apps: [(id: String, name: String)], offset: Int) -> some View {
+    private func appGrid(apps: [(id: String, name: String)], offset: Int,
+                         columns: [GridItem]) -> some View {
         LazyVGrid(columns: columns, spacing: 16) {
             ForEach(Array(apps.enumerated()), id: \.element.id) { i, app in
                 let idx = offset + i
@@ -111,7 +119,7 @@ struct AppLauncherView: View {
     }
 
     // Key codes: left=123 right=124 down=125 up=126 return=36 r=15
-    private func handleKey(_ keyCode: UInt16, apps: [(id: String, name: String)]) {
+    private func handleKey(_ keyCode: UInt16, apps: [(id: String, name: String)], cols: Int) {
         if keyCode == 15 {
             withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
             return
@@ -122,10 +130,10 @@ struct AppLauncherView: View {
         case 123: focusedIndex = max(0, focusedIndex - 1)
         case 124: focusedIndex = min(count - 1, focusedIndex + 1)
         case 126:
-            let next = focusedIndex - columnCount
+            let next = focusedIndex - cols
             if next >= 0 { focusedIndex = next }
         case 125:
-            let next = focusedIndex + columnCount
+            let next = focusedIndex + cols
             if next < count { focusedIndex = next }
         case 36:
             guard focusedIndex < apps.count else { return }
