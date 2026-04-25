@@ -33,8 +33,6 @@ struct DeviceListView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            Divider()
-
             if discovery.devices.isEmpty {
                 emptyState
             } else {

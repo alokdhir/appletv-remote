@@ -22,8 +22,6 @@ struct RemoteControlView: View {
         VStack(spacing: 0) {
             statusBar
 
-            Divider()
-
             // While AutoReconnector is cycling, keep the remote buttons on
             // screen — the transient `.disconnected`/`.connecting`/`.error`
             // would otherwise flash the connect prompt for ~350 ms on every
