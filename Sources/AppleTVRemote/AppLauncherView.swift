@@ -32,9 +32,8 @@ struct AppLauncherView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 12))
-                TextField("Search apps", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                SearchField(text: $searchText, onTab: { searchFocused = true })
+                    .frame(height: 16)
                     .focused($searchFocused)
                     .onChange(of: searchText) { _ in focusedIndex = 0 }
                 if !searchText.isEmpty {
@@ -149,6 +148,50 @@ struct AppLauncherView: View {
             withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
         default: break
         }
+    }
+}
+
+/// NSViewRepresentable wrapper for the search field that disables Tab focus
+/// cycling by overriding keyDown to consume Tab entirely.
+private struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    var onTab: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NoTabTextField {
+        let f = NoTabTextField()
+        f.isBordered = false
+        f.isBezeled = false
+        f.drawsBackground = false
+        f.focusRingType = .none
+        f.font = .systemFont(ofSize: 12)
+        f.placeholderString = "Search apps"
+        f.delegate = context.coordinator
+        f.onTab = onTab
+        return f
+    }
+
+    func updateNSView(_ f: NoTabTextField, context: Context) {
+        if f.stringValue != text { f.stringValue = text }
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: SearchField
+        init(_ p: SearchField) { self.parent = p }
+        func controlTextDidChange(_ n: Notification) {
+            if let f = n.object as? NSTextField {
+                parent.text = f.stringValue
+            }
+        }
+    }
+}
+
+final class NoTabTextField: NSTextField {
+    var onTab: (() -> Void)?
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 48 { return }  // silently drop Tab
+        super.keyDown(with: event)
     }
 }
 
