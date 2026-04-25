@@ -315,6 +315,32 @@ final class IPCServer {
                         client.send(.response(.ok(reqID)))
                     }
                 }
+            case .apps:
+                guard connection.state == .connected else { throw IPCError.notConnected }
+                let cached = connection.appList
+                if !cached.isEmpty {
+                    let ipcApps = cached.map { IPCApp(id: $0.id, name: $0.name) }
+                    client.send(.response(IPCResponse(id: req.id, ok: true, apps: ipcApps)))
+                } else {
+                    // Not yet fetched — trigger a fetch and wait up to 4s
+                    let reqID = req.id
+                    connection.fetchApps { result in
+                        switch result {
+                        case .success(let apps):
+                            let ipcApps = apps.map { IPCApp(id: $0.id, name: $0.name) }
+                            client.send(.response(IPCResponse(id: reqID, ok: true, apps: ipcApps)))
+                        case .failure(let err):
+                            client.send(.response(.failure(reqID, err.localizedDescription)))
+                        }
+                    }
+                }
+            case .launch:
+                guard connection.state == .connected else { throw IPCError.notConnected }
+                guard let bundleID = req.args?["bundleID"], !bundleID.isEmpty else {
+                    throw IPCError.badArgs("launch requires args.bundleID")
+                }
+                connection.launchApp(bundleID: bundleID)
+                client.send(.response(.ok(req.id)))
             }
         } catch {
             client.send(.response(.failure(req.id, error.localizedDescription)))

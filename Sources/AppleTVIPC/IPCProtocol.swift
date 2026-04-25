@@ -47,6 +47,8 @@ public enum IPCCommand: String, Codable, Sendable, CaseIterable {
     case disconnect
     case text
     case clearText    = "clear-text"
+    case apps
+    case launch
 }
 
 /// Button names carried as `args.key`. String-backed so the wire format is
@@ -174,20 +176,31 @@ public struct IPCStatus: Codable, Sendable {
     }
 }
 
+public struct IPCApp: Codable, Sendable {
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) {
+        self.id = id; self.name = name
+    }
+}
+
 public struct IPCResponse: Codable, Sendable {
     public let id: String
     public let ok: Bool
     public let error: String?
     public let devices: [IPCDevice]?
     public let status: IPCStatus?
+    public let apps: [IPCApp]?
 
     public init(id: String, ok: Bool, error: String? = nil,
-                devices: [IPCDevice]? = nil, status: IPCStatus? = nil) {
+                devices: [IPCDevice]? = nil, status: IPCStatus? = nil,
+                apps: [IPCApp]? = nil) {
         self.id = id
         self.ok = ok
         self.error = error
         self.devices = devices
         self.status = status
+        self.apps = apps
     }
 
     public static func ok(_ id: String) -> IPCResponse {

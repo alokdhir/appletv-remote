@@ -487,6 +487,23 @@ func cmdPower(_ conn: IPCConnection) throws {
     expectOk(r)
 }
 
+func cmdApps(_ conn: IPCConnection) throws {
+    let r = try conn.request(.apps)
+    guard r.ok else { die(r.error ?? "apps failed") }
+    let apps = r.apps ?? []
+    if apps.isEmpty { print("No apps found"); return }
+    print("─────────── \(apps.count) apps ───────────")
+    for a in apps.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+        print("  \(a.name)  \(dim(a.id))")
+    }
+}
+
+func cmdLaunch(_ conn: IPCConnection, bundleID: String) throws {
+    let r = try conn.request(.launch, args: ["bundleID": bundleID])
+    expectOk(r)
+    print(green("✓ launched \(bundleID)"))
+}
+
 // MARK: - AirPlay pair / verify (Phase 1 probe)
 
 /// Runs AirPlay pair-setup against a TV directly — no IPC/app involvement.
@@ -1170,10 +1187,10 @@ do {
         expectOk(r)
         print(green("✓ disconnected"))
     case "apps":
-        try runStandalone(args: dispatchArgs, device: standaloneDevice)
+        try cmdApps(conn)
     case "launch":
         guard args.count >= 2 else { die("launch requires a bundle ID") }
-        try runStandalone(args: dispatchArgs, device: standaloneDevice)
+        try cmdLaunch(conn, bundleID: args[1])
     default:
         die("unknown command: \(args[0])")   // show original, not the no-op pass-through
     }

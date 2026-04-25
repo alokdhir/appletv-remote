@@ -39,7 +39,7 @@ final class CompanionConnection: ObservableObject {
     private var decryptKey: SymmetricKey?
     private var sendNonce: UInt64 = 0
     private var recvNonce: UInt64 = 0
-    private var txnCounter: UInt32 = 0
+    private var txnCounter: UInt32 = UInt32.random(in: 1...65535)
 
     // Transaction ID of the _sessionStart request. Once the ATV responds to
     // this txn, we know the session is fully established and safe to subscribe
@@ -399,7 +399,7 @@ final class CompanionConnection: ObservableObject {
         currentTextInputData = nil
         lastPlaybackStateTimestamp = 0
         nowPlaying = nil
-        txnCounter = 0
+        txnCounter = UInt32.random(in: 1...65535)
         sendNonce = 0
         recvNonce = 0
         airPlayTunnel?.close()
@@ -514,7 +514,8 @@ final class CompanionConnection: ObservableObject {
     }
 
     /// Fetch the list of launchable apps from the ATV and store in `appList`.
-    func fetchApps() {
+    /// Optional completion is called on main queue with the result.
+    func fetchApps(completion: ((Result<[(id: String, name: String)], Error>) -> Void)? = nil) {
         let txn = txnCounter; txnCounter &+= 1
         Log.companion.report("Companion: fetchApps txn=\(txn)")
         pendingCallbacks[txn] = { [weak self] response in
@@ -523,6 +524,7 @@ final class CompanionConnection: ObservableObject {
             Log.companion.report("Companion: fetchApps callback fired, _c type=\(type(of: cVal))")
             guard let content = response["_c"] as? [String: Any] else {
                 Log.companion.report("Companion: fetchApps — unexpected response format")
+                completion?(.failure(CompanionError.unexpectedResponse))
                 return
             }
             let apps = content.compactMap { (key, value) -> (id: String, name: String)? in
@@ -531,6 +533,7 @@ final class CompanionConnection: ObservableObject {
             }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             self.appList = apps
             Log.companion.report("Companion: fetched \(apps.count) apps")
+            completion?(.success(apps))
         }
         sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txn))
     }
@@ -1125,6 +1128,15 @@ public struct NowPlayingInfo: Equatable, Sendable {
 }
 
 // MARK: - Text input errors
+
+enum CompanionError: LocalizedError {
+    case unexpectedResponse
+    var errorDescription: String? {
+        switch self {
+        case .unexpectedResponse: return "Unexpected response from Apple TV"
+        }
+    }
+}
 
 enum TextInputError: LocalizedError {
     case notConnected
