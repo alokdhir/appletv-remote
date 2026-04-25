@@ -71,7 +71,7 @@ struct DeviceListView: View {
     private var header: some View {
         HStack {
             Text("Apple TVs")
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
             Spacer()
             if discovery.isSearching {
                 ProgressView()
@@ -90,7 +90,7 @@ struct DeviceListView: View {
             .help("Refresh")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
     private var emptyState: some View {
