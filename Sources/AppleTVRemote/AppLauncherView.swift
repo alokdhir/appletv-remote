@@ -177,6 +177,10 @@ private struct SearchField: NSViewRepresentable {
         f.placeholderString = "Search apps"
         f.delegate = context.coordinator
         f.onTab = onTab
+        f.onClear = { [weak f] in
+            f?.stringValue = ""
+            context.coordinator.parent.text = ""
+        }
         return f
     }
 
@@ -197,8 +201,10 @@ private struct SearchField: NSViewRepresentable {
 
 final class NoTabTextField: NSTextField {
     var onTab: (() -> Void)?
+    var onClear: (() -> Void)?
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48 { return }  // silently drop Tab
+        if event.keyCode == 53 { onClear?(); return }  // Escape → clear
         super.keyDown(with: event)
     }
 }
@@ -229,6 +235,12 @@ private struct KeyMonitor: NSViewRepresentable {
             if window != nil {
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     let code = event.keyCode
+                    // Escape: if search field is focused, let NoTabTextField handle it (clears text)
+                    if code == 53 {
+                        let inField = (event.window?.firstResponder as? NSText) != nil
+                        if inField { return event }  // let the text field consume it
+                        return event  // otherwise let it propagate normally
+                    }
                     // 'r' exits launcher unless a text field has focus
                     if code == 15 {
                         let inField = (event.window?.firstResponder as? NSText) != nil
