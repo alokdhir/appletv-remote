@@ -11,6 +11,16 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 - **Auto-reconnect** — reconnects automatically when the Apple TV becomes reachable
 - **Keyboard shortcuts** — `A` to open app grid, `R` to return to remote, arrow keys to navigate apps
 
+## Screenshots
+
+| Remote (`remote.png`) | Remote + sidebar (`remote with sidebar.png`) |
+|--------|-----------------|
+| ![Remote control](screenshots/remote.png) | ![Remote with sidebar](screenshots/remote%20with%20sidebar.png) |
+
+| App grid (`appgrid.png`) | App grid + sidebar (`appgrid with sidebar.png`) |
+|----------|--------------------|
+| ![App grid](screenshots/appgrid.png) | ![App grid with sidebar](screenshots/appgrid%20with%20sidebar.png) |
+
 ## Requirements
 
 - macOS 13+
