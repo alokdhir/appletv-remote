@@ -536,6 +536,16 @@ final class CompanionConnection: ObservableObject {
             completion?(.success(apps))
         }
         sendEncrypted(OPACK.encodeFetchLaunchableApplicationsEvent(txn: txn))
+        // Timeout: if the ATV doesn't respond in 5s, remove the pending callback
+        // so it doesn't leak. This can happen if the ATV ignores FetchLaunchable
+        // (e.g. after Xcode pairing disrupts Companion credentials).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            if self.pendingCallbacks.removeValue(forKey: txn) != nil {
+                Log.companion.report("Companion: fetchApps timed out (no response from ATV)")
+                completion?(.failure(CompanionError.unexpectedResponse))
+            }
+        }
     }
 
     /// Launch an app on the ATV by bundle ID.
@@ -815,7 +825,14 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func handleOPACKMessage(_ data: Data) {
-        guard let msg = OPACK.decodeDict(data) else {
+        // For large messages (e.g. _systemInfo response ~7KB with deeply nested
+        // binary plists), full recursive decoding causes O(n) skipValue calls.
+        // Use shallow decode for routing — we only need _i, _t, _x at top level.
+        // For messages that need _c (app list, _iMC), the callbacks re-decode it.
+        guard let msg = data.count > 2000
+            ? OPACK.decodeDictShallow(data)
+            : OPACK.decodeDict(data)
+        else {
             Log.companion.fail("Companion: E_OPACK decode failed (\(data.count)B) hex: \(data.prefix(32).map{String(format:"%02x",$0)}.joined(separator:" "))")
             return
         }
@@ -904,7 +921,7 @@ final class CompanionConnection: ObservableObject {
                     guard let self else { return }
                     let st = (resp["_c"] as? [String: Any])?["state"] as? Int
                     if let st { self.attentionState = st }
-                    // Subscribe remaining events, then fetch apps.
+                    // Subscribe remaining events.
                     for evt in ["SystemStatus", "TVSystemStatus",
                                 "_tiStarted", "_tiStopped"] {
                         let t = self.txnCounter; self.txnCounter &+= 1

@@ -401,6 +401,44 @@ public enum OPACK {
         return result
     }
 
+    /// Fast shallow decode: reads only scalar top-level values (string, int, bool,
+    /// bytes). Nested dicts and arrays are skipped. Used for large messages like
+    /// the 7KB _systemInfo response where full recursive decoding is too expensive.
+    public static func decodeDictShallow(_ data: Data) -> [String: Any]? {
+        var cursor = data.startIndex
+        guard cursor < data.endIndex else { return nil }
+        let tag = data[cursor]
+        guard tag >= 0xE0, tag <= 0xEF else { return nil }
+        data.formIndex(after: &cursor)
+        let count = Int(tag - 0xE0)
+        let isOpen = count == 0xF
+        var result = [String: Any]()
+        var iterations = 0
+        while true {
+            if isOpen {
+                if cursor >= data.endIndex || data[cursor] == 0x03 { break }
+            } else {
+                if iterations >= count { break }
+            }
+            let before = cursor
+            guard let key = readString(data, cursor: &cursor) else { break }
+            if let s = peekString(data, cursor: &cursor) {
+                result[key] = s
+            } else if let i = peekInt(data, cursor: &cursor) {
+                result[key] = i
+            } else if let f = peekDouble(data, cursor: &cursor) {
+                result[key] = f
+            } else if let b = peekBytes(data, cursor: &cursor) {
+                result[key] = b
+            } else {
+                skipValue(data, cursor: &cursor)  // skip nested dicts/arrays
+            }
+            if cursor == before { break }
+            iterations += 1
+        }
+        return result
+    }
+
     private static func peekString(_ data: Data, cursor: inout Data.Index) -> String? {
         let saved = cursor
         if let s = readString(data, cursor: &cursor) { return s }
@@ -746,8 +784,10 @@ public enum OPACK {
             if count == 0xF {
                 // open-ended dict: skip key-value pairs until 0x03 terminator
                 while cursor < data.endIndex, data[cursor] != 0x03 {
+                    let before = cursor
                     skipValue(data, cursor: &cursor)  // key
                     skipValue(data, cursor: &cursor)  // value
+                    if cursor == before { break }     // guard: stuck cursor → corrupt data
                 }
                 if cursor < data.endIndex { data.formIndex(after: &cursor) }  // consume 0x03
             } else {
