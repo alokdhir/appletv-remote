@@ -224,7 +224,8 @@ struct RemoteControlView: View {
     private var remoteLayout: some View {
         ScrollView {
             VStack(spacing: 20) {
-                KeyCatcher { connection.send($0) }
+                KeyCatcher(onCommand: { connection.send($0) },
+                            onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } })
                     .frame(width: 0, height: 0)
                 // Navigation pad — circular ring matching the real Apple TV remote
                 ZStack {
@@ -386,20 +387,24 @@ struct RemoteControlView: View {
 /// (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
+    var onShowApps: () -> Void = {}
 
     func makeNSView(context: Context) -> NSView {
         let v = KeyCatcherView()
         v.onCommand = onCommand
+        v.onShowApps = onShowApps
         return v
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView as? KeyCatcherView)?.onCommand = onCommand
+        (nsView as? KeyCatcherView)?.onShowApps = onShowApps
     }
 }
 
 private final class KeyCatcherView: NSView {
     var onCommand: (RemoteCommand) -> Void = { _ in }
+    var onShowApps: () -> Void = {}
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -418,6 +423,10 @@ private final class KeyCatcherView: NSView {
         let mods = event.modifierFlags.intersection([.command, .control, .option])
         if !mods.isEmpty { super.keyDown(with: event); return }
 
+        if event.charactersIgnoringModifiers?.lowercased() == "a" {
+            onShowApps()
+            return
+        }
         if let cmd = command(for: event) {
             onCommand(cmd)
             return

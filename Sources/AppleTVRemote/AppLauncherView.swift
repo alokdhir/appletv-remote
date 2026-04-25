@@ -57,17 +57,20 @@ struct AppLauncherView: View {
                 Text("No apps match \"\(searchText)\"").font(.caption).foregroundStyle(.secondary)
                 Spacer()
             } else {
+                let core = filteredApps.filter { $0.id.hasPrefix("com.apple.") }
+                let user = filteredApps.filter { !$0.id.hasPrefix("com.apple.") }
+                let ordered = core + user
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(Array(filteredApps.enumerated()), id: \.element.id) { idx, app in
-                                AppCell(app: app, iconCache: iconCache, isFocused: idx == focusedIndex) {
-                                    connection.launchApp(bundleID: app.id)
-                                    withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
-                                }
-                                .id(idx)
-                                .onTapGesture { focusedIndex = idx }
-                                .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        VStack(spacing: 12) {
+                            if !core.isEmpty {
+                                appGrid(apps: core, offset: 0)
+                            }
+                            if !core.isEmpty && !user.isEmpty {
+                                Divider().opacity(0.4).padding(.horizontal, 24)
+                            }
+                            if !user.isEmpty {
+                                appGrid(apps: user, offset: core.count)
                             }
                         }
                         .animation(.easeInOut(duration: 0.2), value: filteredApps.map(\.id))
@@ -82,7 +85,7 @@ struct AppLauncherView: View {
                 }
                 .background(
                     KeyMonitor { [self] keyCode in
-                        handleKey(keyCode, count: filteredApps.count)
+                        handleKey(keyCode, apps: ordered)
                     }
                 )
             }
@@ -90,8 +93,29 @@ struct AppLauncherView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // Arrow key codes: left=123 right=124 down=125 up=126 return=36
-    private func handleKey(_ keyCode: UInt16, count: Int) {
+    @ViewBuilder
+    private func appGrid(apps: [(id: String, name: String)], offset: Int) -> some View {
+        LazyVGrid(columns: columns, spacing: 16) {
+            ForEach(Array(apps.enumerated()), id: \.element.id) { i, app in
+                let idx = offset + i
+                AppCell(app: app, iconCache: iconCache, isFocused: idx == focusedIndex) {
+                    connection.launchApp(bundleID: app.id)
+                    withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
+                }
+                .id(idx)
+                .onTapGesture { focusedIndex = idx }
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
+            }
+        }
+    }
+
+    // Key codes: left=123 right=124 down=125 up=126 return=36 r=15
+    private func handleKey(_ keyCode: UInt16, apps: [(id: String, name: String)]) {
+        if keyCode == 15 {
+            withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
+            return
+        }
+        let count = apps.count
         guard count > 0 else { return }
         switch keyCode {
         case 123: focusedIndex = max(0, focusedIndex - 1)
@@ -103,8 +127,8 @@ struct AppLauncherView: View {
             let next = focusedIndex + columnCount
             if next < count { focusedIndex = next }
         case 36:
-            let app = filteredApps[focusedIndex]
-            connection.launchApp(bundleID: app.id)
+            guard focusedIndex < apps.count else { return }
+            connection.launchApp(bundleID: apps[focusedIndex].id)
             withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
         default: break
         }
@@ -134,6 +158,15 @@ private struct KeyMonitor: NSViewRepresentable {
             if window != nil {
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     let code = event.keyCode
+                    // 'r' exits launcher unless a text field has focus
+                    if code == 15 {
+                        let inField = (event.window?.firstResponder as? NSText) != nil
+                        if !inField {
+                            DispatchQueue.main.async { self?.onKey?(code) }
+                            return nil
+                        }
+                        return event
+                    }
                     if [36, 123, 124, 125, 126].contains(code) {
                         DispatchQueue.main.async { self?.onKey?(code) }
                         return nil
