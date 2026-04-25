@@ -40,8 +40,8 @@ struct ContentView: View {
         // keeping the window resizable (min…max range) so edge-hover resize
         // cursors still work. A plain minWidth with no maxWidth would let
         // the HStack expand to full screen width on open.
-        .frame(minWidth: effectivelyCollapsed ? 300 : 520,
-               idealWidth: effectivelyCollapsed ? 300 : 520,
+        .frame(minWidth: effectivelyCollapsed ? 300 : 521,
+               idealWidth: effectivelyCollapsed ? 300 : 521,
                maxWidth: .infinity,
                minHeight: 480,
                idealHeight: 620,
@@ -68,23 +68,18 @@ struct ContentView: View {
             }
         }
         .onChange(of: effectivelyCollapsed) { collapsed in
-            // .windowResizability(.contentMinSize) doesn't auto-shrink the
-            // window when the sidebar hides, because content has maxWidth:
-            // .infinity — the current larger frame stays valid. Drive it
-            // explicitly so hiding the sidebar snaps the window narrower.
             guard let window = MenuBarController.shared.mainWindow else { return }
-            let newWidth: CGFloat = collapsed ? 300 : 520
-            // Use contentView.frame.height — this is the actual content height
-            // setContentSize controls. contentLayoutRect.height is smaller (it
-            // excludes toolbar area), so using it causes height to shrink on
-            // every toggle.
-            let currentHeight = window.contentView?.frame.size.height
-                             ?? window.contentRect(forFrameRect: window.frame).height
+            let currentSize = window.contentView?.frame.size
+                           ?? window.contentRect(forFrameRect: window.frame).size
+            // Add or remove exactly the sidebar width — don't touch the right pane.
+            let sidebarWidth: CGFloat = 220 + 1  // 220 sidebar + 1 divider
+            let delta: CGFloat = collapsed ? -(sidebarWidth) : sidebarWidth
+            let newWidth = max(300, currentSize.width + delta)
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.22
                 ctx.allowsImplicitAnimation = true
                 window.animator().setContentSize(
-                    NSSize(width: newWidth, height: currentHeight)
+                    NSSize(width: newWidth, height: currentSize.height)
                 )
             }
         }
