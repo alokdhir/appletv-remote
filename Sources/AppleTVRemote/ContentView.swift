@@ -69,18 +69,20 @@ struct ContentView: View {
         }
         .onChange(of: effectivelyCollapsed) { collapsed in
             guard let window = MenuBarController.shared.mainWindow else { return }
-            let currentSize = window.contentView?.frame.size
-                           ?? window.contentRect(forFrameRect: window.frame).size
-            // Add or remove exactly the sidebar width — don't touch the right pane.
-            let sidebarWidth: CGFloat = 220 + 1  // 220 sidebar + 1 divider
-            let delta: CGFloat = collapsed ? -(sidebarWidth) : sidebarWidth
-            let newWidth = max(300, currentSize.width + delta)
+            let currentFrame = window.frame
+            let sidebarWidth: CGFloat = 221  // 220 sidebar + 1 divider
+            let delta: CGFloat = collapsed ? -sidebarWidth : sidebarWidth
+            // Grow/shrink from the left edge — keep right edge fixed
+            let newFrame = NSRect(
+                x: currentFrame.origin.x - delta,
+                y: currentFrame.origin.y,
+                width: max(300, currentFrame.width + delta),
+                height: currentFrame.height
+            )
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.22
                 ctx.allowsImplicitAnimation = true
-                window.animator().setContentSize(
-                    NSSize(width: newWidth, height: currentSize.height)
-                )
+                window.animator().setFrame(newFrame, display: true)
             }
         }
     }
