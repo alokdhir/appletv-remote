@@ -177,10 +177,6 @@ private struct SearchField: NSViewRepresentable {
         f.placeholderString = "Search apps"
         f.delegate = context.coordinator
         f.onTab = onTab
-        f.onClear = { [weak f] in
-            f?.stringValue = ""
-            context.coordinator.parent.text = ""
-        }
         return f
     }
 
@@ -196,15 +192,22 @@ private struct SearchField: NSViewRepresentable {
                 parent.text = f.stringValue
             }
         }
+        func control(_ control: NSControl, textView: NSTextView,
+                     doCommandBy selector: Selector) -> Bool {
+            if selector == #selector(NSResponder.cancelOperation(_:)) {
+                parent.text = ""
+                (control as? NSTextField)?.stringValue = ""
+                return true
+            }
+            return false
+        }
     }
 }
 
 final class NoTabTextField: NSTextField {
     var onTab: (() -> Void)?
-    var onClear: (() -> Void)?
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48 { return }  // silently drop Tab
-        if event.keyCode == 53 { onClear?(); return }  // Escape → clear
         super.keyDown(with: event)
     }
 }
