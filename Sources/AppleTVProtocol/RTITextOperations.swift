@@ -137,17 +137,12 @@ public enum RTITextOperations {
     }
 
     /// Build a payload that clears the current field content.
-    ///
-    /// `$objects` layout:
-    ///   [0]  "$null"
-    ///   [1]  RTITextOperations instance  { keyboardOutput:UID(2), targetSessionUUID:UID(5), textToAssert:UID(4), $class:UID(7) }
-    ///   [2]  TIKeyboardOutput instance   { $class:UID(3) }
-    ///   [3]  TIKeyboardOutput class dict
-    ///   [4]  "" (empty string — textToAssert)
-    ///   [5]  NSUUID instance dict
-    ///   [6]  NSUUID class dict
-    ///   [7]  RTITextOperations class dict
     public static func clearPayload(sessionUUID: Data) -> Data {
+        assertPayload(sessionUUID: sessionUUID, text: "")
+    }
+
+    /// Build a payload that replaces the field content with `text` via `textToAssert`.
+    public static func assertPayload(sessionUUID: Data, text: String) -> Data {
         var w = BinaryPlistWriter()
 
         let skClass       = w.addString("$class")
@@ -158,54 +153,40 @@ public enum RTITextOperations {
         let skTextAssert  = w.addString("textToAssert")
         let skNSUUIDbytes = w.addString("NS.uuidbytes")
 
-        // ── $objects[4]: empty string ──────────────────────────────────────────
-        let obj4Empty    = w.addString("")
+        let obj4Text     = w.addString(text)
 
-        // ── $objects[3]: TIKeyboardOutput class dict ───────────────────────────
         let sTIKBName    = w.addString("TIKeyboardOutput")
         let sNSObject    = w.addString("NSObject")
         let aTIKBClasses = w.addArray([sTIKBName, sNSObject])
         let obj3TIKBCls  = w.addDict([(skClassname, sTIKBName), (skClasses, aTIKBClasses)])
 
-        // ── $objects[5]: NSUUID instance dict ─────────────────────────────────
         let oUUIDData      = w.addData(sessionUUID)
         let sNSUUID        = w.addString("NSUUID")
         let aNSUUIDClasses = w.addArray([sNSUUID, sNSObject])
         let obj6NSUUIDCls  = w.addDict([(skClassname, sNSUUID), (skClasses, aNSUUIDClasses)])
         let obj5NSUUIDInst = w.addDict([
             (skNSUUIDbytes, oUUIDData),
-            (skClass,       w.addUID(6)),  // UID(6) = $objects[6]
+            (skClass,       w.addUID(6)),
         ])
 
-        // ── $objects[7]: RTITextOperations class dict ──────────────────────────
         let sRTIName    = w.addString("RTITextOperations")
         let aRTIClasses = w.addArray([sRTIName, sNSObject])
         let obj7RTICls  = w.addDict([(skClassname, sRTIName), (skClasses, aRTIClasses)])
 
-        // ── $objects[2]: TIKeyboardOutput instance (empty) ────────────────────
-        let obj2TIKBInst = w.addDict([
-            (skClass, w.addUID(3)),  // UID(3) = $objects[3]
-        ])
+        let obj2TIKBInst = w.addDict([(skClass, w.addUID(3))])
 
-        // ── $objects[1]: RTITextOperations instance ────────────────────────────
         let obj1RTIInst = w.addDict([
-            (skKbOut,      w.addUID(2)),  // UID(2)
-            (skTargetUUID, w.addUID(5)),  // UID(5)
-            (skTextAssert, w.addUID(4)),  // UID(4) = empty string
-            (skClass,      w.addUID(7)),  // UID(7)
+            (skKbOut,      w.addUID(2)),
+            (skTargetUUID, w.addUID(5)),
+            (skTextAssert, w.addUID(4)),
+            (skClass,      w.addUID(7)),
         ])
 
         let obj0Null = w.addNull()
 
         let objsArray = w.addArray([
-            obj0Null,       // [0]
-            obj1RTIInst,    // [1]
-            obj2TIKBInst,   // [2]
-            obj3TIKBCls,    // [3]
-            obj4Empty,      // [4]
-            obj5NSUUIDInst, // [5]
-            obj6NSUUIDCls,  // [6]
-            obj7RTICls,     // [7]
+            obj0Null, obj1RTIInst, obj2TIKBInst, obj3TIKBCls, obj4Text,
+            obj5NSUUIDInst, obj6NSUUIDCls, obj7RTICls,
         ])
 
         let skVersion  = w.addString("$version")
@@ -274,75 +255,6 @@ public enum RTITextOperations {
             if let v = dict["CF$UID"] as? UInt64 { return Int(v) }
         }
         return nil
-    }
-
-    /// Build a payload that replaces the field content with `text` via `textToAssert`.
-    public static func assertPayload(sessionUUID: Data, text: String) -> Data {
-        var w = BinaryPlistWriter()
-
-        let skClass       = w.addString("$class")
-        let skClassname   = w.addString("$classname")
-        let skClasses     = w.addString("$classes")
-        let skKbOut       = w.addString("keyboardOutput")
-        let skTargetUUID  = w.addString("targetSessionUUID")
-        let skTextAssert  = w.addString("textToAssert")
-        let skNSUUIDbytes = w.addString("NS.uuidbytes")
-
-        let obj4Text     = w.addString(text)
-
-        let sTIKBName    = w.addString("TIKeyboardOutput")
-        let sNSObject    = w.addString("NSObject")
-        let aTIKBClasses = w.addArray([sTIKBName, sNSObject])
-        let obj3TIKBCls  = w.addDict([(skClassname, sTIKBName), (skClasses, aTIKBClasses)])
-
-        let oUUIDData      = w.addData(sessionUUID)
-        let sNSUUID        = w.addString("NSUUID")
-        let aNSUUIDClasses = w.addArray([sNSUUID, sNSObject])
-        let obj6NSUUIDCls  = w.addDict([(skClassname, sNSUUID), (skClasses, aNSUUIDClasses)])
-        let obj5NSUUIDInst = w.addDict([
-            (skNSUUIDbytes, oUUIDData),
-            (skClass,       w.addUID(6)),
-        ])
-
-        let sRTIName    = w.addString("RTITextOperations")
-        let aRTIClasses = w.addArray([sRTIName, sNSObject])
-        let obj7RTICls  = w.addDict([(skClassname, sRTIName), (skClasses, aRTIClasses)])
-
-        let obj2TIKBInst = w.addDict([
-            (skClass, w.addUID(3)),
-        ])
-
-        let obj1RTIInst = w.addDict([
-            (skKbOut,      w.addUID(2)),
-            (skTargetUUID, w.addUID(5)),
-            (skTextAssert, w.addUID(4)),
-            (skClass,      w.addUID(7)),
-        ])
-
-        let obj0Null = w.addNull()
-
-        let objsArray = w.addArray([
-            obj0Null, obj1RTIInst, obj2TIKBInst, obj3TIKBCls, obj4Text,
-            obj5NSUUIDInst, obj6NSUUIDCls, obj7RTICls,
-        ])
-
-        let skVersion  = w.addString("$version")
-        let skArchiver = w.addString("$archiver")
-        let skTop      = w.addString("$top")
-        let skObjects  = w.addString("$objects")
-        let svArchiver = w.addString("RTIKeyedArchiver")
-        let skTextOps  = w.addString("textOperations")
-        let svVersion  = w.addInt(100000)
-
-        let topDict  = w.addDict([(skTextOps, w.addUID(1))])
-        let rootDict = w.addDict([
-            (skVersion,  svVersion),
-            (skArchiver, svArchiver),
-            (skTop,      topDict),
-            (skObjects,  objsArray),
-        ])
-
-        return w.build(topObject: rootDict)
     }
 
     /// Extract the current text content from a `_tiD` binary plist.

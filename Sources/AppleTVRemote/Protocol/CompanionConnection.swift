@@ -526,20 +526,28 @@ final class CompanionConnection: ObservableObject {
         sendEncrypted(OPACK.encodeTextInputStart(txn: startTxn))
     }
 
-
     func sendClearText(completion: @escaping (Error?) -> Void) {
         guard state == .connected else { completion(TextInputError.notConnected); return }
-        guard keyboardActive, let tiD = currentTextInputData else {
-            completion(TextInputError.noActiveTextField); return
+        guard keyboardActive else { completion(TextInputError.noActiveTextField); return }
+        let stopTxn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
+        let startTxn = txnCounter; txnCounter &+= 1
+        pendingCallbacks[startTxn] = { [weak self] response in
+            guard let self else { return }
+            guard let tiD = (response["_c"] as? [String: Any])?["_tiD"] as? Data else {
+                completion(TextInputError.noActiveTextField); return
+            }
+            self.currentTextInputData = tiD
+            guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
+                completion(TextInputError.sessionUUIDMissing); return
+            }
+            let payload = RTITextOperations.clearPayload(sessionUUID: uuid)
+            let cmdTxn = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: cmdTxn))
+            Log.companion.report("Companion: sent clear text input")
+            completion(nil)
         }
-        guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
-            completion(TextInputError.sessionUUIDMissing); return
-        }
-        let payload = RTITextOperations.clearPayload(sessionUUID: uuid)
-        let cmdTxn = txnCounter; txnCounter &+= 1
-        sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: cmdTxn))
-        Log.companion.report("Companion: sent clear text input")
-        completion(nil)
+        sendEncrypted(OPACK.encodeTextInputStart(txn: startTxn))
     }
 
     /// Fetch the list of launchable apps from the ATV and store in `appList`.
@@ -695,6 +703,8 @@ final class CompanionConnection: ObservableObject {
             // Poll text input state to detect when the ATV leaves a text field
             // without sending _tiStopped (known to happen on some tvOS builds).
             if self.keyboardActive {
+                let stopTxn = self.txnCounter; self.txnCounter &+= 1
+                self.sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
                 let tiTxn = self.txnCounter; self.txnCounter &+= 1
                 self.pendingCallbacks[tiTxn] = { [weak self] resp in
                     guard let self else { return }

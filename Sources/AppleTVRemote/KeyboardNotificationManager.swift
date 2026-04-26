@@ -59,13 +59,16 @@ final class KeyboardNotificationManager: NSObject {
             let body  = "Click to type"
 
             if FileManager.default.isExecutableFile(atPath: Self.terminalNotifierPath) {
+                let iconPath = Bundle.main.resourceURL?
+                    .appendingPathComponent("AppIcon.icns").path
+                    ?? "/Applications/AppleTVRemote.app/Contents/Resources/AppIcon.icns"
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: Self.terminalNotifierPath)
                 task.arguments = [
                     "-title",    title,
                     "-message",  body,
                     "-activate", Self.bundleID,
-                    "-appIcon",  "/Applications/AppleTVRemote.app/Contents/Resources/AppIcon.icns",
+                    "-appIcon",  iconPath,
                     "-group",    "keyboard-input",
                 ]
                 try? task.run()
