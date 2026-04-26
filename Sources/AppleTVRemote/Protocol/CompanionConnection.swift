@@ -497,7 +497,36 @@ final class CompanionConnection: ObservableObject {
         completion(nil)
     }
 
-    /// Clear the active text field on the ATV by sending an empty `textToAssert` RTI payload.
+    /// Delete the last character in the active text field by refreshing the
+    /// session to get current text, removing the last character, then asserting.
+    func sendBackspace(completion: @escaping (Error?) -> Void) {
+        guard state == .connected else { completion(TextInputError.notConnected); return }
+        guard keyboardActive else { completion(TextInputError.noActiveTextField); return }
+        // Stop and restart the text input session to get fresh _tiD with current text.
+        let stopTxn = txnCounter; txnCounter &+= 1
+        sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
+        let startTxn = txnCounter; txnCounter &+= 1
+        pendingCallbacks[startTxn] = { [weak self] response in
+            guard let self else { return }
+            guard let tiD = (response["_c"] as? [String: Any])?["_tiD"] as? Data else {
+                completion(TextInputError.noActiveTextField); return
+            }
+            self.currentTextInputData = tiD
+            guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
+                completion(TextInputError.sessionUUIDMissing); return
+            }
+            let current = RTITextOperations.extractCurrentText(from: tiD) ?? ""
+            let updated = String(current.dropLast())
+            let payload = RTITextOperations.assertPayload(sessionUUID: uuid, text: updated)
+            let cmdTxn = self.txnCounter; self.txnCounter &+= 1
+            self.sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: cmdTxn))
+            Log.companion.report("Companion: sent backspace (was \(current.count) chars)")
+            completion(nil)
+        }
+        sendEncrypted(OPACK.encodeTextInputStart(txn: startTxn))
+    }
+
+
     func sendClearText(completion: @escaping (Error?) -> Void) {
         guard state == .connected else { completion(TextInputError.notConnected); return }
         guard keyboardActive, let tiD = currentTextInputData else {
@@ -663,8 +692,23 @@ final class CompanionConnection: ObservableObject {
             }
             let txn = self.txnCounter; self.txnCounter &+= 1
             self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: txn))
-            // Keyboard focus is tracked via _tiStarted / _tiStopped push
-            // events (subscribed via _interest). No need to poll _tiStart.
+            // Poll text input state to detect when the ATV leaves a text field
+            // without sending _tiStopped (known to happen on some tvOS builds).
+            if self.keyboardActive {
+                let tiTxn = self.txnCounter; self.txnCounter &+= 1
+                self.pendingCallbacks[tiTxn] = { [weak self] resp in
+                    guard let self else { return }
+                    let tiD = (resp["_c"] as? [String: Any])?["_tiD"] as? Data
+                    if tiD == nil {
+                        self.keyboardActive = false
+                        self.currentTextInputData = nil
+                        Log.companion.report("Companion: keyboard inactive (poll detected no text field)")
+                    } else {
+                        self.currentTextInputData = tiD
+                    }
+                }
+                self.sendEncrypted(OPACK.encodeTextInputStart(txn: tiTxn))
+            }
         }
         timer.resume()
         keepaliveTimer = timer
@@ -884,7 +928,7 @@ final class CompanionConnection: ObservableObject {
             // Capture the text-input archive from the push if present.
             // Some tvOS builds omit `_tiD` from the push and require a
             // follow-up `_tiStart` request to fetch it — handle both.
-            let c = msg["_c"] as? [String: Any]
+            let c = fullMsg()["_c"] as? [String: Any]
             if let tiD = c?["_tiD"] as? Data {
                 currentTextInputData = tiD
             }
@@ -922,24 +966,19 @@ final class CompanionConnection: ObservableObject {
             if let sst = sessionStartTxn, txn == sst, msgType == 3 {
                 sessionStartTxn = nil
                 Log.companion.report("Companion: session confirmed, subscribing to events")
-                // Mirror pyatv's wire sequence exactly: one event per _interest,
-                // _iMC first, then FetchAttentionState, then the other events,
-                // then FetchLaunchableApplicationsEvent. Bulk _interest with
-                // unrecognized event names appears to break FetchLaunchable.
-                let t1 = txnCounter; txnCounter &+= 1
-                sendEncrypted(OPACK.encodeInterest(events: ["_iMC"], txn: t1))
+                // Send all _interest subscriptions immediately after session start.
+                // _tiStarted/_tiStopped must be subscribed BEFORE FetchAttentionState
+                // or the ATV won't send them for text fields focused during this session.
+                let t = txnCounter; txnCounter &+= 1
+                sendEncrypted(OPACK.encodeInterest(
+                    events: ["_iMC", "SystemStatus", "TVSystemStatus",
+                             "_tiStarted", "_tiStopped"], txn: t))
 
                 let attnTxn = self.txnCounter; self.txnCounter &+= 1
                 self.pendingCallbacks[attnTxn] = { [weak self] resp in
                     guard let self else { return }
                     let st = (resp["_c"] as? [String: Any])?["state"] as? Int
                     if let st { self.attentionState = st }
-                    // Subscribe remaining events.
-                    for evt in ["SystemStatus", "TVSystemStatus",
-                                "_tiStarted", "_tiStopped"] {
-                        let t = self.txnCounter; self.txnCounter &+= 1
-                        self.sendEncrypted(OPACK.encodeInterest(events: [evt], txn: t))
-                    }
                     if self.appList.isEmpty { self.fetchApps() }
                 }
                 self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: attnTxn))

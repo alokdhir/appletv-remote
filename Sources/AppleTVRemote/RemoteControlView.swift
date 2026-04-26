@@ -223,7 +223,8 @@ struct RemoteControlView: View {
         ScrollView {
             VStack(spacing: 20) {
                 KeyCatcher(onCommand: { connection.send($0) },
-                            onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } })
+                            onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } },
+                            onBackspace: connection.keyboardActive ? { connection.sendBackspace { _ in } } : nil)
                     .frame(width: 0, height: 0)
                 // Navigation pad — circular ring matching the real Apple TV remote
                 ZStack {
@@ -386,6 +387,7 @@ struct RemoteControlView: View {
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
     var onShowApps: () -> Void = {}
+    var onBackspace: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSView {
         let v = KeyCatcherView()
@@ -397,12 +399,14 @@ private struct KeyCatcher: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView as? KeyCatcherView)?.onCommand = onCommand
         (nsView as? KeyCatcherView)?.onShowApps = onShowApps
+        (nsView as? KeyCatcherView)?.onBackspace = onBackspace
     }
 }
 
 private final class KeyCatcherView: NSView {
     var onCommand: (RemoteCommand) -> Void = { _ in }
     var onShowApps: () -> Void = {}
+    var onBackspace: (() -> Void)? = nil
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -423,6 +427,11 @@ private final class KeyCatcherView: NSView {
 
         if event.charactersIgnoringModifiers?.lowercased() == "a" {
             onShowApps()
+            return
+        }
+        // Backspace while ATV has a text field focused — delete last character.
+        if event.keyCode == 51, let handler = onBackspace {
+            handler()
             return
         }
         if let cmd = command(for: event) {

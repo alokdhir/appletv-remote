@@ -27,6 +27,14 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 - Xcode 26 / Swift 6
 - Apple TV on the same local network
 
+### Optional dependencies
+
+- **[terminal-notifier](https://github.com/julienXX/terminal-notifier)** — improves keyboard-input notifications. Without it the app falls back to `osascript display notification`, which appears attributed to "Script Editor" and opens Script Editor when clicked. With terminal-notifier, notifications show the AppleTVRemote icon and clicking focuses the app.
+
+  ```bash
+  brew install terminal-notifier
+  ```
+
 ## Building
 
 ### Swift (recommended — builds everything)

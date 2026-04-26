@@ -163,31 +163,16 @@ public enum OPACK {
             "_i": "_systemInfo",
             "_t": 2,
             "_x": txn,
-            // `_pubID`, `model`, `name` mimic pyatv's defaults. ATV appears
-            // to gate some features (e.g. FetchLaunchableApplicationsEvent)
-            // on client identity fields; pyatv-matching values are known to
-            // be accepted.
-            //
-            // `_pubID` = "FF:" + hex of "pyatv" (see pyatv settings.py
-            // DEFAULT_DEVICE_ID). It is a MAC-address-shaped identifier,
-            // NOT a UUID.
             "_c": [
                 "_bf":   0,
                 "_cf":   512,
                 "_clFl": 128,
-                // pyatv sends `_i: None` (null) in `_systemInfo` — NOT the rpID.
-                // The ATV's own rp_id comes back in the response; this field in the
-                // request is intentionally null per pyatv's wire format.
-                "_i":    NSNull(),
+                "_i":    clientID,
                 "_idsID": Data(clientID.utf8),
-                "_pubID": "FF:70:79:61:74:76",
+                "_pubID": clientID,
                 "_sf":   256,
                 "_sv":   "170.18",
-                "model": "iPhone10,6",
-                // MUST match the name sent in HAP pair-setup M5 (HAPPairing.swift).
-                // ATV stores the client name during pairing and gates some features
-                // (e.g. FetchLaunchableApplicationsEvent) on connect-time name match.
-                // TEMP: impersonating pyatv for Option-D test — pyatv's default name.
+                "model": "MacBookPro",
                 "name":  name,
             ] as [String: Any],
         ] as [String: Any])

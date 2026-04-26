@@ -275,4 +275,98 @@ public enum RTITextOperations {
         }
         return nil
     }
+
+    /// Build a payload that replaces the field content with `text` via `textToAssert`.
+    public static func assertPayload(sessionUUID: Data, text: String) -> Data {
+        var w = BinaryPlistWriter()
+
+        let skClass       = w.addString("$class")
+        let skClassname   = w.addString("$classname")
+        let skClasses     = w.addString("$classes")
+        let skKbOut       = w.addString("keyboardOutput")
+        let skTargetUUID  = w.addString("targetSessionUUID")
+        let skTextAssert  = w.addString("textToAssert")
+        let skNSUUIDbytes = w.addString("NS.uuidbytes")
+
+        let obj4Text     = w.addString(text)
+
+        let sTIKBName    = w.addString("TIKeyboardOutput")
+        let sNSObject    = w.addString("NSObject")
+        let aTIKBClasses = w.addArray([sTIKBName, sNSObject])
+        let obj3TIKBCls  = w.addDict([(skClassname, sTIKBName), (skClasses, aTIKBClasses)])
+
+        let oUUIDData      = w.addData(sessionUUID)
+        let sNSUUID        = w.addString("NSUUID")
+        let aNSUUIDClasses = w.addArray([sNSUUID, sNSObject])
+        let obj6NSUUIDCls  = w.addDict([(skClassname, sNSUUID), (skClasses, aNSUUIDClasses)])
+        let obj5NSUUIDInst = w.addDict([
+            (skNSUUIDbytes, oUUIDData),
+            (skClass,       w.addUID(6)),
+        ])
+
+        let sRTIName    = w.addString("RTITextOperations")
+        let aRTIClasses = w.addArray([sRTIName, sNSObject])
+        let obj7RTICls  = w.addDict([(skClassname, sRTIName), (skClasses, aRTIClasses)])
+
+        let obj2TIKBInst = w.addDict([
+            (skClass, w.addUID(3)),
+        ])
+
+        let obj1RTIInst = w.addDict([
+            (skKbOut,      w.addUID(2)),
+            (skTargetUUID, w.addUID(5)),
+            (skTextAssert, w.addUID(4)),
+            (skClass,      w.addUID(7)),
+        ])
+
+        let obj0Null = w.addNull()
+
+        let objsArray = w.addArray([
+            obj0Null, obj1RTIInst, obj2TIKBInst, obj3TIKBCls, obj4Text,
+            obj5NSUUIDInst, obj6NSUUIDCls, obj7RTICls,
+        ])
+
+        let skVersion  = w.addString("$version")
+        let skArchiver = w.addString("$archiver")
+        let skTop      = w.addString("$top")
+        let skObjects  = w.addString("$objects")
+        let svArchiver = w.addString("RTIKeyedArchiver")
+        let skTextOps  = w.addString("textOperations")
+        let svVersion  = w.addInt(100000)
+
+        let topDict  = w.addDict([(skTextOps, w.addUID(1))])
+        let rootDict = w.addDict([
+            (skVersion,  svVersion),
+            (skArchiver, svArchiver),
+            (skTop,      topDict),
+            (skObjects,  objsArray),
+        ])
+
+        return w.build(topObject: rootDict)
+    }
+
+    /// Extract the current text content from a `_tiD` binary plist.
+    /// Follows path: $top → documentState → docSt → contextBeforeInput
+    public static func extractCurrentText(from tiD: Data) -> String? {
+        guard let plist = try? PropertyListSerialization.propertyList(from: tiD,
+                                                                       format: nil) as? [String: Any],
+              let objects = plist["$objects"] as? [Any],
+              let top     = plist["$top"]     as? [String: Any] else { return nil }
+
+        func resolve(_ element: Any) -> Any {
+            if let idx = uidIndex(element), idx < objects.count {
+                return objects[idx]
+            }
+            return element
+        }
+
+        guard let docStateRef = top["documentState"],
+              let docStateDict = resolve(docStateRef) as? [String: Any],
+              let docStRef = docStateDict["docSt"],
+              let docStDict = resolve(docStRef) as? [String: Any],
+              let contextRef = docStDict["contextBeforeInput"],
+              let text = resolve(contextRef) as? String else { return nil }
+
+        return text
+    }
 }

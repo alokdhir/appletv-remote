@@ -6,9 +6,12 @@ import AppleTVLogging
 ///
 /// UNUserNotificationCenter is non-functional for ad-hoc signed apps
 /// (UNErrorDomain Code=1). Instead we use two mechanisms:
-///   1. osascript `display notification` — fires immediately, no signing required,
-///      appears attributed to "Script Editor". No click action.
-///   2. NSApp.requestUserAttention — bounces the dock icon as a secondary signal.
+///   1. terminal-notifier (if found at /opt/homebrew/bin/terminal-notifier) —
+///      shows a proper macOS notification attributed to AppleTVRemote; clicking
+///      it focuses the app. Install with: brew install terminal-notifier
+///   2. osascript `display notification` fallback — works without any extra
+///      install but appears attributed to "Script Editor" with no click action.
+///   3. NSApp.requestUserAttention — bounces the dock icon as a secondary signal.
 ///
 /// Dock icon click (applicationShouldHandleReopen) opens the keyboard sheet
 /// directly when keyboardActive is true.
@@ -21,6 +24,9 @@ final class KeyboardNotificationManager: NSObject {
         "com.adhir.appletv-remote.openKeyboardSheet"
     )
 
+    private static let terminalNotifierPath = "/opt/homebrew/bin/terminal-notifier"
+    private static let bundleID = "com.adhir.appletv-remote"
+
     private var attentionRequestToken: Int = -1
     private var notified = false
 
@@ -28,7 +34,7 @@ final class KeyboardNotificationManager: NSObject {
 
     // MARK: - Public API
 
-    /// Send an osascript notification and bounce the dock icon.
+    /// Send a notification and bounce the dock icon.
     /// Idempotent — only fires once until resetNotify() is called.
     func notify(deviceName: String) {
         DispatchQueue.main.async {
@@ -46,12 +52,30 @@ final class KeyboardNotificationManager: NSObject {
             }
             self.notified = true
 
-            // osascript notification — works without signing, appears immediately.
-            let script = "display notification \"Click the dock icon to type\" with title \"\(deviceName) wants keyboard input\""
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            task.arguments = ["-e", script]
-            try? task.run()
+            let title = "\(deviceName) wants keyboard input"
+            let body  = "Click to type"
+
+            if FileManager.default.isExecutableFile(atPath: Self.terminalNotifierPath) {
+                // terminal-notifier: proper notification attributed to our app;
+                // clicking it activates AppleTVRemote. -sender fakes the sender
+                // so our icon appears and clicking opens our app.
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: Self.terminalNotifierPath)
+                task.arguments = [
+                    "-title",   title,
+                    "-message", body,
+                    "-sender",  Self.bundleID,
+                    "-group",   "keyboard-input",
+                ]
+                try? task.run()
+            } else {
+                // Fallback: osascript — no signing required, but opens Script Editor on click.
+                let script = "display notification \"\(body)\" with title \"\(title)\""
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                task.arguments = ["-e", script]
+                try? task.run()
+            }
 
             // Also bounce the dock icon as a secondary visual cue.
             if self.attentionRequestToken == -1 {
@@ -79,3 +103,4 @@ final class KeyboardNotificationManager: NSObject {
         }
     }
 }
+
