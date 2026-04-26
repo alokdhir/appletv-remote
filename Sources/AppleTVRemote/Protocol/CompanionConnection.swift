@@ -118,7 +118,7 @@ final class CompanionConnection: ObservableObject {
         default: return
         }
         userInitiatedDisconnect = false
-        state = .waking
+        state = .connecting
         currentDevice = device
 
         guard let host = device.host, let port = device.port else {
@@ -136,14 +136,17 @@ final class CompanionConnection: ObservableObject {
             if reachable {
                 let s = self
                 await MainActor.run {
-                    guard let conn = s, conn.state == .waking else { return }
-                    conn.state = .disconnected
+                    guard let conn = s, conn.state == .connecting else { return }
                     conn.connect(to: device)
                 }
                 return
             }
 
-            // Slow path: device is off (or sleeping). Send WoL then poll.
+            // Slow path: device is off (or sleeping). Show waking UI, send WoL.
+            await MainActor.run { [weak self] in
+                guard let self, self.state == .connecting else { return }
+                self.state = .waking
+            }
             if let mac { try? WakeOnLAN.send(mac: mac, targetIP: host) }
 
             // Poll every 3 s for up to 60 s for the Companion port to open.
@@ -171,7 +174,6 @@ final class CompanionConnection: ObservableObject {
                     await MainActor.run {
                         guard let conn = s3, conn.state == .waking else { return }
                         conn.sendWakeOnConnect = true
-                        conn.state = .disconnected
                         conn.connect(to: device)
                     }
                     return
@@ -192,7 +194,6 @@ final class CompanionConnection: ObservableObject {
             await MainActor.run {
                 guard let conn = s4, conn.state == .waking else { return }
                 conn.sendWakeOnConnect = true
-                conn.state = .disconnected
                 conn.connect(to: device)
             }
         }
@@ -264,9 +265,10 @@ final class CompanionConnection: ObservableObject {
     }
 
     func connect(to device: AppleTVDevice) {
-        // Accept from `.disconnected` or `.error` — see wakeAndConnect for why.
+        // Accept from `.disconnected`, `.connecting` (fast-path from wakeAndConnect),
+        // `.waking` (slow-path after WoL), or `.error`.
         switch state {
-        case .disconnected, .error: break
+        case .disconnected, .connecting, .waking, .error: break
         default: return
         }
         userInitiatedDisconnect = false

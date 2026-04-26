@@ -8,12 +8,17 @@ struct ContentView: View {
     @State private var previousSelectedID: String?
     @AppStorage("com.adhir.appletv-remote.lastDeviceID") private var lastDeviceID = ""
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
+    @State private var animateSidebar = false
+    @State private var deviceRestored = false
 
     /// When no device is selected the statusBar (which owns the sidebar toggle)
     /// isn't visible, so we pin the sidebar open — otherwise the user can't
     /// get it back. The collapsed preference is still remembered.
+    /// Before device selection is restored, use sidebarCollapsed directly so
+    /// we start in the right visual state without a startup animation.
     private var effectivelyCollapsed: Bool {
-        sidebarCollapsed && selectedDevice != nil
+        if !deviceRestored { return sidebarCollapsed }
+        return sidebarCollapsed && selectedDevice != nil
     }
 
     var body: some View {
@@ -46,9 +51,16 @@ struct ContentView: View {
                minHeight: 480,
                idealHeight: 620,
                maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.22), value: effectivelyCollapsed)
+        .animation(animateSidebar ? .easeInOut(duration: 0.22) : nil, value: effectivelyCollapsed)
         .onAppear {
             discovery.startDiscovery()
+            // After a short delay, switch to the live effectivelyCollapsed logic
+            // (which pins sidebar open when no device is selected). The delay
+            // allows device restore to complete without a startup animation.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                deviceRestored = true
+                animateSidebar = true
+            }
         }
         .onChange(of: selectedDevice) { newDevice in
             if let id = newDevice?.id { lastDeviceID = id }

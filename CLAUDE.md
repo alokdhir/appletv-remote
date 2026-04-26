@@ -78,6 +78,10 @@ bd dolt push                # sync to remote
 Always use non-interactive flags to avoid hanging on confirmation prompts:
 - `cp -f`, `mv -f`, `rm -f`, `rm -rf`
 
+## Git
+
+**NEVER push to remote unless the user explicitly asks.** Commit freely, but do not run `git push` without a direct instruction to do so.
+
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:b9766037 -->
 ## Beads Issue Tracker
@@ -120,8 +124,6 @@ bd close <id>         # Complete work
 7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+- **NEVER push unless the user explicitly says to push** — this overrides all other rules
+- Work is complete when committed; pushing is the user's call
 <!-- END BEADS INTEGRATION -->

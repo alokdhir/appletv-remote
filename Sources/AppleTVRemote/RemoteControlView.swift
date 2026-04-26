@@ -17,6 +17,7 @@ struct RemoteControlView: View {
     @FocusState private var pinFocused: Bool
     @FocusState private var keyboardInputFocused: Bool
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
+    @State private var readyToShowState = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +45,9 @@ struct RemoteControlView: View {
                 } else {
                     remoteLayout
                 }
+            } else if !readyToShowState {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 switch connection.state {
                 case .disconnected:
@@ -65,11 +69,20 @@ struct RemoteControlView: View {
                     }
                 case .awaitingPairingPin:
                     pairingView
-                case .connected:
-                    remoteLayout
+                case .connected, .connecting, .waking:
+                    // Transitional — hasEverConnected will flip and take over shortly.
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .error(let msg):
                     errorView(msg)
                 }
+            }
+        }
+        .onAppear {
+            // Delay showing connection state UI so the initial connecting/error
+            // flash doesn't appear during app launch.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                readyToShowState = true
             }
         }
         .sheet(isPresented: $showKeyboardInput, onDismiss: {
