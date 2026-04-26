@@ -35,6 +35,8 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
   brew install terminal-notifier
   ```
 
+  > **Note:** The first time a notification fires, macOS will open System Settings → Notifications and ask you to explicitly allow terminal-notifier to send notifications. Do that once and notifications will work from then on.
+
 ## Building
 
 ### Swift (recommended — builds everything)

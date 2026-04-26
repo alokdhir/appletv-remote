@@ -30,6 +30,9 @@ final class KeyboardNotificationManager: NSObject {
     private var attentionRequestToken: Int = -1
     private var notified = false
 
+    /// True if a notification was sent and the user hasn't dismissed/reset it yet.
+    var wasNotified: Bool { notified }
+
     private override init() { super.init() }
 
     // MARK: - Public API
@@ -56,16 +59,14 @@ final class KeyboardNotificationManager: NSObject {
             let body  = "Click to type"
 
             if FileManager.default.isExecutableFile(atPath: Self.terminalNotifierPath) {
-                // terminal-notifier: proper notification attributed to our app;
-                // clicking it activates AppleTVRemote. -sender fakes the sender
-                // so our icon appears and clicking opens our app.
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: Self.terminalNotifierPath)
                 task.arguments = [
-                    "-title",   title,
-                    "-message", body,
-                    "-sender",  Self.bundleID,
-                    "-group",   "keyboard-input",
+                    "-title",    title,
+                    "-message",  body,
+                    "-activate", Self.bundleID,
+                    "-appIcon",  "/Applications/AppleTVRemote.app/Contents/Resources/AppIcon.icns",
+                    "-group",    "keyboard-input",
                 ]
                 try? task.run()
             } else {

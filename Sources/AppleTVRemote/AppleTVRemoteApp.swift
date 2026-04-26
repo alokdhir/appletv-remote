@@ -123,5 +123,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Fires when app is activated from outside (e.g. terminal-notifier click).
+        // Only open the keyboard sheet if we previously sent a notification
+        // (notified flag is set) — avoids spurious opens on normal activation.
+        guard KeyboardNotificationManager.shared.wasNotified,
+              connection?.keyboardActive == true else { return }
+        KeyboardNotificationManager.shared.cancelAttention()
+        NotificationCenter.default.post(
+            name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
+    }
+
     weak var connection: CompanionConnection?
 }
