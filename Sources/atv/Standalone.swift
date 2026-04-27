@@ -235,7 +235,7 @@ final class StandaloneSession {
     /// which are only useful for long-lived sessions).
     func startSession() throws {
         let t1 = nextTxn()
-        try sendEncrypted(OPACK.encodeSystemInfo(clientID: creds.clientID, rpID: creds.rpID, name: creds.name, txn: t1))
+        try sendEncrypted(OPACK.encodeSystemInfo(clientID: creds.clientID, name: creds.name, txn: t1))
         let t2 = nextTxn()
         try sendEncrypted(OPACK.encodeTouchStart(txn: t2))
         let t3 = nextTxn()
@@ -257,7 +257,7 @@ final class StandaloneSession {
             if trace { FileHandle.standardError.write(Data("← \(label) ← \(dictPreview(resp))\n".utf8)) }
             return resp
         }
-        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, rpID: creds.rpID, name: creds.name, txn: nextTxn()))
+        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, name: creds.name, txn: nextTxn()))
         _ = try step("_touchStart",   OPACK.encodeTouchStart(txn: nextTxn()))
         _ = try step("_sessionStart", OPACK.encodeSessionStart(txn: nextTxn(), localSID: UInt32.random(in: 0..<UInt32.max)))
         _ = try step("_tiStart",      OPACK.encodeTextInputStart(txn: nextTxn()))

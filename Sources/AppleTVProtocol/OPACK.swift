@@ -158,7 +158,7 @@ public enum OPACK {
     }
 
     /// Encode `_systemInfo` request — tells the ATV who we are.
-    public static func encodeSystemInfo(clientID: String, rpID: String, name: String, txn: UInt32) -> Data {
+    public static func encodeSystemInfo(clientID: String, name: String, txn: UInt32) -> Data {
         pack([
             "_i": "_systemInfo",
             "_t": 2,

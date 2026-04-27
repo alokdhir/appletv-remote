@@ -322,7 +322,9 @@ final class IPCServer {
                     let ipcApps = cached.map { IPCApp(id: $0.id, name: $0.name) }
                     client.send(.response(IPCResponse(id: req.id, ok: true, apps: ipcApps)))
                 } else {
-                    // Not yet fetched — trigger a fetch and wait up to 4s
+                    // Not yet fetched — trigger a fetch. fetchApps() carries
+                    // its own 5s DispatchWorkItem timeout that propagates a
+                    // .failure into this completion if the ATV never replies.
                     let reqID = req.id
                     connection.fetchApps { result in
                         switch result {

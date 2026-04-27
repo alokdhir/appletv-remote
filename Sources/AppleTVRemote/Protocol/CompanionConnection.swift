@@ -651,15 +651,13 @@ final class CompanionConnection: ObservableObject {
             return
         }
         let clientID = stored.clientID
-        let rpID     = stored.rpID
-        let name     = stored.name
         // The ATV's Companion handshake expects all five of these messages,
         // in order, before it considers the session established. Skipping
         // `_touchStart` or `_tiStart` leaves the session half-open and the
         // ATV closes the socket after ~35 s. Mirrors pyatv's CompanionAPI
         // setup in api.py:151-158.
         let txn1 = txnCounter; txnCounter &+= 1
-        sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, rpID: rpID, name: stored.name, txn: txn1))
+        sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, name: stored.name, txn: txn1))
 
         let txn2 = txnCounter; txnCounter &+= 1
         sendEncrypted(OPACK.encodeTouchStart(txn: txn2))
