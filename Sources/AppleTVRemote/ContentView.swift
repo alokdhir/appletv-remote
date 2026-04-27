@@ -1,6 +1,24 @@
 import SwiftUI
 import AppleTVProtocol
 
+/// Layout constants shared between the body's `.frame(width: ...)` calls and
+/// the window-resize math in the sidebar-toggle handler. Keeping these in one
+/// place prevents the two from drifting (e.g. the previous 221 magic number
+/// was 220 sidebar + 1 divider point — if either side changed without the
+/// other, every toggle would push the window by the difference).
+enum SidebarLayout {
+    /// Width of the device list column.
+    static let listWidth: CGFloat = 220
+    /// Width of the SwiftUI Divider between sidebar and content.
+    static let dividerWidth: CGFloat = 1
+    /// Total horizontal space the sidebar consumes (list + divider).
+    static var totalWidth: CGFloat { listWidth + dividerWidth }
+    /// Minimum content-area width (the right pane's minWidth).
+    static let contentMinWidth: CGFloat = 300
+    /// Window's ideal width with sidebar visible.
+    static var expandedIdealWidth: CGFloat { contentMinWidth + totalWidth }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var discovery:  DeviceDiscovery
     @EnvironmentObject private var connection: CompanionConnection
@@ -25,7 +43,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             if !effectivelyCollapsed {
                 DeviceListView(selectedDevice: $selectedDevice)
-                    .frame(width: 220)
+                    .frame(width: SidebarLayout.listWidth)
                     .transition(.move(edge: .leading).combined(with: .opacity))
 
                 Divider()
@@ -34,10 +52,10 @@ struct ContentView: View {
 
             if let device = selectedDevice {
                 RemoteControlView(device: device, connection: connection)
-                    .frame(minWidth: 300)
+                    .frame(minWidth: SidebarLayout.contentMinWidth)
             } else {
                 placeholderView
-                    .frame(minWidth: 300)
+                    .frame(minWidth: SidebarLayout.contentMinWidth)
             }
         }
         // idealWidth/idealHeight — .windowResizability(.contentSize) uses
@@ -45,8 +63,10 @@ struct ContentView: View {
         // keeping the window resizable (min…max range) so edge-hover resize
         // cursors still work. A plain minWidth with no maxWidth would let
         // the HStack expand to full screen width on open.
-        .frame(minWidth: effectivelyCollapsed ? 300 : 521,
-               idealWidth: effectivelyCollapsed ? 300 : 521,
+        .frame(minWidth: effectivelyCollapsed ? SidebarLayout.contentMinWidth
+                                              : SidebarLayout.expandedIdealWidth,
+               idealWidth: effectivelyCollapsed ? SidebarLayout.contentMinWidth
+                                                : SidebarLayout.expandedIdealWidth,
                maxWidth: .infinity,
                minHeight: 480,
                idealHeight: 620,
@@ -83,13 +103,19 @@ struct ContentView: View {
         .onChange(of: effectivelyCollapsed) { collapsed in
             guard let window = MenuBarController.shared.mainWindow else { return }
             let currentFrame = window.frame
-            let sidebarWidth: CGFloat = 221  // 220 sidebar + 1 divider
-            let delta: CGFloat = collapsed ? -sidebarWidth : sidebarWidth
-            // Grow/shrink from the left edge — keep right edge fixed
+            // Anchor the right edge: snapshot it before the resize so any
+            // discrepancy between SidebarLayout.totalWidth and the actual
+            // rendered sidebar width can't drift the window over repeated
+            // toggles. The width changes by ±totalWidth; x is computed
+            // from the snapshotted right edge.
+            let rightEdge = currentFrame.maxX
+            let delta = collapsed ? -SidebarLayout.totalWidth : SidebarLayout.totalWidth
+            let targetWidth = max(SidebarLayout.contentMinWidth,
+                                  currentFrame.width + delta)
             let newFrame = NSRect(
-                x: currentFrame.origin.x - delta,
+                x: rightEdge - targetWidth,
                 y: currentFrame.origin.y,
-                width: max(300, currentFrame.width + delta),
+                width: targetWidth,
                 height: currentFrame.height
             )
             NSAnimationContext.runAnimationGroup { ctx in

@@ -406,6 +406,7 @@ private struct KeyCatcher: NSViewRepresentable {
         let v = KeyCatcherView()
         v.onCommand = onCommand
         v.onShowApps = onShowApps
+        v.onBackspace = onBackspace
         return v
     }
 
