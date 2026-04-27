@@ -62,10 +62,14 @@ final class CompanionConnection: ObservableObject {
     private var keepaliveTimer: DispatchSourceTimer?
 
     // Set to true when connect() was initiated via wakeAndConnect() so we
-    // auto-send the Wake HID command after the session is established.
+    // auto-send a Menu HID press after the session is established. Menu is
+    // what actually drives HDMI-CEC TV power-on; the dedicated Wake keycode
+    // (HID 13) does not, nor do Up/Down.
     private var sendWakeOnConnect = false
 
-    /// Wake the device and send a Wake HID command once connected (HDMI-CEC TV power-on).
+    /// Wake the device, then once connected fire a Menu HID press to drive
+    /// HDMI-CEC TV power-on. (Naming is historical — kept "PowerOn" because
+    /// that's the user-visible behaviour; it's no longer literally a Wake.)
     func wakeAndPowerOn(to device: AppleTVDevice) {
         sendWakeOnConnect = true
         wakeAndConnect(to: device)
@@ -839,9 +843,10 @@ final class CompanionConnection: ObservableObject {
                 if sendWakeOnConnect {
                     sendWakeOnConnect = false
                     // Small delay to let the session handshake complete before
-                    // sending the Wake HID event — triggers HDMI-CEC TV power-on
+                    // sending the Menu HID event — triggers HDMI-CEC TV power-on.
+                    // Wake keycode (13) does not reliably trigger CEC; Menu does.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        self?.send(.wake)
+                        self?.send(.menu)
                     }
                 }
             } catch {

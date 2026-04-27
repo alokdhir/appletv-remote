@@ -66,7 +66,7 @@ public enum RemoteCommand {
     case home
     case playPause
     case volumeUp, volumeDown
-    case wake   // power on — also triggers HDMI-CEC TV power-on
+    case wake   // power on the ATV (does NOT drive HDMI-CEC TV power-on; see below)
     case sleep  // power off
 
     /// Companion protocol HID keycode for this command.
@@ -88,8 +88,13 @@ public enum RemoteCommand {
     }
 
     /// True if this command should be sent as a single "button up" event only,
-    /// rather than a down+up pair.  The Companion protocol requires Wake/Sleep
-    /// to be sent as a release event to trigger the power/CEC action.
+    /// rather than a down+up pair. The Companion protocol triggers Wake/Sleep
+    /// on the release edge — pyatv's CompanionAPI does the same.
+    ///
+    /// Note: empirically, neither Wake (release-only) nor Up/Down trigger
+    /// HDMI-CEC TV power-on; only "real" button presses like Menu do. Live
+    /// CEC power-on for the ATV-as-WoL-target uses `.menu` from the
+    /// CompanionConnection wake flow, not `.wake`.
     public var sendReleaseOnly: Bool {
         switch self {
         case .wake, .sleep: return true
