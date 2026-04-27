@@ -18,6 +18,7 @@ final class WindowHider: NSObject, NSWindowDelegate {
 /// it ever appears on screen (avoiding the startup flash), and to configure
 /// translucency so the sibling NSVisualEffectView background shows through.
 class WindowSetupView: NSView {
+    private var observers: [NSObjectProtocol] = []
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
@@ -62,6 +63,20 @@ class WindowSetupView: NSView {
         let collapsed = UserDefaults.standard.bool(forKey: "com.adhir.appletv-remote.sidebarCollapsed")
         window.setContentSize(NSSize(width: collapsed ? 300 : 520, height: 620))
 
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak window] _ in
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                window?.animator().alphaValue = 1.0
+            }
+        })
+        observers.append(nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak window] _ in
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                window?.animator().alphaValue = 0.8
+            }
+        })
+
         // Default true: hide window on startup so CLI-launched app doesn't steal
         // focus, but the window is still created so dock-click can surface it.
         let hide = UserDefaults.standard.object(forKey: "com.adhir.appletv-remote.hideWindowAtStartup") == nil
@@ -75,6 +90,10 @@ class WindowSetupView: NSView {
             window.orderOut(nil)
             window.alphaValue = 1
         }
+    }
+
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 }
 
