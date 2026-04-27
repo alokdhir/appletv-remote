@@ -314,6 +314,11 @@ private struct AppCell: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .id("\(app.id)-\(iconCache.version)")
+        // No `.id` dependency on iconCache.version: that would change the
+        // SwiftUI identity on every fetch tick (~50 during the initial
+        // refresh) and force every visible cell to be torn down + rebuilt.
+        // Body re-evaluation through @ObservedObject is enough — when a
+        // freshly-cached icon lands, iconCache.icon(for:) returns the new
+        // image and the Image view redraws in place.
     }
 }

@@ -12,7 +12,11 @@ final class AppIconCache: ObservableObject {
 
     static let shared = AppIconCache()
 
-    /// Fires when any icon is newly cached — consumers can observe to refresh UI.
+    /// Bumps when any icon is newly cached. Observers (e.g. AppLauncherView)
+    /// re-evaluate their body and call `icon(for:)` again to pick up the
+    /// fresh bytes — do NOT bake this into a SwiftUI `.id(...)` modifier;
+    /// that would force every visible cell to be discarded and rebuilt on
+    /// every fetch tick rather than letting bodies update in place.
     @Published var version: Int = 0
 
     private let cacheDir: URL
