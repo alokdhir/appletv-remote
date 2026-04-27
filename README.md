@@ -118,6 +118,29 @@ atv --standalone apps
 atv --standalone --device "Living Room" l
 ```
 
+## Keyboard Controls
+
+### Remote control pane
+
+| Key | Action |
+|-----|--------|
+| `↑ ↓ ← →` | D-pad up / down / left / right |
+| `Return` | Select (D-pad centre) |
+| `M` | Menu / Back |
+| `H` | Home |
+| `Space` or `P` | Play / Pause |
+| `A` | Open app launcher |
+| `⌫ Backspace` | Delete last character _(when Apple TV text field is active)_ |
+
+### App launcher pane
+
+| Key | Action |
+|-----|--------|
+| `↑ ↓ ← →` | Navigate app grid |
+| `Return` | Launch selected app |
+| `Tab` | Focus search field |
+| `R` | Return to remote |
+
 ## Credential Storage
 
 Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are stored as JSON in:
