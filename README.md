@@ -7,6 +7,7 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 - **Menu bar app** — lives in the menu bar; popover remote for quick access
 - **Main window** — collapsible device sidebar + remote control pane with D-pad, playback, volume, now-playing
 - **App launcher** — browse and launch apps installed on the Apple TV
+- **Keyboard text input** — type into active Apple TV text fields from the Mac
 - **`atv` CLI** — scriptable control from the terminal or shell scripts
 - **Auto-reconnect** — reconnects automatically when the Apple TV becomes reachable
 - **Keyboard shortcuts** — `A` to open app grid, `R` to return to remote, arrow keys to navigate apps
