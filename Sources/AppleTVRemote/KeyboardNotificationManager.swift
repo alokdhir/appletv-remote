@@ -5,10 +5,10 @@ import AppleTVLogging
 /// Manages keyboard-input notifications for Apple TV remote requests.
 ///
 /// UNUserNotificationCenter is non-functional for ad-hoc signed apps
-/// (UNErrorDomain Code=1). Instead we use two mechanisms:
-///   1. terminal-notifier (if found at /opt/homebrew/bin/terminal-notifier) —
-///      shows a proper macOS notification attributed to AppleTVRemote; clicking
-///      it focuses the app. Install with: brew install terminal-notifier
+/// (UNErrorDomain Code=1). Instead we use three mechanisms:
+///   1. terminal-notifier (Apple-silicon or Intel Homebrew prefix) — shows a
+///      proper macOS notification attributed to AppleTVRemote; clicking it
+///      focuses the app. Install with: brew install terminal-notifier
 ///   2. osascript `display notification` fallback — works without any extra
 ///      install but appears attributed to "Script Editor" with no click action.
 ///   3. NSApp.requestUserAttention — bounces the dock icon as a secondary signal.
@@ -24,8 +24,24 @@ final class KeyboardNotificationManager: NSObject {
         "com.adhir.appletv-remote.openKeyboardSheet"
     )
 
-    private static let terminalNotifierPath = "/opt/homebrew/bin/terminal-notifier"
-    private static let bundleID = "com.adhir.appletv-remote"
+    /// Standard Homebrew install paths for `terminal-notifier`. Apple silicon
+    /// uses `/opt/homebrew`, Intel uses `/usr/local`. First executable wins.
+    private static let terminalNotifierCandidates = [
+        "/opt/homebrew/bin/terminal-notifier",
+        "/usr/local/bin/terminal-notifier",
+    ]
+
+    /// Resolved at first-use; nil means not installed and we'll fall back to osascript.
+    private static var terminalNotifierPath: String? {
+        terminalNotifierCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// Bundle identifier of this app — used as terminal-notifier's `-activate`
+    /// target so a click brings AppleTVRemote forward. Pulled live from
+    /// Info.plist so changing the bundle ID there keeps this in sync.
+    private static var bundleID: String {
+        Bundle.main.bundleIdentifier ?? "com.adhir.appletv-remote"
+    }
 
     private var attentionRequestToken: Int = -1
     private var notified = false
@@ -58,12 +74,12 @@ final class KeyboardNotificationManager: NSObject {
             let title = "\(deviceName) wants keyboard input"
             let body  = "Click to type"
 
-            if FileManager.default.isExecutableFile(atPath: Self.terminalNotifierPath) {
+            if let notifierPath = Self.terminalNotifierPath {
                 let iconPath = Bundle.main.resourceURL?
                     .appendingPathComponent("AppIcon.icns").path
                     ?? "/Applications/AppleTVRemote.app/Contents/Resources/AppIcon.icns"
                 let task = Process()
-                task.executableURL = URL(fileURLWithPath: Self.terminalNotifierPath)
+                task.executableURL = URL(fileURLWithPath: notifierPath)
                 task.arguments = [
                     "-title",    title,
                     "-message",  body,
@@ -107,4 +123,3 @@ final class KeyboardNotificationManager: NSObject {
         }
     }
 }
-

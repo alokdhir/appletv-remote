@@ -92,6 +92,15 @@ struct AppleTVRemoteApp: App {
 // MARK: - App delegate
 
 /// Keeps the app alive when all windows close. Without this, SwiftUI's default
+/// Settle delay used after first appear to suppress visual flashes from
+/// transient state (sidebar reflow, connection state churn). Long enough
+/// that device restore + the first round-trip can complete; short enough
+/// that the user just sees a single ProgressView, not a beat of nothing.
+/// Centralised here so the three on-appear timers stay in sync.
+enum LaunchSettle {
+    static let delay: TimeInterval = 0.5
+}
+
 /// `applicationShouldTerminateAfterLastWindowClosed == true` terminates the
 /// process whenever the user closes a secondary window (e.g. the standard
 /// About panel) while the main window is hidden — since the menu-bar status

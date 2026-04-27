@@ -81,7 +81,7 @@ struct RemoteControlView: View {
         .onAppear {
             // Delay showing connection state UI so the initial connecting/error
             // flash doesn't appear during app launch.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + LaunchSettle.delay) {
                 readyToShowState = true
             }
         }

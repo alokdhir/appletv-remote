@@ -54,10 +54,11 @@ struct ContentView: View {
         .animation(animateSidebar ? .easeInOut(duration: 0.22) : nil, value: effectivelyCollapsed)
         .onAppear {
             discovery.startDiscovery()
-            // After a short delay, switch to the live effectivelyCollapsed logic
-            // (which pins sidebar open when no device is selected). The delay
-            // allows device restore to complete without a startup animation.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // After the launch-settle window, switch to the live
+            // effectivelyCollapsed logic (which pins sidebar open when no
+            // device is selected) — the delay lets device restore complete
+            // without a startup animation.
+            DispatchQueue.main.asyncAfter(deadline: .now() + LaunchSettle.delay) {
                 deviceRestored = true
                 animateSidebar = true
             }
