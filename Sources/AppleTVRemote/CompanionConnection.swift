@@ -1,0 +1,607 @@
+import Foundation
+import Darwin
+import AppleTVLogging
+import AppleTVProtocol
+
+/// Manages a connection to an Apple TV via the Companion protocol (_companion-link._tcp).
+///
+/// Uses raw BSD sockets (bypasses NWConnection TCC restrictions on macOS 14+).
+/// Writes: Darwin.write() on writeQueue.
+/// Reads:  blocking Darwin.read() loop on readQueue.
+///
+/// Connection flow:
+///   First connection (no stored credentials):
+///     TCP → PS_Start M1 → PS_Next M2 (show PIN) → M3 → M4 → M5 → M6 → session
+///   Subsequent connections (stored credentials):
+///     TCP → PV_Start M1 → PV_Next M2 → M3 → M4 → session
+///   After session:
+///     E_OPACK frames (ChaCha20-Poly1305 encrypted) for commands and events
+@MainActor
+final class CompanionConnection: ObservableObject {
+    @Published var state: ConnectionState = .disconnected
+
+    private var connectionEpoch: Int = 0
+    private let writeQueue = DispatchQueue(label: "companion.write", qos: .userInitiated)
+    private let readQueue  = DispatchQueue(label: "companion.read",  qos: .userInitiated)
+    private let credentialStore = CredentialStore()
+    @Published var currentDevice: AppleTVDevice?
+
+    // Session encryption — keys installed by PairingFlow after pair-verify.
+    private let transport = EncryptedFrameTransport()
+
+    // Pairing state machine — pair-setup (SRP) and pair-verify (ECDH).
+    private lazy var pairingFlow = PairingFlow(delegate: makePairingDelegate())
+
+    // Live session — non-nil from the moment the TCP connection is made until
+    // disconnect(). Replaced on each reconnect.
+    private var session: CompanionSession?
+
+    // Set to true when connect() was initiated via wakeAndConnect() so we
+    // auto-send a Menu HID press after the session is established.
+    private var sendWakeOnConnect = false
+
+    /// Set when the user explicitly tore down the connection (via `disconnect()`).
+    @Published var userInitiatedDisconnect = false
+
+    /// Most recent Now Playing payload the ATV has volunteered via `_iMC`.
+    @Published var nowPlaying: NowPlayingInfo?
+
+    /// Most recent attention state reported by `FetchAttentionState`.
+    @Published var attentionState: Int?
+
+    /// True when the ATV has an active text field waiting for keyboard input.
+    @Published var keyboardActive: Bool = false
+
+    /// Apps available for launch on the ATV, fetched after each session start.
+    @Published var appList: [(id: String, name: String)] = []
+
+    /// Live AirPlay MRP tunnel — provides real-time now-playing pushes.
+    private var airPlayTunnel: AirPlayTunnel.Tunnel?
+    private var lastPlaybackStateTimestamp: Double = 0
+
+    // MARK: - Connect / Disconnect
+
+    func wakeAndPowerOn(to device: AppleTVDevice) {
+        sendWakeOnConnect = true
+        wakeAndConnect(to: device)
+    }
+
+    /// Smart connect: probes the device first (0.3 s TCP timeout).
+    func wakeAndConnect(to device: AppleTVDevice) {
+        switch state {
+        case .disconnected, .error: break
+        default: return
+        }
+        userInitiatedDisconnect = false
+        state = .connecting
+        currentDevice = device
+
+        guard let host = device.host, let port = device.port else {
+            state = .error("Device not yet resolved — try again")
+            return
+        }
+
+        let mac = MACStore.load(for: device.id)
+        guard let mac else {
+            connect(to: device)
+            return
+        }
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 0.3)
+            Log.companion.report("SmartConnect: \(device.name) reachable=\(reachable)")
+
+            if reachable {
+                let s = self
+                await MainActor.run {
+                    guard let conn = s, conn.state == .connecting else { return }
+                    conn.connect(to: device)
+                }
+                return
+            }
+
+            await MainActor.run { [weak self] in
+                guard let self, self.state == .connecting else { return }
+                self.state = .waking
+            }
+            try? WakeOnLAN.send(mac: mac, targetIP: host)
+
+            let deadline = Date().addingTimeInterval(90)
+            var wolSent = 1
+
+            while Date() < deadline {
+                let s1 = self
+                let cancelled = await MainActor.run { s1?.state != .waking }
+                if cancelled { return }
+
+                try? await Task.sleep(for: .seconds(3))
+
+                let s2 = self
+                let stillWaking = await MainActor.run { s2?.state == .waking }
+                if !stillWaking { return }
+
+                if Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 2) {
+                    Log.companion.report("SmartConnect: \(device.name) responded after \(wolSent) WoL packet(s)")
+                    let s3 = self
+                    await MainActor.run {
+                        guard let conn = s3, conn.state == .waking else { return }
+                        conn.sendWakeOnConnect = true
+                        conn.connect(to: device)
+                    }
+                    return
+                }
+
+                wolSent += 1
+                if wolSent % 5 == 0 {
+                    Log.wol.report("WoL: resending (attempt \(wolSent / 5 + 1))")
+                    try? WakeOnLAN.send(mac: mac, targetIP: host)
+                }
+            }
+
+            Log.companion.report("SmartConnect: \(device.name) did not respond in 90 s, trying connect")
+            let s4 = self
+            await MainActor.run {
+                guard let conn = s4, conn.state == .waking else { return }
+                conn.sendWakeOnConnect = true
+                conn.connect(to: device)
+            }
+        }
+    }
+
+    private nonisolated static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
+        let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+
+        var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
+        setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
+        defer { Darwin.close(fd) }
+
+        let boundSrc = PrimaryInterface.bindSourceAddress(fd: fd, logHost: host)
+        if boundSrc == nil {
+            Log.companion.report("isReachableSync: bindSourceAddress returned nil for \(host)")
+        }
+
+        let flags = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+
+        var addr = sockaddr_in()
+        addr.sin_len    = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port   = in_port_t(port).bigEndian
+        inet_pton(AF_INET, host, &addr.sin_addr)
+
+        let result = withUnsafePointer(to: addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        if result == 0 { return true }
+        if errno != EINPROGRESS {
+            Log.companion.report("isReachableSync: connect() returned \(result), errno \(errno) (\(String(cString: strerror(errno))))")
+            return false
+        }
+
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        let ms    = Int32(timeoutSeconds * 1000)
+        let ready = poll(&pfd, 1, ms)
+        if ready <= 0 {
+            Log.companion.report("isReachableSync: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
+            return false
+        }
+
+        var err: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
+        if err != 0 {
+            Log.companion.report("isReachableSync: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
+        }
+        return err == 0
+    }
+
+    func connect(to device: AppleTVDevice) {
+        switch state {
+        case .disconnected, .connecting, .waking, .error: break
+        default: return
+        }
+        userInitiatedDisconnect = false
+        guard let host = device.host, let port = device.port else {
+            state = .error("Device not yet resolved — try again")
+            return
+        }
+        state = .connecting
+        currentDevice = device
+        transport.resetNonces()
+
+        let deviceCopy = device
+        writeQueue.async { [weak self] in
+            var addr = sockaddr_in()
+            addr.sin_len    = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port   = in_port_t(port).bigEndian
+            let inetResult = host.withCString { inet_pton(AF_INET, $0, &addr.sin_addr) }
+            guard inetResult == 1 else {
+                let msg = "inet_pton failed for '\(host)'"
+                DispatchQueue.main.async { self?.state = .error(msg) }
+                return
+            }
+
+            let transientErrnos: Set<Int32> = [EHOSTUNREACH, ENETUNREACH, ETIMEDOUT, ECONNREFUSED, EADDRINUSE]
+            var fd: Int32 = -1
+            var lastErrno: Int32 = 0
+            var lastFailStage = "socket"
+            for attempt in 0..<3 {
+                let trialFD = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+                if trialFD < 0 {
+                    lastErrno = errno
+                    lastFailStage = "socket"
+                    if attempt < 2 {
+                        Log.companion.report("Companion: socket() attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                        Thread.sleep(forTimeInterval: 1)
+                        continue
+                    }
+                    break
+                }
+
+                PrimaryInterface.bindSourceAddress(fd: trialFD,
+                                                   logHost: attempt == 0 ? host : nil)
+
+                let rc = withUnsafePointer(to: addr) { ptr in
+                    ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        Darwin.connect(trialFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
+                if rc == 0 {
+                    fd = trialFD
+                    break
+                }
+
+                lastErrno = errno
+                lastFailStage = "connect"
+                Darwin.close(trialFD)
+                guard transientErrnos.contains(lastErrno), attempt < 2 else { break }
+                Log.companion.report("Companion: connect attempt \(attempt + 1) failed (\(String(cString: strerror(lastErrno)))), retrying in 1 s…")
+                Thread.sleep(forTimeInterval: 1)
+            }
+            guard fd >= 0 else {
+                let msg = "\(lastFailStage)() failed: \(String(cString: strerror(lastErrno)))"
+                DispatchQueue.main.async { self?.state = .error(msg) }
+                return
+            }
+
+            Log.companion.report("Companion: TCP connected to \(host):\(port)")
+
+            var enable: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enable, socklen_t(MemoryLayout<Int32>.size))
+            var idleSec: Int32 = 10
+            setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idleSec, socklen_t(MemoryLayout<Int32>.size))
+
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.connectionEpoch &+= 1
+                let sess = CompanionSession(
+                    fd: fd,
+                    epoch: self.connectionEpoch,
+                    transport: self.transport,
+                    writeQueue: self.writeQueue,
+                    readQueue: self.readQueue
+                )
+                sess.delegate = self
+                self.session = sess
+                sess.start()
+                if self.credentialStore.hasCredentials(for: deviceCopy.id) {
+                    Log.companion.report("Companion: starting pair-verify")
+                    self.startPairVerify(device: deviceCopy)
+                } else {
+                    Log.companion.report("Companion: starting pair-setup")
+                    self.startPairSetup()
+                }
+            }
+        }
+    }
+
+    func disconnect() {
+        userInitiatedDisconnect = true
+        connectionEpoch &+= 1
+        session?.close()
+        session = nil
+        state = .disconnected
+        currentDevice = nil
+        pairingFlow.reset()
+        transport.reset()
+        sendWakeOnConnect = false
+        attentionState = nil
+        keyboardActive = false
+        lastPlaybackStateTimestamp = 0
+        nowPlaying = nil
+        airPlayTunnel?.close()
+        airPlayTunnel = nil
+    }
+
+    // MARK: - Remote Commands (post-session)
+
+    func send(_ command: RemoteCommand) {
+        guard state == .connected else { return }
+        session?.send(command)
+    }
+
+    func sendLongPress(_ command: RemoteCommand, ms: Int = 1000) {
+        guard state == .connected else { return }
+        session?.sendLongPress(command, ms: ms)
+    }
+
+    func sendSwipe(_ direction: SwipeDirection) {
+        guard state == .connected else { return }
+        session?.sendSwipe(direction)
+    }
+
+    func sendText(_ text: String, completion: @escaping (Error?) -> Void) {
+        guard state == .connected else { completion(TextInputError.notConnected); return }
+        guard keyboardActive else { completion(TextInputError.noActiveTextField); return }
+        session?.sendText(text, completion: completion) ?? completion(TextInputError.notConnected)
+    }
+
+    func sendBackspace(completion: @escaping (Error?) -> Void) {
+        guard state == .connected else { completion(TextInputError.notConnected); return }
+        guard keyboardActive else { completion(TextInputError.noActiveTextField); return }
+        session?.sendBackspace(completion: completion) ?? completion(TextInputError.notConnected)
+    }
+
+    func sendClearText(completion: @escaping (Error?) -> Void) {
+        guard state == .connected else { completion(TextInputError.notConnected); return }
+        guard keyboardActive else { completion(TextInputError.noActiveTextField); return }
+        session?.sendClearText(completion: completion) ?? completion(TextInputError.notConnected)
+    }
+
+    func fetchApps(completion: ((Result<[(id: String, name: String)], Error>) -> Void)? = nil) {
+        session?.fetchApps(completion: completion)
+    }
+
+    func launchApp(bundleID: String,
+                   completion: ((Result<Void, Error>) -> Void)? = nil) {
+        guard state == .connected else {
+            completion?(.failure(CompanionError.unexpectedResponse))
+            return
+        }
+        session?.launchApp(bundleID: bundleID, completion: completion)
+    }
+
+    // MARK: - AirPlay MRP
+
+    private func startAirPlayMRP() {
+        guard let device = currentDevice,
+              let host = device.host,
+              let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
+        let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
+        let writeQueue = self.writeQueue
+        writeQueue.async { [weak self] in
+            do {
+                let tunnel = try AirPlayTunnel.open(
+                    host: host,
+                    credentials: creds,
+                    mrpClientID: airPlayClientID,
+                    onMessage: { [weak self] msgData in
+                        guard let update = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
+                            var info = self.nowPlaying ?? NowPlayingInfo()
+                            if let v = update.title       { info.title        = v }
+                            if let v = update.artist      { info.artist       = v }
+                            if let v = update.album       { info.album        = v }
+                            if let v = update.duration    { info.duration     = v }
+                            if let v = update.elapsedTime { info.elapsedTime  = v }
+                            if let v = update.playbackRate {
+                                let ts = update.playbackStateTimestamp ?? 0
+                                if ts >= self.lastPlaybackStateTimestamp {
+                                    self.lastPlaybackStateTimestamp = ts
+                                    info.playbackRate = v
+                                }
+                            }
+                            self.nowPlaying = info
+                        }
+                    }
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.airPlayTunnel = tunnel
+                }
+            } catch {
+                Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")
+            }
+        }
+    }
+
+    // MARK: - Pairing PIN
+
+    func submitPairingPin(_ pin: String) {
+        guard state == .awaitingPairingPin else { return }
+        state = .connecting
+        pairingFlow.submitPin(pin,
+            onSend: { [weak self] m3 in
+                self?.session?.sendFrame(.psNext, payload: OPACK.wrapPsNextData(m3))
+            },
+            onError: { [weak self] msg in
+                self?.state = .error(msg)
+            }
+        )
+    }
+
+    // MARK: - Pair Setup / Verify
+
+    private func startPairSetup() {
+        pairingFlow.startPairSetup()
+    }
+
+    private func startPairVerify(device: AppleTVDevice) {
+        guard let creds = credentialStore.load(deviceID: device.id) else {
+            startPairSetup()
+            return
+        }
+        pairingFlow.startPairVerify(credentials: creds)
+    }
+
+    // MARK: - Pairing delegate factory
+
+    private func makePairingDelegate() -> PairingFlow.Delegate {
+        PairingFlow.Delegate(
+            sendFrame: { [weak self] type, payload in
+                self?.session?.sendFrame(type, payload: payload)
+            },
+            setState: { [weak self] newState in
+                guard let self else { return }
+                self.state = newState
+                if case .connected = newState {
+                    guard let stored = self.credentialStore.load(deviceID: self.currentDevice?.id ?? "") else { return }
+                    self.session?.sendSessionInit(clientID: stored.clientID, name: stored.name)
+                    self.session?.startKeepalive()
+                    self.startAirPlayMRP()
+                    if self.sendWakeOnConnect {
+                        self.sendWakeOnConnect = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                            self?.send(.menu)
+                        }
+                    }
+                }
+            },
+            installKeys: { [weak self] enc, dec in
+                self?.transport.installSessionKeys(encrypt: enc, decrypt: dec)
+            },
+            reconnect: { [weak self] device in
+                self?.disconnect()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.connect(to: device)
+                }
+            },
+            saveCredentials: { [weak self] creds, deviceID in
+                self?.credentialStore.save(credentials: creds, for: deviceID)
+            },
+            deleteCredentials: { [weak self] deviceID in
+                self?.credentialStore.delete(deviceID: deviceID)
+            }
+        )
+    }
+
+    // MARK: - Now Playing merge
+
+    private func mergeNowPlaying(from inner: [String: Any]) {
+        let update = NowPlayingInfo(from: inner)
+        var info = nowPlaying ?? NowPlayingInfo()
+        if let newApp = update.app, newApp != info.app {
+            info.title = nil; info.artist = nil; info.album = nil
+            info.elapsedTime = nil; info.duration = nil; info.playbackRate = nil
+        }
+        if let v = update.title        { info.title        = v }
+        if let v = update.artist       { info.artist       = v }
+        if let v = update.album        { info.album        = v }
+        if let v = update.app          { info.app          = v }
+        if let v = update.elapsedTime  { info.elapsedTime  = v }
+        if let v = update.duration     { info.duration     = v }
+        if let v = update.playbackRate { info.playbackRate = v }
+        info.raw.merge(update.raw) { _, new in new }
+        nowPlaying = info
+        Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
+    }
+}
+
+// MARK: - CompanionSessionDelegate
+
+extension CompanionConnection: CompanionSessionDelegate {
+    func sessionDidUpdateNowPlaying(_ update: CompanionNowPlayingUpdate) {
+        mergeNowPlaying(from: update.inner)
+    }
+
+    func sessionDidChangeKeyboardActive(_ active: Bool, data: Data?) {
+        keyboardActive = active
+        if !active { return }
+    }
+
+    func sessionDidUpdateAttentionState(_ st: Int) {
+        attentionState = st
+    }
+
+    func sessionDidReadError(_ message: String) {
+        keyboardActive = false
+        state = .error(message)
+    }
+
+    func sessionDidClose() {
+        keyboardActive = false
+        state = .disconnected
+    }
+
+    func sessionDidConfirmStart() {
+        if appList.isEmpty { session?.fetchApps() }
+    }
+
+    func sessionDidFetchApps(_ apps: [(id: String, name: String)]) {
+        appList = apps
+        Log.companion.report("Companion: fetched \(apps.count) apps")
+    }
+
+    func sessionDidReceivePairingFrame(_ frame: CompanionFrame) {
+        switch frame.type {
+        case .psNext: pairingFlow.handlePsNext(frame.payload, device: currentDevice!)
+        case .pvNext: pairingFlow.handlePvNext(frame.payload, deviceID: currentDevice?.id ?? "")
+        default: break
+        }
+    }
+}
+
+// MARK: - Now Playing
+
+/// Snapshot of the Apple TV's current media-playback state, as pushed via
+/// Companion `_iMC` event subscription. All fields are optional because tvOS
+/// is inconsistent about which keys populate for which apps — the `raw` map
+/// preserves everything we saw (stringified) so unknown keys stay inspectable.
+public struct NowPlayingInfo: Equatable, Sendable {
+    public var title: String?
+    public var artist: String?
+    public var album: String?
+    /// User-facing app name (e.g. "TV", "Music", "Netflix"). Usually under key
+    /// `clientName` or `displayName` — we check both.
+    public var app: String?
+    public var elapsedTime: Double?
+    public var duration: Double?
+    /// 0.0 = paused, 1.0 = playing at normal speed. Some apps report other rates.
+    public var playbackRate: Double?
+    /// Every key/value we saw, stringified. Useful for debugging and for any
+    /// field we haven't named above yet.
+    public var raw: [String: String]
+
+    public init() {
+        self.title = nil; self.artist = nil; self.album = nil; self.app = nil
+        self.elapsedTime = nil; self.duration = nil; self.playbackRate = nil
+        self.raw = [:]
+    }
+
+    public init(from dict: [String: Any]) {
+        func str(_ keys: String...) -> String? {
+            for k in keys {
+                if let v = dict[k] as? String, !v.isEmpty { return v }
+            }
+            return nil
+        }
+        func num(_ keys: String...) -> Double? {
+            for k in keys {
+                if let v = dict[k] as? Double { return v }
+                if let v = dict[k] as? Int    { return Double(v) }
+                if let v = dict[k] as? String, let d = Double(v) { return d }
+            }
+            return nil
+        }
+        self.title        = str("title", "kMRMediaRemoteNowPlayingInfoTitle")
+        self.artist       = str("artist", "kMRMediaRemoteNowPlayingInfoArtist")
+        self.album        = str("album", "kMRMediaRemoteNowPlayingInfoAlbum")
+        self.app          = str("clientName", "displayName", "bundleIdentifier")
+        self.elapsedTime  = num("elapsedTime", "kMRMediaRemoteNowPlayingInfoElapsedTime")
+        self.duration     = num("duration", "kMRMediaRemoteNowPlayingInfoDuration")
+        self.playbackRate = num("playbackRate", "kMRMediaRemoteNowPlayingInfoPlaybackRate")
+
+        var r: [String: String] = [:]
+        for (k, v) in dict {
+            r[k] = String(describing: v)
+        }
+        self.raw = r
+    }
+}
+
+
