@@ -11,3 +11,6 @@
 .beads/
 AppleTVRemote.xcodeproj/
 .claude/
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key
