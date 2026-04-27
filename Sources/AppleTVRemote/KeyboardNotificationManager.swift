@@ -15,9 +15,9 @@ import AppleTVLogging
 ///
 /// Dock icon click (applicationShouldHandleReopen) opens the keyboard sheet
 /// directly when keyboardActive is true.
-final class KeyboardNotificationManager: NSObject {
+final class KeyboardNotificationManager: NSObject, @unchecked Sendable {
 
-    static let shared = KeyboardNotificationManager()
+    nonisolated(unsafe) static let shared = KeyboardNotificationManager()
 
     /// Posted on the main thread to open the keyboard input sheet.
     static let openKeyboardSheetNotification = Notification.Name(

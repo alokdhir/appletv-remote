@@ -7,29 +7,65 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		018B7307EA5644C6CE60A13D /* com.apple.appleevents.png in Resources */ = {isa = PBXBuildFile; fileRef = FBBA9DF8C26186E76ACA7BAA /* com.apple.appleevents.png */; };
+		0AE5E319BFC0328781486447 /* com.apple.TVPhotos.png in Resources */ = {isa = PBXBuildFile; fileRef = FF54A19A1D55A1C8AFF6B0E0 /* com.apple.TVPhotos.png */; };
+		0EE55D6C7CA30F0A57057B73 /* PopoverActivationGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 033146CEB0BCDAC531A241C7 /* PopoverActivationGuard.swift */; };
+		135F30E2248E1750F7312F68 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D2FE0AE2A2FD628BD91D5F /* MenuBarController.swift */; };
 		1FE6E013046C9DB4B787E784 /* DeviceListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD795F451DD61537F44810E /* DeviceListView.swift */; };
+		230417237D24357F38B801F3 /* com.apple.podcasts.png in Resources */ = {isa = PBXBuildFile; fileRef = F38854F34AB5ACA05B0C554A /* com.apple.podcasts.png */; };
+		23100FE0C8E4D9A738A67482 /* com.apple.TVAppStore.png in Resources */ = {isa = PBXBuildFile; fileRef = 4BE6E796DC1476ECFEDDB679 /* com.apple.TVAppStore.png */; };
 		439C1977607157CCFF28BBD7 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 697023DBDB64775282D57CE8 /* ContentView.swift */; };
 		512A7F66BD725F6F7DC27AD4 /* DeviceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AA527B2B5D01D7A13520C2 /* DeviceDiscovery.swift */; };
+		5E0D08070871AC7127302360 /* AppLauncherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5D1CAEE41DD90CA9209B799 /* AppLauncherView.swift */; };
+		628BD988A0021E61ECFF81A1 /* AppIconCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CF92C46D27334F3D0BAA38 /* AppIconCache.swift */; };
+		65FCE5D6F30673B73BC36D03 /* com.apple.Arcade.png in Resources */ = {isa = PBXBuildFile; fileRef = D0E8203E3B4C142F8AD22801 /* com.apple.Arcade.png */; };
 		7190FBAB75D95648266F850D /* AppleTVRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B7FC32DA2B5E6F9269EC4E /* AppleTVRemoteApp.swift */; };
+		790575010B800CDCE832E7EB /* AutoReconnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FDAC9977ABD2F8B8FDF625 /* AutoReconnector.swift */; };
+		7A966A8C9432E530D01D9257 /* KeyboardNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */; };
+		8B74776E3A1745B16BE85A76 /* IPCServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA0DD35CBD3CDCDB6F14579 /* IPCServer.swift */; };
+		A6985739CD3DC1BB961CFB5D /* com.apple.TVHomeSharing.png in Resources */ = {isa = PBXBuildFile; fileRef = 11F60F8E872A83159EB516E1 /* com.apple.TVHomeSharing.png */; };
 		B7EB06AE04C7299D2414ADF5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200E928EC93A584B2CAB3C30 /* Assets.xcassets */; };
 		BAA90A232D6F4A731B1D4292 /* RemoteControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7DC03D0A656F41898865DC /* RemoteControlView.swift */; };
-		C22B53B59B5DF880BA16388C /* CompanionConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0437B726CD8B8C8B62F4214 /* CompanionConnection.swift */; };
-		C22B53B59B5DF880BA16389A /* IPCServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0437B726CD8B8C8B62F421A /* IPCServer.swift */; };
-		E40A8AECD791492B2FA7D170 /* AppleTVLogging in Frameworks */ = {isa = PBXBuildFile; productRef = 2457F9A5729060F9AAFE6D5D /* AppleTVLogging */; };
-		E40A8AECD791492B2FA7D171 /* AppleTVProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 2457F9A5729060F9AAFE6D5E /* AppleTVProtocol */; };
-		E40A8AECD791492B2FA7D172 /* AppleTVIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 2457F9A5729060F9AAFE6D5F /* AppleTVIPC */; };
+		C332AD54A00B33A6898A8E62 /* com.apple.TVSearch.png in Resources */ = {isa = PBXBuildFile; fileRef = 00EBF2797718AA1292053D92 /* com.apple.TVSearch.png */; };
+		D023A3D14C37D45FCA115430 /* com.apple.TVSettings.png in Resources */ = {isa = PBXBuildFile; fileRef = F89E0E7EC81D5422A1A7543E /* com.apple.TVSettings.png */; };
+		D65EA98EFEEC4F755ECF2B45 /* VisualEffectBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97C3EDA394F0072CCD1E8192 /* VisualEffectBackground.swift */; };
+		DE44080DE17724231BAD91B3 /* WindowManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD585A928C520506C488367E /* WindowManagement.swift */; };
+		DEEE7E3CFB267860762C4B8C /* com.apple.Fitness.png in Resources */ = {isa = PBXBuildFile; fileRef = 4B92F62C9329CB6892800D7E /* com.apple.Fitness.png */; };
+		E40A8AECD791492B2FA7D170 /* BigInt in Frameworks */ = {isa = PBXBuildFile; productRef = 2457F9A5729060F9AAFE6D5D /* BigInt */; };
+		E597CC2AD765750D19E461A0 /* com.apple.TVMusic.png in Resources */ = {isa = PBXBuildFile; fileRef = 1E3E61B61D4693E20F6B5AE4 /* com.apple.TVMusic.png */; };
+		ED1C682ABF7878731C94E701 /* CompanionConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C3649637E9DD7C78B1BCF4 /* CompanionConnection.swift */; };
+		FA0C99C4FD486106DE4D6928 /* com.apple.TVWatchList.png in Resources */ = {isa = PBXBuildFile; fileRef = A0E0F0118964ADA532DC338B /* com.apple.TVWatchList.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		00EBF2797718AA1292053D92 /* com.apple.TVSearch.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVSearch.png; sourceTree = "<group>"; };
+		033146CEB0BCDAC531A241C7 /* PopoverActivationGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverActivationGuard.swift; sourceTree = "<group>"; };
 		0E56EF24F7B53CA48FCF66D5 /* AppleTVRemote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppleTVRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		11F60F8E872A83159EB516E1 /* com.apple.TVHomeSharing.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVHomeSharing.png; sourceTree = "<group>"; };
+		1E3E61B61D4693E20F6B5AE4 /* com.apple.TVMusic.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVMusic.png; sourceTree = "<group>"; };
 		200E928EC93A584B2CAB3C30 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4B92F62C9329CB6892800D7E /* com.apple.Fitness.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.Fitness.png; sourceTree = "<group>"; };
+		4BE6E796DC1476ECFEDDB679 /* com.apple.TVAppStore.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVAppStore.png; sourceTree = "<group>"; };
 		52B7FC32DA2B5E6F9269EC4E /* AppleTVRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVRemoteApp.swift; sourceTree = "<group>"; };
 		5F7DC03D0A656F41898865DC /* RemoteControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteControlView.swift; sourceTree = "<group>"; };
+		61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardNotificationManager.swift; sourceTree = "<group>"; };
 		697023DBDB64775282D57CE8 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7AD795F451DD61537F44810E /* DeviceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceListView.swift; sourceTree = "<group>"; };
+		88FDAC9977ABD2F8B8FDF625 /* AutoReconnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoReconnector.swift; sourceTree = "<group>"; };
 		96AA527B2B5D01D7A13520C2 /* DeviceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiscovery.swift; sourceTree = "<group>"; };
-		C0437B726CD8B8C8B62F4214 /* CompanionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionConnection.swift; sourceTree = "<group>"; };
-		C0437B726CD8B8C8B62F421A /* IPCServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCServer.swift; sourceTree = "<group>"; };
+		97C3EDA394F0072CCD1E8192 /* VisualEffectBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualEffectBackground.swift; sourceTree = "<group>"; };
+		A0E0F0118964ADA532DC338B /* com.apple.TVWatchList.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVWatchList.png; sourceTree = "<group>"; };
+		B9C3649637E9DD7C78B1BCF4 /* CompanionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionConnection.swift; sourceTree = "<group>"; };
+		BCA0DD35CBD3CDCDB6F14579 /* IPCServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPCServer.swift; sourceTree = "<group>"; };
+		C3D2FE0AE2A2FD628BD91D5F /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
+		C4CF92C46D27334F3D0BAA38 /* AppIconCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconCache.swift; sourceTree = "<group>"; };
+		D0E8203E3B4C142F8AD22801 /* com.apple.Arcade.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.Arcade.png; sourceTree = "<group>"; };
+		F38854F34AB5ACA05B0C554A /* com.apple.podcasts.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.podcasts.png; sourceTree = "<group>"; };
+		F5D1CAEE41DD90CA9209B799 /* AppLauncherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLauncherView.swift; sourceTree = "<group>"; };
+		F89E0E7EC81D5422A1A7543E /* com.apple.TVSettings.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVSettings.png; sourceTree = "<group>"; };
+		FBBA9DF8C26186E76ACA7BAA /* com.apple.appleevents.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.appleevents.png; sourceTree = "<group>"; };
+		FD585A928C520506C488367E /* WindowManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowManagement.swift; sourceTree = "<group>"; };
+		FF54A19A1D55A1C8AFF6B0E0 /* com.apple.TVPhotos.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVPhotos.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,9 +73,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E40A8AECD791492B2FA7D170 /* AppleTVLogging in Frameworks */,
-				E40A8AECD791492B2FA7D171 /* AppleTVProtocol in Frameworks */,
-				E40A8AECD791492B2FA7D172 /* AppleTVIPC in Frameworks */,
+				E40A8AECD791492B2FA7D170 /* BigInt in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -54,14 +88,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		527C476BF7CC8B37213B1066 /* Protocol */ = {
-			isa = PBXGroup;
-			children = (
-				C0437B726CD8B8C8B62F4214 /* CompanionConnection.swift */,
-			);
-			path = Protocol;
-			sourceTree = "<group>";
-		};
 		611AF5DDA02954B9B4EC83C2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -73,23 +99,50 @@
 		9245C4BCF9150250890DFE3B /* AppleTVRemote */ = {
 			isa = PBXGroup;
 			children = (
+				C4CF92C46D27334F3D0BAA38 /* AppIconCache.swift */,
+				F5D1CAEE41DD90CA9209B799 /* AppLauncherView.swift */,
 				52B7FC32DA2B5E6F9269EC4E /* AppleTVRemoteApp.swift */,
+				88FDAC9977ABD2F8B8FDF625 /* AutoReconnector.swift */,
+				B9C3649637E9DD7C78B1BCF4 /* CompanionConnection.swift */,
 				697023DBDB64775282D57CE8 /* ContentView.swift */,
 				96AA527B2B5D01D7A13520C2 /* DeviceDiscovery.swift */,
 				7AD795F451DD61537F44810E /* DeviceListView.swift */,
+				BCA0DD35CBD3CDCDB6F14579 /* IPCServer.swift */,
+				61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */,
+				C3D2FE0AE2A2FD628BD91D5F /* MenuBarController.swift */,
+				033146CEB0BCDAC531A241C7 /* PopoverActivationGuard.swift */,
 				5F7DC03D0A656F41898865DC /* RemoteControlView.swift */,
-				C0437B726CD8B8C8B62F421A /* IPCServer.swift */,
-				527C476BF7CC8B37213B1066 /* Protocol */,
+				97C3EDA394F0072CCD1E8192 /* VisualEffectBackground.swift */,
+				FD585A928C520506C488367E /* WindowManagement.swift */,
 				CD205FC70F8D3B2C9A5BE18D /* Resources */,
 			);
 			name = AppleTVRemote;
 			path = Sources/AppleTVRemote;
 			sourceTree = "<group>";
 		};
+		B822A0C7A4B7A3659A593F2C /* AppIcons */ = {
+			isa = PBXGroup;
+			children = (
+				FBBA9DF8C26186E76ACA7BAA /* com.apple.appleevents.png */,
+				D0E8203E3B4C142F8AD22801 /* com.apple.Arcade.png */,
+				4B92F62C9329CB6892800D7E /* com.apple.Fitness.png */,
+				F38854F34AB5ACA05B0C554A /* com.apple.podcasts.png */,
+				4BE6E796DC1476ECFEDDB679 /* com.apple.TVAppStore.png */,
+				11F60F8E872A83159EB516E1 /* com.apple.TVHomeSharing.png */,
+				1E3E61B61D4693E20F6B5AE4 /* com.apple.TVMusic.png */,
+				FF54A19A1D55A1C8AFF6B0E0 /* com.apple.TVPhotos.png */,
+				00EBF2797718AA1292053D92 /* com.apple.TVSearch.png */,
+				F89E0E7EC81D5422A1A7543E /* com.apple.TVSettings.png */,
+				A0E0F0118964ADA532DC338B /* com.apple.TVWatchList.png */,
+			);
+			path = AppIcons;
+			sourceTree = "<group>";
+		};
 		CD205FC70F8D3B2C9A5BE18D /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 				200E928EC93A584B2CAB3C30 /* Assets.xcassets */,
+				B822A0C7A4B7A3659A593F2C /* AppIcons */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -111,9 +164,7 @@
 			);
 			name = AppleTVRemote;
 			packageProductDependencies = (
-				2457F9A5729060F9AAFE6D5D /* AppleTVLogging */,
-				2457F9A5729060F9AAFE6D5E /* AppleTVProtocol */,
-				2457F9A5729060F9AAFE6D5F /* AppleTVIPC */,
+				2457F9A5729060F9AAFE6D5D /* BigInt */,
 			);
 			productName = AppleTVRemote;
 			productReference = 0E56EF24F7B53CA48FCF66D5 /* AppleTVRemote.app */;
@@ -143,7 +194,7 @@
 			mainGroup = 286BC268DC90EE1E8CBF8CDD;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D2D73BB85FFD6953C34CC0A7 /* XCLocalSwiftPackageReference "." */,
+				D2D73BB85FFD6953C34CC0A7 /* XCRemoteSwiftPackageReference "BigInt" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 611AF5DDA02954B9B4EC83C2 /* Products */;
@@ -161,6 +212,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				B7EB06AE04C7299D2414ADF5 /* Assets.xcassets in Resources */,
+				65FCE5D6F30673B73BC36D03 /* com.apple.Arcade.png in Resources */,
+				DEEE7E3CFB267860762C4B8C /* com.apple.Fitness.png in Resources */,
+				23100FE0C8E4D9A738A67482 /* com.apple.TVAppStore.png in Resources */,
+				A6985739CD3DC1BB961CFB5D /* com.apple.TVHomeSharing.png in Resources */,
+				E597CC2AD765750D19E461A0 /* com.apple.TVMusic.png in Resources */,
+				0AE5E319BFC0328781486447 /* com.apple.TVPhotos.png in Resources */,
+				C332AD54A00B33A6898A8E62 /* com.apple.TVSearch.png in Resources */,
+				D023A3D14C37D45FCA115430 /* com.apple.TVSettings.png in Resources */,
+				FA0C99C4FD486106DE4D6928 /* com.apple.TVWatchList.png in Resources */,
+				018B7307EA5644C6CE60A13D /* com.apple.appleevents.png in Resources */,
+				230417237D24357F38B801F3 /* com.apple.podcasts.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,13 +233,21 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				628BD988A0021E61ECFF81A1 /* AppIconCache.swift in Sources */,
+				5E0D08070871AC7127302360 /* AppLauncherView.swift in Sources */,
 				7190FBAB75D95648266F850D /* AppleTVRemoteApp.swift in Sources */,
+				790575010B800CDCE832E7EB /* AutoReconnector.swift in Sources */,
+				ED1C682ABF7878731C94E701 /* CompanionConnection.swift in Sources */,
 				439C1977607157CCFF28BBD7 /* ContentView.swift in Sources */,
 				512A7F66BD725F6F7DC27AD4 /* DeviceDiscovery.swift in Sources */,
 				1FE6E013046C9DB4B787E784 /* DeviceListView.swift in Sources */,
+				8B74776E3A1745B16BE85A76 /* IPCServer.swift in Sources */,
+				7A966A8C9432E530D01D9257 /* KeyboardNotificationManager.swift in Sources */,
+				135F30E2248E1750F7312F68 /* MenuBarController.swift in Sources */,
+				0EE55D6C7CA30F0A57057B73 /* PopoverActivationGuard.swift in Sources */,
 				BAA90A232D6F4A731B1D4292 /* RemoteControlView.swift in Sources */,
-				C22B53B59B5DF880BA16388C /* CompanionConnection.swift in Sources */,
-				C22B53B59B5DF880BA16389A /* IPCServer.swift in Sources */,
+				D65EA98EFEEC4F755ECF2B45 /* VisualEffectBackground.swift in Sources */,
+				DE44080DE17724231BAD91B3 /* WindowManagement.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -188,23 +258,19 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = AppleTVRemote.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Sources/AppleTVRemote/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = AppleTVRemote;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.adhir.appletv-remote";
 				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
@@ -213,23 +279,19 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = AppleTVRemote.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Sources/AppleTVRemote/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = AppleTVRemote;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.adhir.appletv-remote";
 				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
@@ -376,25 +438,22 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		D2D73BB85FFD6953C34CC0A7 /* XCLocalSwiftPackageReference "." */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = .;
+/* Begin XCRemoteSwiftPackageReference section */
+		D2D73BB85FFD6953C34CC0A7 /* XCRemoteSwiftPackageReference "BigInt" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/attaswift/BigInt";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.3.0;
+			};
 		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		2457F9A5729060F9AAFE6D5D /* AppleTVLogging */ = {
+		2457F9A5729060F9AAFE6D5D /* BigInt */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = AppleTVLogging;
-		};
-		2457F9A5729060F9AAFE6D5E /* AppleTVProtocol */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = AppleTVProtocol;
-		};
-		2457F9A5729060F9AAFE6D5F /* AppleTVIPC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = AppleTVIPC;
+			package = D2D73BB85FFD6953C34CC0A7 /* XCRemoteSwiftPackageReference "BigInt" */;
+			productName = BigInt;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

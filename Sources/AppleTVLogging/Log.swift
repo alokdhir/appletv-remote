@@ -18,12 +18,12 @@ public enum Log {
     private static let subsystem = "com.adhir.appletv-remote"
 
     /// When true, all trace/report/fail messages are also written to stderr.
-    public static var verbose: Bool = false
+    public nonisolated(unsafe) static var verbose: Bool = false
 
     /// Active log sinks, keyed by forwarder identity.
     /// Fan-out: every active LogForwarder receives every message.
     /// Access must be serialised via `_lock`.
-    public static var _sinks: [UUID: (String) -> Void] = [:]
+    public nonisolated(unsafe) static var _sinks: [UUID: (String) -> Void] = [:]
     public static let _lock = NSLock()
 
     public static let companion   = Logger(subsystem: subsystem, category: "companion")

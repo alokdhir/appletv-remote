@@ -45,8 +45,7 @@ final class AppIconCache: ObservableObject {
     func icon(for bundleID: String) -> NSImage? {
         if let cached = memCache[bundleID] { return cached }
         // 1. Check app bundle first — authoritative, survives cache clears.
-        if let url = Bundle.module.url(forResource: bundleID, withExtension: "png",
-                                       subdirectory: "AppIcons"),
+        if let url = bundleResourceURL(forResource: bundleID, withExtension: "png", subdirectory: "AppIcons"),
            let img = NSImage(contentsOf: url) {
             memCache[bundleID] = img
             return img
@@ -89,8 +88,7 @@ final class AppIconCache: ObservableObject {
         for bundleID in bundleIDs {
             guard !Task.isCancelled else { return }
             // Skip icons that are bundled in the app — they never need network fetch.
-            if Bundle.module.url(forResource: bundleID, withExtension: "png",
-                                 subdirectory: "AppIcons") != nil { continue }
+            if bundleResourceURL(forResource: bundleID, withExtension: "png", subdirectory: "AppIcons") != nil { continue }
             // Skip IDs known to have no iTunes result this session.
             if notFoundIDs.contains(bundleID) { continue }
             let dest = cacheDir.appendingPathComponent("\(bundleID).png")
@@ -141,4 +139,14 @@ final class AppIconCache: ObservableObject {
               let png = bitmap.representation(using: .png, properties: [:]) else { return }
         try png.write(to: dest)
     }
+}
+
+/// Returns a URL for a bundled resource, working under both SPM (Bundle.module)
+/// and xcodebuild (Bundle.main).
+private func bundleResourceURL(forResource name: String, withExtension ext: String, subdirectory: String) -> URL? {
+    #if SWIFT_PACKAGE
+    return Bundle.module.url(forResource: name, withExtension: ext, subdirectory: subdirectory)
+    #else
+    return Bundle.main.url(forResource: name, withExtension: ext, subdirectory: subdirectory)
+    #endif
 }
