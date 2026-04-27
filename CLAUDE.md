@@ -38,28 +38,54 @@ binary) before debugging further — stale installs are the usual culprit.
 
 ## Architecture
 
-This is a SwiftUI macOS app that discovers and controls Apple TVs on the local network via the **Media Remote Protocol (MRP)**.
+This is a SwiftUI macOS app that discovers and controls Apple TVs on the local network via the **Companion protocol** (`_companion-link._tcp`).
+
+### Targets
+
+| Target | Role |
+|--------|------|
+| `AppleTVRemote` | SwiftUI app |
+| `atv` | CLI |
+| `AppleTVProtocol` | Core protocol library — testable, no UI dependencies |
+| `AppleTVIPC` | IPC wire types shared between app and CLI |
+| `AppleTVLogging` | `os.Logger` instances |
 
 ### Source files (`Sources/AppleTVRemote/`)
 
 | File | Role |
 |------|------|
-| `AppleTVRemoteApp.swift` | `@main` SwiftUI entry point; owns `DeviceDiscovery` |
-| `AppleTVDevice.swift` | Device model, `ConnectionState`, `RemoteCommand` enums |
-| `DeviceDiscovery.swift` | Bonjour browser (`_mediaremotetv._tcp`) using `NWBrowser` |
+| `AppleTVRemoteApp.swift` | `@main` SwiftUI entry point |
+| `CompanionConnection.swift` | App-layer orchestrator: TCP connect/disconnect, WoL, pairing delegation, `@Published` state for SwiftUI |
 | `ContentView.swift` | Root split layout (sidebar + detail) |
-| `DeviceListView.swift` | Sidebar: discovered device list with refresh |
+| `DeviceListView.swift` | Sidebar: discovered device list |
 | `RemoteControlView.swift` | D-pad, playback, volume, now-playing card |
-| `Protocol/MRPConnection.swift` | `NWConnection` TCP connection; varint-framed message receive loop |
-| `Protocol/MRPMessage.swift` | Hand-encoded protobuf MRP wire messages (no protobuf runtime dependency) |
-| `Protocol/CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
+| `IPCServer.swift` | Unix socket IPC server for `atv` CLI |
+| `AutoReconnector.swift` | Watches for unexpected disconnects and retries |
+| `WindowManagement.swift` | NSWindow setup: translucency, focus-fade, hide-on-close |
+
+### Source files (`Sources/AppleTVProtocol/`)
+
+| File | Role |
+|------|------|
+| `CompanionSession.swift` | Live session: socket I/O, frame dispatch, keepalive, txn/callbacks, all feature send methods. Conforms to `CompanionSessionDelegate` contract |
+| `PairingFlow.swift` | Pair-setup (SRP-6a) and pair-verify (ECDH) state machines |
+| `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
+| `CompanionFrame.swift` | Wire frame encode/decode |
+| `OPACK.swift` | OPACK serialization (Apple's binary dict format) |
+| `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
+| `AirPlayTunnel.swift` | AirPlay MRP tunnel for real-time now-playing |
+| `CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
+| `HAPPairing.swift` / `SRPClient.swift` | HAP pairing crypto |
+| `RTITextOperations.swift` | RTI binary plist encoder for text input |
 
 ### Key protocol notes
 
-- Apple TVs advertise `_mediaremotetv._tcp` via Bonjour; port is resolved dynamically
-- MRP messages are length-prefixed with a protobuf varint, followed by a protobuf payload
-- Pairing uses an SRP-6a exchange; the Apple TV displays a 4-digit PIN
-- Reference implementation: [pyatv](https://github.com/postlund/pyatv) (`protocols/mrp/`)
+- Apple TVs advertise `_companion-link._tcp` via Bonjour; port is resolved dynamically
+- Companion protocol uses raw BSD sockets (bypasses NWConnection TCC restrictions on macOS 14+)
+- Pairing uses SRP-6a (pair-setup) + ECDH (pair-verify); ATV displays a 4-digit PIN
+- Post-pairing frames are ChaCha20-Poly1305 encrypted E_OPACK
+- `CompanionSession` is the testable core; `CompanionConnection` is this app's SwiftUI wrapper around it
+- Reference implementation: [pyatv](https://github.com/postlund/pyatv) (`pyatv/protocols/companion/`)
 
 ## Issue tracking
 
