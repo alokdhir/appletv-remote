@@ -341,8 +341,16 @@ final class IPCServer {
                 guard let bundleID = req.args?["bundleID"], !bundleID.isEmpty else {
                     throw IPCError.badArgs("launch requires args.bundleID")
                 }
-                connection.launchApp(bundleID: bundleID)
-                client.send(.response(.ok(req.id)))
+                let reqID = req.id
+                connection.launchApp(bundleID: bundleID) { result in
+                    switch result {
+                    case .success:
+                        client.send(.response(.ok(reqID)))
+                    case .failure:
+                        client.send(.response(.failure(reqID,
+                            "Launch \(bundleID) failed — bundle ID may not be installed")))
+                    }
+                }
             }
         } catch {
             client.send(.response(.failure(req.id, error.localizedDescription)))

@@ -593,11 +593,46 @@ final class CompanionConnection: ObservableObject {
     }
 
     /// Launch an app on the ATV by bundle ID.
-    func launchApp(bundleID: String) {
-        guard state == .connected else { return }
+    /// Optional completion is called on the main queue with the result —
+    /// `.success` if the ATV responded within `LaunchApp.timeout`, `.failure`
+    /// on no-response timeout (typical when the bundle ID isn't installed
+    /// or refers to an app the ATV refuses to launch).
+    func launchApp(bundleID: String,
+                   completion: ((Result<Void, Error>) -> Void)? = nil) {
+        guard state == .connected else {
+            completion?(.failure(CompanionError.unexpectedResponse))
+            return
+        }
         let txn = txnCounter; txnCounter &+= 1
+        Log.companion.report("Companion: launching app \(bundleID) txn=\(txn)")
+
+        let timeoutItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.pendingCallbacks.removeValue(forKey: txn) != nil {
+                Log.companion.report(
+                    "Companion: launchApp \(bundleID) timed out (ATV did not respond)")
+                completion?(.failure(CompanionError.unexpectedResponse))
+            }
+        }
+        pendingCallbacks[txn] = { _ in
+            timeoutItem.cancel()
+            // Any response counts as success — the standalone path empirically
+            // gets a response on every successful launch and silence on bad
+            // bundle IDs, so a fired callback means the ATV accepted the request.
+            completion?(.success(()))
+        }
         sendEncrypted(OPACK.encodeLaunchApp(bundleID: bundleID, txn: txn))
-        Log.companion.report("Companion: launching app \(bundleID)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + LaunchApp.timeout,
+                                      execute: timeoutItem)
+    }
+
+    /// Tunables for the launchApp ack-or-timeout flow. Kept as a nested type
+    /// so the magic seconds value lives next to the function it controls.
+    private enum LaunchApp {
+        /// How long to wait for the ATV's `_launchApp` response before
+        /// declaring the launch failed. The ATV usually responds within
+        /// ~50ms on success; bad bundle IDs go silent.
+        static let timeout: TimeInterval = 3
     }
 
     private func startAirPlayMRP() {
