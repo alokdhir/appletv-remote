@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import Darwin
 import AppleTVLogging
 import AppleTVProtocol
@@ -29,16 +28,12 @@ final class CompanionConnection: ObservableObject {
     private var receiveBuffer = Data()
     @Published var currentDevice: AppleTVDevice?
 
-    // Pairing state
-    private var pairing: HAPPairing?
-    private var pairVerify: CompanionPairVerify?
-    private var pendingM2Data: Data?
+    // Session encryption (after pair-verify completes). Owns the directional
+    // ChaCha20-Poly1305 keys + nonce counters; pure crypto, no socket I/O.
+    private let transport = EncryptedFrameTransport()
 
-    // Session encryption (after pair-verify completes)
-    private var encryptKey: SymmetricKey?
-    private var decryptKey: SymmetricKey?
-    private var sendNonce: UInt64 = 0
-    private var recvNonce: UInt64 = 0
+    // Pairing state machine — pair-setup (SRP) and pair-verify (ECDH).
+    private lazy var pairingFlow = PairingFlow(delegate: makePairingDelegate())
     private var txnCounter: UInt32 = UInt32.random(in: 1...65535)
 
     // Transaction ID of the _sessionStart request. Once the ATV responds to
@@ -132,9 +127,15 @@ final class CompanionConnection: ObservableObject {
 
         let mac = MACStore.load(for: device.id)
 
+        // No MAC = can't WoL = nothing to gain from probing; connect directly.
+        guard let mac else {
+            connect(to: device)
+            return
+        }
+
         Task.detached(priority: .userInitiated) { [weak self] in
             // Fast path: device is already on — skip WoL and boot wait entirely.
-            let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 1)
+            let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 0.3)
             Log.companion.report("SmartConnect: \(device.name) reachable=\(reachable)")
 
             if reachable {
@@ -151,7 +152,7 @@ final class CompanionConnection: ObservableObject {
                 guard let self, self.state == .connecting else { return }
                 self.state = .waking
             }
-            if let mac { try? WakeOnLAN.send(mac: mac, targetIP: host) }
+            try? WakeOnLAN.send(mac: mac, targetIP: host)
 
             // Poll every 3 s for up to 60 s for the Companion port to open.
             // Probing the actual port (not just ping) ensures the MRP service
@@ -186,7 +187,7 @@ final class CompanionConnection: ObservableObject {
                 // Re-send WoL every ~15 s (every 5th poll) in case the first
                 // packet was lost before the NIC's WoL listener was ready.
                 wolSent += 1
-                if wolSent % 5 == 0, let mac {
+                if wolSent % 5 == 0 {
                     Log.wol.report("WoL: resending (attempt \(wolSent / 5 + 1))")
                     try? WakeOnLAN.send(mac: mac, targetIP: host)
                 }
@@ -282,9 +283,7 @@ final class CompanionConnection: ObservableObject {
         }
         state = .connecting
         currentDevice = device
-        pairing = HAPPairing()
-        sendNonce = 0
-        recvNonce = 0
+        transport.resetNonces()
 
         let deviceCopy = device
         writeQueue.async { [weak self] in
@@ -393,10 +392,8 @@ final class CompanionConnection: ObservableObject {
         if fd >= 0 { Darwin.close(fd) }   // unblocks the read loop
         state = .disconnected
         currentDevice = nil
-        pairing = nil
-        pairVerify = nil
-        encryptKey = nil
-        decryptKey = nil
+        pairingFlow.reset()
+        transport.reset()
         sendWakeOnConnect = false
         sessionStartTxn = nil
         attentionState = nil
@@ -406,8 +403,6 @@ final class CompanionConnection: ObservableObject {
         lastPlaybackStateTimestamp = 0
         nowPlaying = nil
         txnCounter = UInt32.random(in: 1...65535)
-        sendNonce = 0
-        recvNonce = 0
         airPlayTunnel?.close()
         airPlayTunnel = nil
     }
@@ -433,7 +428,7 @@ final class CompanionConnection: ObservableObject {
     }
 
     /// Sends a long-press: holds the button down for `ms` milliseconds before releasing.
-    func sendLongPress(_ command: RemoteCommand, ms: Int = 700) {
+    func sendLongPress(_ command: RemoteCommand, ms: Int = 1000) {
         guard state == .connected else { return }
         let keycode = command.hidKeycode
         let txn = txnCounter; txnCounter &+= 1
@@ -766,153 +761,87 @@ final class CompanionConnection: ObservableObject {
     // MARK: - Pairing PIN
 
     func submitPairingPin(_ pin: String) {
-        guard state == .awaitingPairingPin, let m2 = pendingM2Data else { return }
+        guard state == .awaitingPairingPin else { return }
         state = .connecting   // block re-entry; SRP modular exponentiation is slow
-        let capturedPairing = pairing
-        Task.detached {       // run off main thread — avoids beachball
-            do {
-                let m3 = try capturedPairing?.processM2(m2, pin: pin) ?? Data()
-                await MainActor.run {
-                    self.sendFrame(.psNext, payload: OPACK.wrapPsNextData(m3))
-                }
-            } catch {
-                await MainActor.run {
-                    self.state = .error("Pairing M3 failed: \(error)")
-                }
+        pairingFlow.submitPin(pin,
+            onSend: { [weak self] m3 in
+                self?.sendFrame(.psNext, payload: OPACK.wrapPsNextData(m3))
+            },
+            onError: { [weak self] msg in
+                self?.state = .error(msg)
             }
-        }
+        )
     }
 
-    // MARK: - Pair Setup
+    // MARK: - Pair Setup / Verify
 
     private func startPairSetup() {
-        guard let payload = pairing?.m1Payload() else { return }
-        sendFrame(.psStart, payload: OPACK.wrapPsStartData(payload))
+        pairingFlow.startPairSetup()
     }
 
     private func handlePsNext(_ payload: Data) {
-        let opackExtracted = OPACK.extractPairingData(from: payload)
-        let extracted = opackExtracted ?? payload
-        if opackExtracted == nil {
-            let hex = payload.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-            Log.companion.fail("Companion psNext: OPACK extraction failed, raw payload hex: \(hex)")
-        }
-        let tlv = TLV8.decode(extracted)
-        let step = tlv[.state]?.first ?? 0
-
-        switch step {
-        case 2:  // M2: ATV sent salt + public key → need PIN
-            pendingM2Data = extracted   // store TLV8, not OPACK wrapper
-            state = .awaitingPairingPin
-
-        case 4:  // M4: server proof verified → auto-send M5
-            do {
-                let m5 = try pairing?.processM4(extracted) ?? Data()
-                sendFrame(.psNext, payload: OPACK.wrapPsNextData(m5))
-            } catch {
-                state = .error("Pairing M4 failed: \(error)")
-            }
-
-        case 6:  // M6: ATV identity → pairing complete
-            do {
-                let creds = try pairing?.processM6(extracted)
-                guard let device = currentDevice, let creds else {
-                    state = .error("Pairing M6: missing device or credentials")
-                    return
-                }
-                credentialStore.save(credentials: creds, for: device.id)
-                // Companion protocol requires pair-verify on a fresh TCP connection.
-                // Close now; reconnect() will see stored credentials and start pair-verify.
-                let deviceToVerify = device
-                disconnect()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.connect(to: deviceToVerify)
-                }
-            } catch {
-                state = .error("Pairing M6 failed: \(error)")
-            }
-
-        default:
-            Log.companion.fail("Companion: unexpected PS_Next state \(step)")
-        }
+        guard let device = currentDevice else { return }
+        pairingFlow.handlePsNext(payload, device: device)
     }
-
-    // MARK: - Pair Verify
 
     private func startPairVerify(device: AppleTVDevice) {
         guard let creds = credentialStore.load(deviceID: device.id) else {
             startPairSetup()
             return
         }
-        let verify = CompanionPairVerify(credentials: creds)
-        pairVerify = verify
-        sendFrame(.pvStart, payload: OPACK.wrapPvStartData(verify.m1Payload()))
+        pairingFlow.startPairVerify(credentials: creds)
     }
 
     private func handlePvNext(_ payload: Data) {
-        let extracted = OPACK.extractPairingData(from: payload) ?? payload
-        let tlv = TLV8.decode(extracted)
-        let step = tlv[.state]?.first ?? 0
-        Log.companion.trace("Companion pvNext step=\(step) (\(extracted.count) bytes TLV8)")
+        pairingFlow.handlePvNext(payload, deviceID: currentDevice?.id ?? "")
+    }
 
-        switch step {
-        case 2:  // M2: ATV sent its ephemeral key + encrypted identity
-            do {
-                let m3 = try pairVerify?.processM2(extracted) ?? Data()
-                sendFrame(.pvNext, payload: OPACK.wrapPairingData(m3))
-            } catch {
-                state = .error("Pair verify M2 failed: \(error)")
-            }
+    // MARK: - Pairing delegate factory
 
-        case 4:  // M4: success or error
-            do {
-                try pairVerify?.verifyM4(extracted)
-                encryptKey = pairVerify?.sessionEncryptKey
-                decryptKey = pairVerify?.sessionDecryptKey
-                state = .connected
-                startCompanionSession()
-                startKeepalive()
-                startAirPlayMRP()
-                if sendWakeOnConnect {
-                    sendWakeOnConnect = false
-                    // Small delay to let the session handshake complete before
-                    // sending the Menu HID event — triggers HDMI-CEC TV power-on.
-                    // Wake keycode (13) does not reliably trigger CEC; Menu does.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        self?.send(.menu)
+    private func makePairingDelegate() -> PairingFlow.Delegate {
+        PairingFlow.Delegate(
+            sendFrame: { [weak self] type, payload in
+                self?.sendFrame(type, payload: payload)
+            },
+            setState: { [weak self] newState in
+                guard let self else { return }
+                self.state = newState
+                if case .connected = newState {
+                    self.startCompanionSession()
+                    self.startKeepalive()
+                    self.startAirPlayMRP()
+                    if self.sendWakeOnConnect {
+                        self.sendWakeOnConnect = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                            self?.send(.menu)
+                        }
                     }
                 }
-            } catch {
-                // Only delete credentials if the ATV explicitly rejected them (serverError).
-                // Transient failures (TCP reset, timeout, crypto) should not wipe valid credentials.
-                if case CompanionPairVerify.VerifyError.serverError = error,
-                   let device = currentDevice {
-                    credentialStore.delete(deviceID: device.id)
+            },
+            installKeys: { [weak self] enc, dec in
+                self?.transport.installSessionKeys(encrypt: enc, decrypt: dec)
+            },
+            reconnect: { [weak self] device in
+                self?.disconnect()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.connect(to: device)
                 }
-                state = .error("Pair verify failed: \(error)\nPress Connect to re-pair.")
+            },
+            saveCredentials: { [weak self] creds, deviceID in
+                self?.credentialStore.save(credentials: creds, for: deviceID)
+            },
+            deleteCredentials: { [weak self] deviceID in
+                self?.credentialStore.delete(deviceID: deviceID)
             }
-
-        default:
-            Log.companion.fail("Companion: unexpected PV_Next state \(step)")
-        }
+        )
     }
 
     // MARK: - Encrypted E_OPACK
 
     private func handleEOPACK(_ payload: Data) {
-        guard let key = decryptKey else { return }
+        guard transport.isReady else { return }
         do {
-            let nonce = try ChaChaPoly.Nonce(data: nonceData(recvNonce))
-            recvNonce += 1
-            // AAD = frame header: type byte + 3-byte big-endian payload length
-            let aad = Data([
-                CompanionFrame.FrameType.eOPACK.rawValue,
-                UInt8((payload.count >> 16) & 0xFF),
-                UInt8((payload.count >> 8)  & 0xFF),
-                UInt8( payload.count        & 0xFF),
-            ])
-            let box   = try ChaChaPoly.SealedBox(combined: nonce.withUnsafeBytes { Data($0) } + payload)
-            let plain = try ChaChaPoly.open(box, using: key, authenticating: aad)
+            let plain = try transport.open(payload)
             handleOPACKMessage(plain)
         } catch {
             Log.companion.fail("Companion: E_OPACK decrypt failed: \(error)")
@@ -1069,7 +998,7 @@ final class CompanionConnection: ObservableObject {
     }
 
     private func sendEncrypted(_ opackData: Data) {
-        guard let key = encryptKey else {
+        guard transport.isReady else {
             Log.companion.report("Companion → sendEncrypted DROPPED (no key, \(opackData.count)B)")
             return
         }
@@ -1084,30 +1013,11 @@ final class CompanionConnection: ObservableObject {
             Log.companion.report("Companion → OPACK[\(opackData.count)B]: \(peek)")
         }
         do {
-            let nonce = try ChaChaPoly.Nonce(data: nonceData(sendNonce))
-            sendNonce += 1
-            // AAD = frame header: type byte + 3-byte big-endian payload length
-            // Payload length = ciphertext (same as plaintext) + 16-byte Poly1305 tag
-            let payloadLen = opackData.count + 16
-            let aad = Data([
-                CompanionFrame.FrameType.eOPACK.rawValue,
-                UInt8((payloadLen >> 16) & 0xFF),
-                UInt8((payloadLen >> 8)  & 0xFF),
-                UInt8( payloadLen        & 0xFF),
-            ])
-            let sealed = try ChaChaPoly.seal(opackData, using: key, nonce: nonce, authenticating: aad)
-            sendFrame(.eOPACK, payload: sealed.ciphertext + sealed.tag)
+            let body = try transport.seal(opackData)
+            sendFrame(.eOPACK, payload: body)
         } catch {
             Log.companion.fail("Companion: encrypt failed: \(error)")
         }
-    }
-
-    /// 12-byte nonce: counter serialized as 12-byte little-endian integer.
-    /// For counters that fit in 64 bits: bytes 0–7 = LE counter, bytes 8–11 = 0x00.
-    /// Matches pyatv's Chacha20Cipher(nonce_length=12): counter.to_bytes(12, 'little').
-    private func nonceData(_ counter: UInt64) -> Data {
-        var n = counter.littleEndian
-        return Data(bytes: &n, count: 8) + Data(repeating: 0, count: 4)
     }
 
     // MARK: - Sending

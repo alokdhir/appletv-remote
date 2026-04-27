@@ -259,6 +259,8 @@ struct RemoteControlView: View {
                 HStack(spacing: 48) {
                     LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
                         connection.send(.menu)
+                    } longPressAction: {
+                        connection.sendLongPress(.menu)
                     }
                     LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
                         connection.send(.home)
