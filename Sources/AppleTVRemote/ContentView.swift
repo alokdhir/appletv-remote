@@ -28,6 +28,7 @@ struct ContentView: View {
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
     @State private var animateSidebar = false
     @State private var deviceRestored = false
+    @State private var isKeyWindow = true
 
     /// When no device is selected the statusBar (which owns the sidebar toggle)
     /// isn't visible, so we pin the sidebar open — otherwise the user can't
@@ -71,7 +72,15 @@ struct ContentView: View {
                minHeight: 480,
                idealHeight: 620,
                maxHeight: .infinity)
+        .opacity(isKeyWindow ? 1.0 : 0.50)
+        .animation(.easeInOut(duration: 0.2), value: isKeyWindow)
         .animation(animateSidebar ? .easeInOut(duration: 0.22) : nil, value: effectivelyCollapsed)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            isKeyWindow = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            isKeyWindow = false
+        }
         .onAppear {
             discovery.startDiscovery()
             // After the launch-settle window, switch to the live
