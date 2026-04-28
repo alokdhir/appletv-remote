@@ -164,6 +164,7 @@ atv --standalone --device "Living Room" l
 | `H` | Home |
 | `Space` or `P` | Play / Pause |
 | `A` | Open app launcher |
+| `⌃ ↑` / `⌃ ↓` | Volume up / down |
 | `⌫ Backspace` | Delete last character _(when Apple TV text field is active)_ |
 
 ### App launcher pane

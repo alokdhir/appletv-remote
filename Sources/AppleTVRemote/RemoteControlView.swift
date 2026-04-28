@@ -394,11 +394,15 @@ struct RemoteControlView: View {
 ///
 ///   ↑ ↓ ← →     — D-pad
 ///   return      — select (D-pad centre)
+///   space, p    — play / pause
 ///   m           — menu / back
 ///   h           — home
+///   a           — show app grid
+///   delete      — backspace (when ATV text field is focused)
+///   ⌃↑ ⌃↓       — volume up / down
 ///
-/// Keys with modifiers (⌘/⌃/⌥) are passed through so app-level shortcuts
-/// (⌘Q, ⌘W, ⌘,) keep working.
+/// Other keys with modifiers (⌘/⌥, plus ⌃ outside the volume bindings) are
+/// passed through so app-level shortcuts (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
     var onShowApps: () -> Void = {}
@@ -437,8 +441,20 @@ private final class KeyCatcherView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Let ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
         let mods = event.modifierFlags.intersection([.command, .control, .option])
+
+        // ⌃↑ / ⌃↓ → volume up / down. Caught before the modifier bail-out
+        // below so they don't bubble up to the system. Only fires on plain
+        // ⌃ (not ⌘⌃, ⌥⌃, …) so we don't shadow other shortcuts.
+        if mods == .control {
+            switch event.keyCode {
+            case 126: onCommand(.volumeUp);   return
+            case 125: onCommand(.volumeDown); return
+            default:  break
+            }
+        }
+
+        // Let other ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
         if !mods.isEmpty { super.keyDown(with: event); return }
 
         if event.charactersIgnoringModifiers?.lowercased() == "a" {
