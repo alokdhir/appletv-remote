@@ -8,6 +8,12 @@ options:
   xcodeVersion: "16"
 
 packages:
+  # Local SwiftPM root — provides AppleTVLogging / AppleTVProtocol / AppleTVIPC.
+  # Without this, xcodegen drops them from the Xcode project's
+  # XCSwiftPackageProductDependency / Frameworks build phase, breaking
+  # `xcodebuild` (the README's recommended path for distribution / notarization).
+  AppleTV:
+    path: .
   BigInt:
     url: https://github.com/attaswift/BigInt
     from: "5.3.0"
@@ -21,6 +27,12 @@ targets:
         excludes:
           - Resources/Info.plist
     dependencies:
+      - package: AppleTV
+        product: AppleTVLogging
+      - package: AppleTV
+        product: AppleTVProtocol
+      - package: AppleTV
+        product: AppleTVIPC
       - package: BigInt
     info:
       path: Sources/AppleTVRemote/Resources/Info.plist
@@ -37,7 +49,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.adhir.appletv-remote
-        SWIFT_VERSION: "6.0"
+        # SwiftPM (Package.swift swift-tools-version: 5.9) builds in Swift 5
+        # language mode. Match it here so xcodebuild and `swift build` agree
+        # on what the source compiles as — Swift 6 mode triggers strict-
+        # concurrency errors in deinits and AsyncPublisher use that the SPM
+        # build never sees.
+        SWIFT_VERSION: "5.0"
         SWIFT_STRICT_CONCURRENCY: minimal
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_HARDENED_RUNTIME: YES
