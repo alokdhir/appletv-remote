@@ -1,5 +1,113 @@
 import SwiftUI
 import AppleTVProtocol
+import AppKit
+
+// MARK: - Delayed tooltip helper
+
+private struct DelayedTooltip: NSViewRepresentable {
+    let text: String
+    let delay: TimeInterval
+
+    func makeNSView(context: Context) -> TooltipView {
+        TooltipView(text: text, delay: delay)
+    }
+
+    func updateNSView(_ nsView: TooltipView, context: Context) {
+        nsView.tooltipText = text
+        nsView.delay = delay
+    }
+
+    final class TooltipView: NSView {
+        var tooltipText: String
+        var delay: TimeInterval
+        private var timer: Timer?
+        private var trackingArea: NSTrackingArea?
+        private weak var tooltipPanel: NSPanel?
+
+        init(text: String, delay: TimeInterval) {
+            self.tooltipText = text
+            self.delay = delay
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let ta = trackingArea { removeTrackingArea(ta) }
+            let ta = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(ta)
+            trackingArea = ta
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            timer?.invalidate()
+            let capturedEvent = event
+            timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                self?.showPanel(near: capturedEvent)
+            }
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            timer?.invalidate()
+            timer = nil
+            hidePanel()
+        }
+
+        private func showPanel(near event: NSEvent) {
+            hidePanel()
+
+            let label = NSTextField(labelWithString: tooltipText)
+            label.font = NSFont.preferredFont(forTextStyle: .subheadline)
+            label.textColor = .white
+            label.sizeToFit()
+
+            let padding: CGFloat = 5
+            let contentSize = CGSize(
+                width: label.frame.width + padding * 2,
+                height: label.frame.height + padding * 2
+            )
+
+            let mouseScreen = NSEvent.mouseLocation
+            let origin = CGPoint(x: mouseScreen.x + 12, y: mouseScreen.y - contentSize.height - 4)
+
+            let panel = NSPanel(
+                contentRect: CGRect(origin: origin, size: contentSize),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.level = .popUpMenu
+            panel.hasShadow = true
+            panel.ignoresMouseEvents = true
+
+            let container = NSView(frame: CGRect(origin: .zero, size: contentSize))
+            container.wantsLayer = true
+            container.layer?.backgroundColor = NSColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 0.95).cgColor
+            container.layer?.cornerRadius = 5
+            container.layer?.masksToBounds = true
+
+            label.frame = CGRect(x: padding, y: padding, width: label.frame.width, height: label.frame.height)
+            container.addSubview(label)
+
+            panel.contentView = container
+            panel.orderFront(nil)
+            tooltipPanel = panel
+        }
+
+        private func hidePanel() {
+            tooltipPanel?.orderOut(nil)
+            tooltipPanel = nil
+        }
+    }
+}
 
 // MARK: - Auto-connect store
 
@@ -123,6 +231,11 @@ struct DeviceRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name)
                     .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .overlay {
+                        DelayedTooltip(text: device.name, delay: 0.2)
+                    }
                 if device.isPaired {
                     Text("Paired")
                         .font(.caption2)
