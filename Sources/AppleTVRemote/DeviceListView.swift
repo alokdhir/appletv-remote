@@ -32,6 +32,12 @@ private struct DelayedTooltip: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError() }
 
+        override var acceptsFirstResponder: Bool { false }
+
+        override func keyDown(with event: NSEvent) {
+            nextResponder?.keyDown(with: event)
+        }
+
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
             if let ta = trackingArea { removeTrackingArea(ta) }
