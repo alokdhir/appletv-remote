@@ -22,11 +22,24 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 |----------|--------------------|
 | ![App grid](screenshots/appgrid.png) | ![App grid with sidebar](screenshots/appgrid%20with%20sidebar.png) |
 
+## Install
+
+Grab the latest signed + notarized DMG from the
+**[Releases page](https://github.com/alokdhir/appletv-remote/releases/latest)**.
+
+1. Download `AppleTVRemote-X.Y.Z.dmg`.
+2. Open it — Gatekeeper accepts it directly (no "unidentified developer" warning) since it's notarized by Apple.
+3. Drag `AppleTVRemote.app` onto the `Applications` shortcut.
+4. *(Optional)* For the `atv` CLI: open a Terminal in the mounted DMG and run `./install.sh` — copies the app to `/Applications` and the CLI to `/usr/local/bin/atv` in one go.
+5. Launch from `/Applications` (or run `atv help` from the terminal).
+
+That's it — no Xcode, no command-line build required.
+
 ## Requirements
 
 - macOS 13+
-- Xcode 26 / Swift 6
 - Apple TV on the same local network
+- Xcode 26 / Swift 6 *(only if you want to build from source)*
 
 ### Optional dependencies
 
@@ -38,7 +51,9 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 
   > **Note:** The first time a notification fires, macOS will open System Settings → Notifications and ask you to explicitly allow terminal-notifier to send notifications. Do that once and notifications will work from then on.
 
-## Building
+## Building from source
+
+If you'd rather build it yourself than use the prebuilt DMG above.
 
 ### Swift (recommended — builds everything)
 
