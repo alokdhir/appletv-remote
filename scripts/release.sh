@@ -49,8 +49,14 @@ if [[ "$current_branch" != "main" ]]; then
     exit 1
 fi
 
-if git rev-parse "$VERSION" >/dev/null 2>&1; then
-    echo "release: tag $VERSION already exists" >&2
+# Check specifically for an existing tag — `git rev-parse "$VERSION"` would
+# also resolve a same-named branch / commit-ish, falsely reporting "exists".
+if git rev-parse --verify --quiet "refs/tags/$VERSION" >/dev/null; then
+    echo "release: tag $VERSION already exists locally" >&2
+    exit 1
+fi
+if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+    echo "release: tag $VERSION already exists on origin" >&2
     exit 1
 fi
 
@@ -68,21 +74,37 @@ VERSION="${VERSION#v}" "$REPO_ROOT/scripts/build-dmg.sh"
 DMG_PATH="$REPO_ROOT/dist/AppleTVRemote-${VERSION#v}.dmg"
 [[ -f "$DMG_PATH" ]] || { echo "release: expected DMG not found at $DMG_PATH" >&2; exit 1; }
 
-# ── Tag + push ────────────────────────────────────────────────────────────
+# ── Tag locally ───────────────────────────────────────────────────────────
 echo
-echo "==> Tagging and pushing $VERSION"
+echo "==> Tagging $VERSION (local)"
 git tag -a "$VERSION" -m "Release $VERSION"
-git push origin "$VERSION"
 
 # ── GitHub release ────────────────────────────────────────────────────────
+# Order is deliberate: create the release + upload the DMG BEFORE pushing
+# the tag. If the upload or release-create fails, we don't end up with a
+# tag on origin pointing at no release. `gh release create` works on a
+# local-only tag and pushes it as part of asset upload.
 echo
-echo "==> Creating GitHub release $VERSION"
+echo "==> Creating GitHub release $VERSION + uploading DMG"
+release_args=("$VERSION" "$DMG_PATH" --title "$VERSION")
 if [[ $# -gt 0 ]]; then
-    # Pass any remaining args (e.g. -F notes.md or a literal note string) through to gh.
-    gh release create "$VERSION" "$DMG_PATH" --title "$VERSION" "$@"
+    release_args+=("$@")  # caller-provided notes/flags
 else
-    gh release create "$VERSION" "$DMG_PATH" --title "$VERSION" --generate-notes
+    release_args+=(--generate-notes)
 fi
+
+if ! gh release create "${release_args[@]}"; then
+    echo "release: gh release create failed — leaving local tag in place" >&2
+    echo "release: delete it with 'git tag -d $VERSION' if you want to retry" >&2
+    exit 1
+fi
+
+# ── Push tag (gh already pushed it as part of release create, but make
+#    sure local refs are visible explicitly so 'git pull' on other clones
+#    sees the tag without --tags). Idempotent.
+echo
+echo "==> Pushing tag $VERSION to origin"
+git push origin "$VERSION"
 
 echo
 echo "✓ Released $VERSION"

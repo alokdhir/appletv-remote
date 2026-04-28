@@ -3,21 +3,19 @@
 # Build a distributable AppleTVRemote DMG.
 #
 # Usage:
-#   scripts/build-dmg.sh                                 # ad-hoc signed (testing)
+#   scripts/build-dmg.sh                       # auto-detected identity + profile
+#   SIGN_IDENTITY=- scripts/build-dmg.sh       # force ad-hoc (no Developer ID)
+#   NOTARIZE_PROFILE= scripts/build-dmg.sh     # skip notarization
 #
-#   SIGN_IDENTITY="Developer ID Application: Alok Dhir (TEAMID)" \
-#       scripts/build-dmg.sh                             # production-signed,
-#                                                        # no notarization
-#
-#   SIGN_IDENTITY="Developer ID Application: ..." \
-#   NOTARIZE_PROFILE=appletv-remote-notarization \
-#       scripts/build-dmg.sh                             # full pipeline
-#
-# Env vars:
-#   SIGN_IDENTITY       Codesign identity. Default "-" (ad-hoc, for testing).
-#                       For distribution use a Developer ID Application cert.
-#   NOTARIZE_PROFILE    notarytool keychain profile name. Set to enable
-#                       notarization + stapling. Create once with:
+# Env vars (all optional — sane defaults from the keychain):
+#   SIGN_IDENTITY       Codesign identity. Defaults to the first valid
+#                       "Developer ID Application" in the keychain. Set to
+#                       "-" to force ad-hoc signing (no Developer ID needed,
+#                       but Gatekeeper will warn end-users).
+#   NOTARIZE_PROFILE    notarytool keychain profile name. Defaults to
+#                       "appletv-remote-notarization" if that profile exists,
+#                       otherwise empty (skip). Set explicitly to "" to skip.
+#                       First-time setup:
 #                         xcrun notarytool store-credentials \
 #                           appletv-remote-notarization \
 #                           --apple-id ... --team-id ... --password ...
