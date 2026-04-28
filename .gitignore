@@ -14,3 +14,5 @@ dist/
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+AppleTVRemote.xcodeproj/project.xcworkspace/
+AppleTVRemote.xcodeproj/xcuserdata/
