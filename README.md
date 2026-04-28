@@ -78,7 +78,9 @@ xcodebuild -project AppleTVRemote.xcodeproj -scheme AppleTVRemote -configuration
 
 Builds only the `AppleTVRemote.app` GUI target. Use this path for archiving, signing, and notarizing for distribution.
 
-### Installing after a release build
+### Installing a local build
+
+After `swift build -c release`, copy the binaries into place:
 
 ```bash
 cp -f .build/release/AppleTVRemote /Applications/AppleTVRemote.app/Contents/MacOS/AppleTVRemote
@@ -89,6 +91,23 @@ codesign --force --deep --sign - /Applications/AppleTVRemote.app
 
 > **Note:** Always copy both the binary *and* the `.bundle` — the bundle contains
 > bundled app icons and other resources that SwiftUI's `Bundle.module` reads at runtime.
+
+### Cutting a release (maintainer only)
+
+The full signed + notarized DMG pipeline is automated in `scripts/`.
+
+```bash
+# Build a signed + notarized DMG, no upload.
+scripts/build-dmg.sh
+
+# End-to-end: tag, build, push, attach to GitHub release.
+scripts/release.sh v1.2.0
+```
+
+`build-dmg.sh` auto-detects the Developer ID Application identity in your
+keychain and the `appletv-remote-notarization` notarytool profile. First-time
+setup (cert, app-specific password, `notarytool store-credentials`) is
+described in the script header.
 
 ## Pairing
 

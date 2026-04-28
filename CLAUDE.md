@@ -13,7 +13,30 @@ swift build          # debug build
 swift build -c release
 ```
 
-The project requires macOS 13+ and Xcode 26 / Swift 6.
+The project requires macOS 13+ and Xcode 26.
+
+Swift toolchain is 6.x but the language mode is **Swift 5** — Package.swift
+uses `swift-tools-version: 5.9`, and `project.yml` sets `SWIFT_VERSION: "5.0"`
+so xcodebuild matches. Don't bump to Swift 6 mode without auditing deinits
+(AutoReconnector, WindowManagement) and AsyncPublisher sites (IPCServer) —
+they trigger strict-concurrency errors only the Swift 6 mode catches.
+
+## Releasing
+
+Distribution is automated. Don't hand-roll codesign/notarization flows.
+
+```bash
+# Build signed + notarized DMG (no upload).
+scripts/build-dmg.sh
+
+# Full pipeline: tag, build, push, attach to GitHub release.
+scripts/release.sh v1.2.0
+```
+
+`build-dmg.sh` auto-detects the Developer ID Application identity and the
+`appletv-remote-notarization` notarytool keychain profile. First-time setup
+(generating the cert, creating an app-specific password, calling
+`xcrun notarytool store-credentials`) lives in the script header.
 
 ## Install paths
 
