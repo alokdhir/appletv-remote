@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Short sentences. Only necessary words. No preamble, no recap, no filler.
 
+## Git commits
+
+Do NOT add "Assisted-by", "Co-Authored-By", or any attribution lines to commit messages.
+
 ## Building
 
 ```bash
