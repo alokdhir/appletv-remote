@@ -328,7 +328,9 @@ public final class CompanionSession {
     // MARK: - Encrypted send
 
     public func sendEncrypted(_ opackData: Data) {
-        if Log.companion.isEnabled(type: .debug) {
+        // Gate on Log.verbose, not Logger.isEnabled(type:) — the latter is a
+// macOS 15+ API and we deploy to macOS 13.
+if Log.verbose {
             let peek = OPACK.decodeDict(opackData).map { d -> String in
                 let i = d["_i"] as? String ?? "?"
                 let t = d["_t"] as? Int ?? -1
@@ -461,7 +463,9 @@ public final class CompanionSession {
             return msg
         }
 
-        if Log.companion.isEnabled(type: .debug) {
+        // Gate on Log.verbose, not Logger.isEnabled(type:) — the latter is a
+// macOS 15+ API and we deploy to macOS 13.
+if Log.verbose {
             func describeValue(_ v: Any?) -> String {
                 switch v {
                 case let s as String:           return "\"\(s)\""
