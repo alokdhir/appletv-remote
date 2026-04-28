@@ -33,8 +33,6 @@ Grab the latest signed + notarized DMG from the
 4. *(Optional)* For the `atv` CLI: open a Terminal in the mounted DMG and run `./install.sh` — copies the app to `/Applications` and the CLI to `/usr/local/bin/atv` in one go.
 5. Launch from `/Applications` (or run `atv help` from the terminal).
 
-That's it — no Xcode, no command-line build required.
-
 ## Requirements
 
 - macOS 13+
