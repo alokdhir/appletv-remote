@@ -1,4 +1,4 @@
-# Apple TV Remote
+# <img src="assets/icon.png" width="32" height="32" align="left" style="margin-right:8px"> Apple TV Remote
 
 A macOS app that discovers and controls Apple TVs on the local network via the **Companion** and **Media Remote Protocol (MRP)** protocols. Includes a full-featured main window with device sidebar and remote control UI, and a scriptable `atv` CLI companion tool.
 
