@@ -17,7 +17,7 @@ import AppleTVLogging
 /// directly when keyboardActive is true.
 final class KeyboardNotificationManager: NSObject, @unchecked Sendable {
 
-    nonisolated(unsafe) static let shared = KeyboardNotificationManager()
+    static let shared = KeyboardNotificationManager()
 
     /// Posted on the main thread to open the keyboard input sheet.
     static let openKeyboardSheetNotification = Notification.Name(

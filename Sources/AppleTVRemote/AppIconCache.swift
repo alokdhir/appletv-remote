@@ -126,7 +126,7 @@ final class AppIconCache: ObservableObject {
               let first = results.first,
               var artworkURLString = first["artworkUrl100"] as? String else {
             // iTunes returned no results — record so we don't retry this session.
-            await MainActor.run { notFoundIDs.insert(bundleID) }
+            _ = await MainActor.run { notFoundIDs.insert(bundleID) }
             return
         }
 

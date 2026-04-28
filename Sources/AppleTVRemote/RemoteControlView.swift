@@ -69,7 +69,7 @@ struct RemoteControlView: View {
                     }
                 case .awaitingPairingPin:
                     pairingView
-                case .connected, .connecting, .waking:
+                case .connected:
                     // Transitional — hasEverConnected will flip and take over shortly.
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -399,9 +399,10 @@ struct RemoteControlView: View {
 ///   h           — home
 ///   a           — show app grid
 ///   delete      — backspace (when ATV text field is focused)
-///   ⌃↑ ⌃↓       — volume up / down
+///   ⌥↑ ⌥↓       — volume up / down
+///                  (⌃↑/⌃↓ would conflict with macOS Mission Control)
 ///
-/// Other keys with modifiers (⌘/⌥, plus ⌃ outside the volume bindings) are
+/// Other keys with modifiers (⌘/⌃, plus ⌥ outside the volume bindings) are
 /// passed through so app-level shortcuts (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
@@ -443,10 +444,11 @@ private final class KeyCatcherView: NSView {
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection([.command, .control, .option])
 
-        // ⌃↑ / ⌃↓ → volume up / down. Caught before the modifier bail-out
-        // below so they don't bubble up to the system. Only fires on plain
-        // ⌃ (not ⌘⌃, ⌥⌃, …) so we don't shadow other shortcuts.
-        if mods == .control {
+        // ⌥↑ / ⌥↓ → volume up / down. Using Option rather than Control
+        // because macOS reserves ⌃↑ / ⌃↓ for Mission Control. Caught before
+        // the modifier bail-out below; only fires on plain ⌥ (not ⌘⌥, ⌃⌥)
+        // so we don't shadow other shortcuts.
+        if mods == .option {
             switch event.keyCode {
             case 126: onCommand(.volumeUp);   return
             case 125: onCommand(.volumeDown); return

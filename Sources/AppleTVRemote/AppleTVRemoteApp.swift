@@ -82,8 +82,10 @@ struct AppleTVRemoteApp: App {
         }
         if iconRefreshTimer == nil {
             iconRefreshTimer = Timer.scheduledTimer(withTimeInterval: 12 * 60 * 60, repeats: true) { [weak connection] _ in
-                guard let ids = connection?.appList.map({ $0.id }), !ids.isEmpty else { return }
-                AppIconCache.shared.refreshIfStale(bundleIDs: ids)
+                Task { @MainActor in
+                    guard let ids = connection?.appList.map({ $0.id }), !ids.isEmpty else { return }
+                    AppIconCache.shared.refreshIfStale(bundleIDs: ids)
+                }
             }
         }
     }

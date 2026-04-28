@@ -18,7 +18,7 @@ final class PopoverActivationGuard {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil, queue: .main) { [weak self] _ in
-            self?.lastActivation = Date()
+            Task { @MainActor [weak self] in self?.lastActivation = Date() }
         }
     }
 
