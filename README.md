@@ -28,7 +28,7 @@ Grab the latest signed + notarized DMG from the
 **[Releases page](https://github.com/alokdhir/appletv-remote/releases/latest)**.
 
 1. Download `AppleTVRemote-X.Y.Z.dmg`.
-2. Open it — Gatekeeper accepts it directly (no "unidentified developer" warning) since it's notarized by Apple.
+2. Double click to mount and open
 3. Drag `AppleTVRemote.app` onto the `Applications` shortcut.
 4. *(Optional)* For the `atv` CLI: open a Terminal in the mounted DMG and run `./install.sh` — copies the app to `/Applications` and the CLI to `/usr/local/bin/atv` in one go.
 5. Launch from `/Applications` (or run `atv help` from the terminal).
