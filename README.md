@@ -188,10 +188,11 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 
 ## Architecture
 
+### `Sources/AppleTVRemote/` — SwiftUI app
+
 | File | Role |
 |------|------|
 | `AppleTVRemoteApp.swift` | `@main` entry point; owns `DeviceDiscovery`, `AutoReconnector` |
-| `AppleTVDevice.swift` | Device model, `ConnectionState`, `RemoteCommand` enums |
 | `DeviceDiscovery.swift` | Bonjour browser (`_companion-link._tcp`) using `NWBrowser` |
 | `ContentView.swift` | Root split layout (collapsible sidebar + detail) |
 | `DeviceListView.swift` | Sidebar: device list, auto-connect toggles |
@@ -199,10 +200,35 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 | `AppLauncherView.swift` | App grid with search, keyboard navigation, responsive columns |
 | `MenuBarController.swift` | Menu bar status item, popover, right-click menu |
 | `AppIconCache.swift` | Fetches and caches app icons from iTunes + bundled system icons |
-| `Protocol/CompanionConnection.swift` | TCP Companion session: pair-setup, pair-verify, encrypted OPACK |
-| `Protocol/OPACK.swift` | OPACK binary encoder/decoder |
-| `Protocol/CredentialStore.swift` | JSON credential persistence |
-| `AppleTVIPC/IPCProtocol.swift` | IPC protocol between app and `atv` CLI |
+| `CompanionConnection.swift` | App-layer orchestrator: TCP connect/disconnect, WoL, pairing delegation, `@Published` state for SwiftUI |
+| `IPCServer.swift` | Unix socket IPC server for `atv` CLI |
+| `AutoReconnector.swift` | Watches for unexpected disconnects and retries |
+| `WindowManagement.swift` | NSWindow setup: translucency, focus-fade, hide-on-close |
+
+### `Sources/AppleTVProtocol/` — Core protocol library (reusable, no UI dependencies)
+
+`AppleTVProtocol` has no dependency on SwiftUI, AppKit, or this app. It can be embedded in other Swift projects (CLI tools, server-side daemons, other apps) to drive Apple TV Companion sessions directly.
+
+| File | Role |
+|------|------|
+| `AppleTVDevice.swift` | Device model, `ConnectionState`, `RemoteCommand` enums |
+| `CompanionSession.swift` | Live session: socket I/O, frame dispatch, keepalive, all feature send methods |
+| `PairingFlow.swift` | Pair-setup (SRP-6a) and pair-verify (ECDH) state machines |
+| `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
+| `CompanionFrame.swift` | Wire frame encode/decode |
+| `OPACK.swift` | OPACK binary encoder/decoder |
+| `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
+| `AirPlayTunnel.swift` | AirPlay MRP tunnel for real-time now-playing |
+| `CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
+| `HAPPairing.swift` / `SRPClient.swift` | HAP pairing crypto |
+| `RTITextOperations.swift` | RTI binary plist encoder for text input |
+| `WakeOnLAN.swift` | Magic packet broadcast |
+
+### `Sources/AppleTVIPC/` — Shared IPC wire types
+
+| File | Role |
+|------|------|
+| `IPCProtocol.swift` | IPC protocol between app and `atv` CLI |
 
 ### Protocol overview
 
