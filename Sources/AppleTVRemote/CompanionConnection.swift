@@ -485,10 +485,25 @@ final class CompanionConnection: ObservableObject {
     private func mergeNowPlaying(from inner: [String: Any]) {
         let update = NowPlayingInfo(from: inner)
         var info = nowPlaying ?? NowPlayingInfo()
-        if let newApp = update.app, newApp != info.app {
-            info.title = nil; info.artist = nil; info.album = nil
-            info.elapsedTime = nil; info.duration = nil; info.playbackRate = nil
+
+        // Clear the cohort whenever we detect a new track/episode. Without this,
+        // fields from an earlier track stick around forever if the next push
+        // doesn't include them — e.g. the album field from a previous show
+        // bleeds into "title — artist — album" of the current one. We trigger
+        // on either:
+        //   • app change (tvOS switched apps), OR
+        //   • title change within the same app (new track, episode, video).
+        let appChanged   = (update.app   != nil) && (update.app   != info.app)
+        let titleChanged = (update.title != nil) && (update.title != info.title)
+        if appChanged || titleChanged {
+            info.title       = nil
+            info.artist      = nil
+            info.album       = nil
+            info.elapsedTime = nil
+            info.duration    = nil
+            info.playbackRate = nil
         }
+
         if let v = update.title        { info.title        = v }
         if let v = update.artist       { info.artist       = v }
         if let v = update.album        { info.album        = v }

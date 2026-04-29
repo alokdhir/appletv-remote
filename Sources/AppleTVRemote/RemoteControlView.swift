@@ -233,6 +233,63 @@ struct RemoteControlView: View {
     }
 
     private var remoteLayout: some View {
+        VStack(spacing: 0) {
+            remoteScrollContent
+            nowPlayingFooter
+        }
+    }
+
+    @ViewBuilder
+    private var nowPlayingFooter: some View {
+        if let np = connection.nowPlaying, hasFooterContent(np) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(footerTitle(np) ?? "")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(footerTime(np) ?? "")
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .layoutPriority(1)   // never get truncated in favour of the title
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(.quaternary.opacity(0.4))
+        }
+    }
+
+    private func hasFooterContent(_ np: NowPlayingInfo) -> Bool {
+        footerTitle(np) != nil || footerTime(np) != nil
+    }
+
+    private func footerTitle(_ np: NowPlayingInfo) -> String? {
+        if let t = np.title, !t.isEmpty { return t }
+        if let a = np.app,   !a.isEmpty { return a }
+        return nil
+    }
+
+    private func footerTime(_ np: NowPlayingInfo) -> String? {
+        guard let elapsed = np.elapsedTime else { return nil }
+        if let total = np.duration, total > 0 {
+            return "\(Self.formatTime(elapsed)) / \(Self.formatTime(total))"
+        }
+        return Self.formatTime(elapsed)
+    }
+
+    /// "1:23" or "1:02:34" — same convention as `atv status`.
+    private static func formatTime(_ seconds: Double) -> String {
+        let s   = Int(seconds.rounded())
+        let h   = s / 3600
+        let m   = (s % 3600) / 60
+        let sec = s % 60
+        return h > 0
+            ? String(format: "%d:%02d:%02d", h, m, sec)
+            : String(format: "%d:%02d", m, sec)
+    }
+
+    private var remoteScrollContent: some View {
         ScrollView {
             VStack(spacing: 20) {
                 KeyCatcher(onCommand: { connection.send($0) },
