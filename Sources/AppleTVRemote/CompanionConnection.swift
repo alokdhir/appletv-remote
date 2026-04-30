@@ -323,6 +323,16 @@ final class CompanionConnection: ObservableObject {
     func send(_ command: RemoteCommand) {
         guard state == .connected else { return }
         session?.send(command)
+        // Left / right while watching video acts as ff / rew — the ATV
+        // scrubs ~10s. Nudge the AirPlay tunnel for a fresh state push so
+        // the displayed elapsed snaps to the new position rather than
+        // waiting for the ATV's own (sometimes delayed) reactive push.
+        // Small delay so the scrub completes before we ask for state.
+        if command == .left || command == .right {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.requestNowPlayingRefresh()
+            }
+        }
     }
 
     func sendLongPress(_ command: RemoteCommand, ms: Int = 1000) {
@@ -389,10 +399,27 @@ final class CompanionConnection: ObservableObject {
                 )
                 DispatchQueue.main.async { [weak self] in
                     self?.airPlayTunnel = tunnel
+                    // No need to re-send CLIENT_UPDATES_CONFIG / GET_KEYBOARD_SESSION
+                    // here — AirPlayTunnel.open already issues both as part of its
+                    // standard init sequence.
                 }
             } catch {
                 Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")
             }
+        }
+    }
+
+    /// Ask the ATV to push a fresh now-playing SET_STATE so elapsed time
+    /// snaps to ground truth. Used after the user issues a command that
+    /// likely changed playback position (resume, scrub, ff/rew). Cheap —
+    /// two MRP frames; the ATV ignores GET_STATE post-init, but the
+    /// CLIENT_UPDATES_CONFIG + GET_KEYBOARD_SESSION pair is the sequence
+    /// that empirically triggers a fresh push including elapsed time.
+    private func requestNowPlayingRefresh() {
+        guard let tunnel = airPlayTunnel else { return }
+        writeQueue.async {
+            try? tunnel.mrp.send(MRPMessage.clientUpdatesConfig())
+            try? tunnel.mrp.send(MRPMessage.getKeyboardSession())
         }
     }
 
@@ -499,24 +526,33 @@ final class CompanionConnection: ObservableObject {
         if let v = update.album       { info.album        = NowPlayingInfo.filterAlbum(v) }
         if let v = update.duration    { info.duration     = v }
         if let v = update.elapsedTime  { info.elapsedTime  = v }
+        let prevRate = info.playbackRate ?? 0
         if let v = update.playbackRate {
             let ts = update.playbackStateTimestamp ?? 0
             if ts >= lastPlaybackStateTimestamp {
                 lastPlaybackStateTimestamp = ts
-                if v == 0, let live = info.liveElapsed() {
+                // On the play → pause edge, freeze the interpolated value
+                // into elapsedTime before flipping the rate so liveElapsed
+                // returns the right "where we paused" number afterwards.
+                if v == 0, prevRate > 0, let live = info.liveElapsed() {
                     info.elapsedTime = live
                 }
                 info.playbackRate = v
             }
         }
         let nowRate = info.playbackRate ?? 0
-        if nowRate > 0, update.elapsedTime != nil || update.playbackRate != nil {
-            // Anchor whenever we have confirmed playing state: either a fresh
-            // elapsed arrived, or the rate just changed to playing. The frozen
-            // elapsedTime (set on pause) is a reliable base for resume.
-            info.elapsedAnchor = Date()
-        } else if nowRate == 0 {
+
+        // Anchor invariant: while playing (rate > 0), `elapsedAnchor` MUST be set
+        // — liveElapsed needs it to interpolate. While paused, the anchor is nil.
+        //   • elapsedTime fresh from the push → re-anchor to now (covers seek + start).
+        //   • rate just flipped 0 → >0 (resume) → anchor the existing elapsedTime
+        //     to now even though no fresh elapsedTime came in this push.
+        //     Without this, the resume push doesn't tick because anchor stays nil.
+        //   • paused now → clear anchor (liveElapsed falls back to elapsedTime).
+        if nowRate == 0 {
             info.elapsedAnchor = nil
+        } else if update.elapsedTime != nil || prevRate == 0 {
+            info.elapsedAnchor = Date()
         }
         nowPlaying = info
 
@@ -534,6 +570,17 @@ final class CompanionConnection: ObservableObject {
                     ((titleChanged || artistChanged || durationChanged) ? " — track change, cohort reset" : "")
                 )
             }
+        }
+
+        // Pull a fresh state from the ATV when the playback position is
+        // likely to have changed: pause→play resume, or playbackState == 5
+        // (the MRP "seeking" state). Catches scrubs that didn't transit
+        // through our local send() — e.g. the user pressing ff/rew on the
+        // physical Siri Remote.
+        let didResume = nowRate > 0 && prevRate == 0
+        let isSeeking = update.playbackState == 5
+        if didResume || isSeeking {
+            requestNowPlayingRefresh()
         }
     }
 
@@ -576,16 +623,25 @@ final class CompanionConnection: ObservableObject {
         if let v = update.app          { info.app          = v }
         if let v = update.elapsedTime  { info.elapsedTime  = v }
         if let v = update.duration     { info.duration     = v }
+        let prevRate = info.playbackRate ?? 0
         if let v = update.playbackRate {
-            if v == 0, let live = info.liveElapsed() {
+            // play → pause edge: bake the live-interpolated elapsed before
+            // flipping rate so the frozen value is correct.
+            if v == 0, prevRate > 0, let live = info.liveElapsed() {
                 info.elapsedTime = live
             }
             info.playbackRate = v
         }
-        // Companion _iMC never carries elapsed — don't anchor here.
-        // On pause, clear the anchor so liveElapsed returns the frozen value.
-        if (info.playbackRate ?? 0) == 0 {
+        let nowRate = info.playbackRate ?? 0
+        // Anchor invariant: anchor must be set while rate > 0, nil while paused.
+        //   • elapsedTime fresh from the push → re-anchor (Companion rarely
+        //     carries elapsed, but if it does, honour it).
+        //   • paused → playing transition → anchor existing elapsedTime to now.
+        //   • now paused → clear anchor.
+        if nowRate == 0 {
             info.elapsedAnchor = nil
+        } else if update.elapsedTime != nil || prevRate == 0 {
+            info.elapsedAnchor = Date()
         }
         info.raw.merge(update.raw) { _, new in new }
         nowPlaying = info

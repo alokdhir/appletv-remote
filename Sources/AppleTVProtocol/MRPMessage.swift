@@ -93,7 +93,7 @@ public enum MRPMessage {
         return makeMessage(type: .getKeyboardSession, inner: Data())
     }
 
-    /// Wrap an inner message in a ProtocolMessage envelope with the required
+/// Wrap an inner message in a ProtocolMessage envelope with the required
     /// errorCode (field 4 = 0) and uniqueIdentifier (field 85 = UUID) fields
     /// that pyatv always includes. The ATV appears to silently ignore messages
     /// that lack these fields.
