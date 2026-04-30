@@ -36,10 +36,6 @@ final class CompanionConnection: ObservableObject {
     // disconnect(). Replaced on each reconnect.
     private var session: CompanionSession?
 
-    // Set to true when connect() was initiated via wakeAndConnect() so we
-    // auto-send a Menu HID press after the session is established.
-    private var sendWakeOnConnect = false
-
     /// Set when the user explicitly tore down the connection (via `disconnect()`).
     @Published var userInitiatedDisconnect = false
 
@@ -60,11 +56,6 @@ final class CompanionConnection: ObservableObject {
     private var lastPlaybackStateTimestamp: Double = 0
 
     // MARK: - Connect / Disconnect
-
-    func wakeAndPowerOn(to device: AppleTVDevice) {
-        sendWakeOnConnect = true
-        wakeAndConnect(to: device)
-    }
 
     /// Smart connect: probes the device first (0.3 s TCP timeout).
     func wakeAndConnect(to device: AppleTVDevice) {
@@ -125,7 +116,6 @@ final class CompanionConnection: ObservableObject {
                     let s3 = self
                     await MainActor.run {
                         guard let conn = s3, conn.state == .waking else { return }
-                        conn.sendWakeOnConnect = true
                         conn.connect(to: device)
                     }
                     return
@@ -142,7 +132,6 @@ final class CompanionConnection: ObservableObject {
             let s4 = self
             await MainActor.run {
                 guard let conn = s4, conn.state == .waking else { return }
-                conn.sendWakeOnConnect = true
                 conn.connect(to: device)
             }
         }
@@ -309,7 +298,6 @@ final class CompanionConnection: ObservableObject {
         currentDevice = nil
         pairingFlow.reset()
         transport.reset()
-        sendWakeOnConnect = false
         attentionState = nil
         keyboardActive = false
         lastPlaybackStateTimestamp = 0
@@ -467,12 +455,6 @@ final class CompanionConnection: ObservableObject {
                     self.session?.sendSessionInit(clientID: stored.clientID, name: stored.name)
                     self.session?.startKeepalive()
                     self.startAirPlayMRP()
-                    if self.sendWakeOnConnect {
-                        self.sendWakeOnConnect = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                            self?.send(.menu)
-                        }
-                    }
                 }
             },
             installKeys: { [weak self] enc, dec in

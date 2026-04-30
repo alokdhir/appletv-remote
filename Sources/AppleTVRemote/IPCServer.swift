@@ -482,7 +482,7 @@ final class IPCServer {
             client.send(.response(.failure(id, msg)))
             return
         }
-        connection.wakeAndPowerOn(to: device)
+        connection.wakeAndConnect(to: device)
         client.send(.response(.ok(id)))
     }
 
