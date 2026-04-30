@@ -248,6 +248,10 @@ struct RemoteControlView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(footerDetail(np).map { tip in
+                            DelayedTooltip(text: tip, delay: 0.4)
+                                .allowsHitTesting(true)
+                        })
                     Text(footerTime(np, at: ctx.date) ?? "")
                         .monospacedDigit()
                         .lineLimit(1)
@@ -270,6 +274,12 @@ struct RemoteControlView: View {
         if let t = np.title, !t.isEmpty { return t }
         if let a = np.app,   !a.isEmpty { return a }
         return nil
+    }
+
+    private func footerDetail(_ np: NowPlayingInfo) -> String? {
+        let bits = [np.title, np.artist, np.album].compactMap { $0 }.filter { !$0.isEmpty }
+        guard bits.count > 1 else { return nil }
+        return bits.joined(separator: " — ")
     }
 
     private func footerTime(_ np: NowPlayingInfo, at date: Date) -> String? {

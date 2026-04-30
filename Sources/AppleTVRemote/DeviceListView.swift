@@ -4,7 +4,7 @@ import AppKit
 
 // MARK: - Delayed tooltip helper
 
-private struct DelayedTooltip: NSViewRepresentable {
+struct DelayedTooltip: NSViewRepresentable {
     let text: String
     let delay: TimeInterval
 
