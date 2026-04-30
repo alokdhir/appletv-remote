@@ -23,10 +23,17 @@ public enum MRPDecoder {
 
     /// Attempt to decode a now-playing update from a raw ProtocolMessage payload.
     /// Returns nil if the message type carries no playback-relevant data.
+    ///
+    /// tvOS sends the full state on session bring-up via SET_STATE_MESSAGE
+    /// (type 4) and then incremental metadata-only deltas via
+    /// UPDATE_CONTENT_ITEM_MESSAGE (type 56) for elapsed-time / artwork /
+    /// title changes. Without parsing 56 our anchor never moves between
+    /// session-restart events, so the displayed elapsed drifts.
     public static func decodeNowPlaying(from data: Data) -> MRPNowPlayingUpdate? {
         guard let msgType = data.protobufVarintField(fieldNumber: 1) else { return nil }
         switch msgType {
         case 4:  return decodeSetState(data)
+        case 56: return decodeUpdateContentItem(data)
         default: return nil
         }
     }
@@ -57,16 +64,41 @@ public enum MRPDecoder {
 
         // playbackQueue (field 3) → first ContentItem → ContentItemMetadata
         if let pq = ssm.protobufBytesField(fieldNumber: 3),
-           let ci = pq.protobufBytesField(fieldNumber: 2),   // first ContentItem
-           let meta = ci.protobufBytesField(fieldNumber: 2) { // ContentItemMetadata
-            u.title    = meta.protobufStringField(fieldNumber: 1)
-            u.album    = meta.protobufStringField(fieldNumber: 6)
-            u.artist   = meta.protobufStringField(fieldNumber: 7)
-            if let d = meta.protobufDoubleField(fieldNumber: 14) { u.duration    = d }
-            if let e = meta.protobufDoubleField(fieldNumber: 35) { u.elapsedTime = e }
+           let ci = pq.protobufBytesField(fieldNumber: 2) {
+            applyContentItem(ci, into: &u)
         }
 
         return u.isEmpty ? nil : u
+    }
+
+    // MARK: - UPDATE_CONTENT_ITEM_MESSAGE (type 56, ext field 60)
+
+    /// tvOS posts these as incremental updates between SET_STATE pushes —
+    /// new elapsed time, artwork, or metadata for the currently-playing
+    /// item. Carries no playback-rate / state info, so we only update the
+    /// metadata cohort and let SET_STATE drive rate transitions.
+    private static func decodeUpdateContentItem(_ outer: Data) -> MRPNowPlayingUpdate? {
+        guard let inner = outer.protobufBytesField(fieldNumber: 60) else { return nil }
+        var u = MRPNowPlayingUpdate()
+
+        // contentItems (field 1, repeated). The first item is the active
+        // one; we ignore later items (representing queued-up content).
+        if let ci = inner.protobufBytesField(fieldNumber: 1) {
+            applyContentItem(ci, into: &u)
+        }
+
+        return u.isEmpty ? nil : u
+    }
+
+    /// Pull title / artist / album / duration / elapsedTime out of a
+    /// ContentItem's metadata payload (field 2).
+    private static func applyContentItem(_ ci: Data, into u: inout MRPNowPlayingUpdate) {
+        guard let meta = ci.protobufBytesField(fieldNumber: 2) else { return }
+        if let v = meta.protobufStringField(fieldNumber: 1)  { u.title    = v }
+        if let v = meta.protobufStringField(fieldNumber: 6)  { u.album    = v }
+        if let v = meta.protobufStringField(fieldNumber: 7)  { u.artist   = v }
+        if let v = meta.protobufDoubleField(fieldNumber: 14) { u.duration    = v }
+        if let v = meta.protobufDoubleField(fieldNumber: 35) { u.elapsedTime = v }
     }
 }
 
