@@ -383,21 +383,7 @@ final class CompanionConnection: ObservableObject {
                     onMessage: { [weak self] msgData in
                         guard let update = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
                         DispatchQueue.main.async { [weak self] in
-                            guard let self else { return }
-                            var info = self.nowPlaying ?? NowPlayingInfo()
-                            if let v = update.title       { info.title        = v }
-                            if let v = update.artist      { info.artist       = v }
-                            if let v = update.album       { info.album        = v }
-                            if let v = update.duration    { info.duration     = v }
-                            if let v = update.elapsedTime { info.elapsedTime  = v }
-                            if let v = update.playbackRate {
-                                let ts = update.playbackStateTimestamp ?? 0
-                                if ts >= self.lastPlaybackStateTimestamp {
-                                    self.lastPlaybackStateTimestamp = ts
-                                    info.playbackRate = v
-                                }
-                            }
-                            self.nowPlaying = info
+                            self?.applyAirPlayUpdate(update)
                         }
                     }
                 )
@@ -482,20 +468,88 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Now Playing merge
 
+    /// Merge an AirPlay-MRP push into `nowPlaying`. Mirrors `mergeNowPlaying`'s
+    /// track-change detection so an old episode's album field doesn't bleed
+    /// into a new one when the new push doesn't include it.
+    ///
+    /// AirPlay pushes are the actual source of title/artist/album/elapsed/
+    /// duration metadata — Companion `_iMC` only carries `_mcF` flags — so
+    /// the bleed bug lives entirely on this path.
+    private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
+        var info = nowPlaying ?? NowPlayingInfo()
+
+        let titleChanged    = (update.title    != nil) && (update.title    != info.title)
+        let artistChanged   = (update.artist   != nil) && (update.artist   != info.artist)
+        let durationChanged: Bool = {
+            guard let new = update.duration, let old = info.duration else { return false }
+            return abs(new - old) > 5
+        }()
+        if titleChanged || artistChanged || durationChanged {
+            info.title       = nil
+            info.artist      = nil
+            info.album       = nil
+            info.elapsedTime = nil
+            info.duration    = nil
+            info.playbackRate = nil
+        }
+
+        if let v = update.title       { info.title        = v }
+        if let v = update.artist      { info.artist       = v }
+        if let v = update.album       { info.album        = NowPlayingInfo.filterAlbum(v) }
+        if let v = update.duration    { info.duration     = v }
+        if let v = update.elapsedTime { info.elapsedTime  = v }
+        if let v = update.playbackRate {
+            let ts = update.playbackStateTimestamp ?? 0
+            if ts >= lastPlaybackStateTimestamp {
+                lastPlaybackStateTimestamp = ts
+                info.playbackRate = v
+            }
+        }
+        nowPlaying = info
+
+        if Log.verbose {
+            let parts: [String] = [
+                update.title.map     { "title=\"\($0)\"" },
+                update.artist.map    { "artist=\"\($0)\"" },
+                update.album.map     { "album=\"\($0)\"" },
+                update.duration.map  { "duration=\($0)" },
+                update.elapsedTime.map { "elapsed=\($0)" },
+                update.playbackRate.map { "rate=\($0)" },
+            ].compactMap { $0 }
+            if !parts.isEmpty {
+                Log.companion.report(
+                    "AirPlay → now-playing update [\(parts.joined(separator: " "))]" +
+                    ((titleChanged || artistChanged || durationChanged)
+                        ? " — track change, cohort reset" : "")
+                )
+            }
+        }
+    }
+
     private func mergeNowPlaying(from inner: [String: Any]) {
         let update = NowPlayingInfo(from: inner)
         var info = nowPlaying ?? NowPlayingInfo()
 
         // Clear the cohort whenever we detect a new track/episode. Without this,
         // fields from an earlier track stick around forever if the next push
-        // doesn't include them — e.g. the album field from a previous show
-        // bleeds into "title — artist — album" of the current one. We trigger
-        // on either:
+        // doesn't include them — e.g. a previous show's album field bleeding
+        // into "title — artist — album" of the current one. Trigger on:
         //   • app change (tvOS switched apps), OR
-        //   • title change within the same app (new track, episode, video).
-        let appChanged   = (update.app   != nil) && (update.app   != info.app)
-        let titleChanged = (update.title != nil) && (update.title != info.title)
-        if appChanged || titleChanged {
+        //   • title change (new song / movie / different show), OR
+        //   • artist change with same title (new episode of a series — title
+        //     stays "The Expanse", artist goes "S2 E5 Home" → "S2 E6 Paradigm
+        //     Shift"), OR
+        //   • duration change of >5s while there's an existing track (per-
+        //     episode runtime differs even when title+artist coincidentally
+        //     don't change).
+        let appChanged    = (update.app      != nil) && (update.app      != info.app)
+        let titleChanged  = (update.title    != nil) && (update.title    != info.title)
+        let artistChanged = (update.artist   != nil) && (update.artist   != info.artist)
+        let durationChanged: Bool = {
+            guard let new = update.duration, let old = info.duration else { return false }
+            return abs(new - old) > 5
+        }()
+        if appChanged || titleChanged || artistChanged || durationChanged {
             info.title       = nil
             info.artist      = nil
             info.album       = nil
@@ -605,7 +659,8 @@ public struct NowPlayingInfo: Equatable, Sendable {
         }
         self.title        = str("title", "kMRMediaRemoteNowPlayingInfoTitle")
         self.artist       = str("artist", "kMRMediaRemoteNowPlayingInfoArtist")
-        self.album        = str("album", "kMRMediaRemoteNowPlayingInfoAlbum")
+        self.album        = NowPlayingInfo.filterAlbum(
+            str("album", "kMRMediaRemoteNowPlayingInfoAlbum"))
         self.app          = str("clientName", "displayName", "bundleIdentifier")
         self.elapsedTime  = num("elapsedTime", "kMRMediaRemoteNowPlayingInfoElapsedTime")
         self.duration     = num("duration", "kMRMediaRemoteNowPlayingInfoDuration")
@@ -616,6 +671,18 @@ public struct NowPlayingInfo: Equatable, Sendable {
             r[k] = String(describing: v)
         }
         self.raw = r
+    }
+
+    /// Drop "Season N, Episode N" album values that Apple TV's catalog injects
+    /// for video content. Those numbers are the catalog's internal index, not
+    /// the show's real season/episode (we've seen the same "Season 8,
+    /// Episode 3" string attached to two unrelated shows). Real album
+    /// metadata for music ("A Night at the Opera" etc.) doesn't match the
+    /// pattern and is preserved.
+    static func filterAlbum(_ album: String?) -> String? {
+        guard let album else { return nil }
+        return album.range(of: #"^Season \d+, Episode \d+$"#,
+                           options: .regularExpression) != nil ? nil : album
     }
 }
 
