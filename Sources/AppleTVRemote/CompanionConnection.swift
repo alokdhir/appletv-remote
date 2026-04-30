@@ -572,14 +572,22 @@ final class CompanionConnection: ObservableObject {
             }
         }
 
-        // Pull a fresh state from the ATV when the playback position is
-        // likely to have changed: pause→play resume, or playbackState == 5
-        // (the MRP "seeking" state). Catches scrubs that didn't transit
-        // through our local send() — e.g. the user pressing ff/rew on the
-        // physical Siri Remote.
+        // Pull a fresh state from the ATV any time playback context just
+        // changed — the first push describing the change often arrives
+        // before the ATV has its real elapsed value to share, or arrives
+        // without elapsedTime at all (rate-only push). Asking again
+        // promptly closes the gap and replaces our interpolated/zeroed
+        // estimate with ground truth:
+        //   • didResume   : 0 → playing edge (rate flip)
+        //   • didPause    : playing → 0 edge (rate flip)
+        //   • trackChanged: cohort reset just fired (new episode, song,
+        //                   video, etc.) — first push may lack elapsed.
+        //   • isSeeking   : playbackState == 5 (MRP "seeking")
         let didResume = nowRate > 0 && prevRate == 0
+        let didPause  = nowRate == 0 && prevRate > 0
+        let trackChanged = titleChanged || artistChanged || durationChanged
         let isSeeking = update.playbackState == 5
-        if didResume || isSeeking {
+        if didResume || didPause || trackChanged || isSeeking {
             requestNowPlayingRefresh()
         }
     }
