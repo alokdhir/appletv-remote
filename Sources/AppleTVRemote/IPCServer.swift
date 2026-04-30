@@ -374,12 +374,16 @@ final class IPCServer {
     }
 
     private func currentStatus() -> IPCStatus {
+        // Use liveElapsed() so the CLI shows time interpolated forward from
+        // the last AirPlay push (which only fires on transitions). Without
+        // this, two `atv status` calls a few seconds apart return the same
+        // elapsed value until the ATV happens to push again.
         let np = connection.nowPlaying.map {
             IPCNowPlaying(title: $0.title,
                           artist: $0.artist,
                           album: $0.album,
                           app: $0.app,
-                          elapsedTime: $0.elapsedTime,
+                          elapsedTime: $0.liveElapsed(),
                           duration: $0.duration,
                           playbackRate: $0.playbackRate)
         }

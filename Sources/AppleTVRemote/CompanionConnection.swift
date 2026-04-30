@@ -491,18 +491,28 @@ final class CompanionConnection: ObservableObject {
             info.elapsedTime = nil
             info.duration    = nil
             info.playbackRate = nil
+            info.elapsedAnchor = nil
         }
 
         if let v = update.title       { info.title        = v }
         if let v = update.artist      { info.artist       = v }
         if let v = update.album       { info.album        = NowPlayingInfo.filterAlbum(v) }
         if let v = update.duration    { info.duration     = v }
-        if let v = update.elapsedTime { info.elapsedTime  = v }
+        if let v = update.elapsedTime {
+            info.elapsedTime  = v
+            info.elapsedAnchor = Date()  // stamp for client-side live interpolation
+        }
         if let v = update.playbackRate {
             let ts = update.playbackStateTimestamp ?? 0
             if ts >= lastPlaybackStateTimestamp {
                 lastPlaybackStateTimestamp = ts
                 info.playbackRate = v
+                // Re-anchor on rate change so a pause→play transition starts
+                // counting from the moment of the transition, not from when
+                // the elapsed value was last received.
+                if info.elapsedTime != nil {
+                    info.elapsedAnchor = Date()
+                }
             }
         }
         nowPlaying = info
@@ -556,15 +566,22 @@ final class CompanionConnection: ObservableObject {
             info.elapsedTime = nil
             info.duration    = nil
             info.playbackRate = nil
+            info.elapsedAnchor = nil
         }
 
         if let v = update.title        { info.title        = v }
         if let v = update.artist       { info.artist       = v }
         if let v = update.album        { info.album        = v }
         if let v = update.app          { info.app          = v }
-        if let v = update.elapsedTime  { info.elapsedTime  = v }
+        if let v = update.elapsedTime  {
+            info.elapsedTime = v
+            info.elapsedAnchor = Date()
+        }
         if let v = update.duration     { info.duration     = v }
-        if let v = update.playbackRate { info.playbackRate = v }
+        if let v = update.playbackRate {
+            info.playbackRate = v
+            if info.elapsedTime != nil { info.elapsedAnchor = Date() }
+        }
         info.raw.merge(update.raw) { _, new in new }
         nowPlaying = info
         Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
@@ -632,6 +649,11 @@ public struct NowPlayingInfo: Equatable, Sendable {
     public var duration: Double?
     /// 0.0 = paused, 1.0 = playing at normal speed. Some apps report other rates.
     public var playbackRate: Double?
+    /// Local Mac timestamp captured at the moment `elapsedTime` was last set.
+    /// Used by views to compute live elapsed = elapsedTime + (now - anchor) * rate
+    /// while playing — the ATV pushes elapsed only on start / seek / pause,
+    /// not every second.
+    public var elapsedAnchor: Date?
     /// Every key/value we saw, stringified. Useful for debugging and for any
     /// field we haven't named above yet.
     public var raw: [String: String]
@@ -639,7 +661,20 @@ public struct NowPlayingInfo: Equatable, Sendable {
     public init() {
         self.title = nil; self.artist = nil; self.album = nil; self.app = nil
         self.elapsedTime = nil; self.duration = nil; self.playbackRate = nil
+        self.elapsedAnchor = nil
         self.raw = [:]
+    }
+
+    /// Live elapsed time, interpolated from the anchor when playing.
+    /// Falls back to the stored elapsed when paused, missing, or unanchored.
+    public func liveElapsed(at date: Date = Date()) -> Double? {
+        guard let elapsed = elapsedTime else { return nil }
+        guard let anchor = elapsedAnchor, let rate = playbackRate, rate > 0 else {
+            return elapsed
+        }
+        let computed = elapsed + date.timeIntervalSince(anchor) * rate
+        if let dur = duration { return min(computed, dur) }
+        return computed
     }
 
     public init(from dict: [String: Any]) {

@@ -242,26 +242,33 @@ struct RemoteControlView: View {
     @ViewBuilder
     private var nowPlayingFooter: some View {
         if let np = connection.nowPlaying, hasFooterContent(np) {
-            HStack(alignment: .center, spacing: 8) {
-                Text(footerTitle(np) ?? "")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(footerTime(np) ?? "")
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .layoutPriority(1)   // never get truncated in favour of the title
+            // TimelineView redraws every second so the elapsed time interpolates
+            // forward between AirPlay pushes (which only arrive on transitions —
+            // start, seek, pause). When paused (rate == 0) `liveElapsed` returns
+            // the static value, so the redraws are wasted but cheap and the
+            // timeline keeps everything smooth on resume.
+            TimelineView(.periodic(from: .now, by: 1.0)) { ctx in
+                HStack(alignment: .center, spacing: 8) {
+                    Text(footerTitle(np) ?? "")
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(footerTime(np, at: ctx.date) ?? "")
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .layoutPriority(1)   // never truncate time in favour of title
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.4))
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.4))
         }
     }
 
     private func hasFooterContent(_ np: NowPlayingInfo) -> Bool {
-        footerTitle(np) != nil || footerTime(np) != nil
+        footerTitle(np) != nil || np.elapsedTime != nil
     }
 
     private func footerTitle(_ np: NowPlayingInfo) -> String? {
@@ -270,8 +277,8 @@ struct RemoteControlView: View {
         return nil
     }
 
-    private func footerTime(_ np: NowPlayingInfo) -> String? {
-        guard let elapsed = np.elapsedTime else { return nil }
+    private func footerTime(_ np: NowPlayingInfo, at date: Date) -> String? {
+        guard let elapsed = np.liveElapsed(at: date) else { return nil }
         if let total = np.duration, total > 0 {
             return "\(Self.formatTime(elapsed)) / \(Self.formatTime(total))"
         }
