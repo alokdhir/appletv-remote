@@ -242,11 +242,6 @@ struct RemoteControlView: View {
     @ViewBuilder
     private var nowPlayingFooter: some View {
         if let np = connection.nowPlaying, hasFooterContent(np) {
-            // TimelineView redraws every second so the elapsed time interpolates
-            // forward between AirPlay pushes (which only arrive on transitions —
-            // start, seek, pause). When paused (rate == 0) `liveElapsed` returns
-            // the static value, so the redraws are wasted but cheap and the
-            // timeline keeps everything smooth on resume.
             TimelineView(.periodic(from: .now, by: 1.0)) { ctx in
                 HStack(alignment: .center, spacing: 8) {
                     Text(footerTitle(np) ?? "")
@@ -256,7 +251,7 @@ struct RemoteControlView: View {
                     Text(footerTime(np, at: ctx.date) ?? "")
                         .monospacedDigit()
                         .lineLimit(1)
-                        .layoutPriority(1)   // never truncate time in favour of title
+                        .layoutPriority(1)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

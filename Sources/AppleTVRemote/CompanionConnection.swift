@@ -485,11 +485,11 @@ final class CompanionConnection: ObservableObject {
             return abs(new - old) > 5
         }()
         if titleChanged || artistChanged || durationChanged {
-            info.title       = nil
-            info.artist      = nil
-            info.album       = nil
-            info.elapsedTime = nil
-            info.duration    = nil
+            info.title        = nil
+            info.artist       = nil
+            info.album        = nil
+            info.elapsedTime  = nil
+            info.duration     = nil
             info.playbackRate = nil
             info.elapsedAnchor = nil
         }
@@ -498,39 +498,40 @@ final class CompanionConnection: ObservableObject {
         if let v = update.artist      { info.artist       = v }
         if let v = update.album       { info.album        = NowPlayingInfo.filterAlbum(v) }
         if let v = update.duration    { info.duration     = v }
-        if let v = update.elapsedTime {
-            info.elapsedTime  = v
-            info.elapsedAnchor = Date()  // stamp for client-side live interpolation
-        }
+        if let v = update.elapsedTime  { info.elapsedTime  = v }
         if let v = update.playbackRate {
             let ts = update.playbackStateTimestamp ?? 0
             if ts >= lastPlaybackStateTimestamp {
                 lastPlaybackStateTimestamp = ts
-                info.playbackRate = v
-                // Re-anchor on rate change so a pause→play transition starts
-                // counting from the moment of the transition, not from when
-                // the elapsed value was last received.
-                if info.elapsedTime != nil {
-                    info.elapsedAnchor = Date()
+                if v == 0, let live = info.liveElapsed() {
+                    info.elapsedTime = live
                 }
+                info.playbackRate = v
             }
+        }
+        let nowRate = info.playbackRate ?? 0
+        if nowRate > 0, update.elapsedTime != nil || update.playbackRate != nil {
+            // Anchor whenever we have confirmed playing state: either a fresh
+            // elapsed arrived, or the rate just changed to playing. The frozen
+            // elapsedTime (set on pause) is a reliable base for resume.
+            info.elapsedAnchor = Date()
+        } else if nowRate == 0 {
+            info.elapsedAnchor = nil
         }
         nowPlaying = info
 
         if Log.verbose {
             let parts: [String] = [
-                update.title.map     { "title=\"\($0)\"" },
-                update.artist.map    { "artist=\"\($0)\"" },
-                update.album.map     { "album=\"\($0)\"" },
-                update.duration.map  { "duration=\($0)" },
+                update.title.map       { "title=\"\($0)\"" },
+                update.artist.map      { "artist=\"\($0)\"" },
+                update.duration.map    { "duration=\($0)" },
                 update.elapsedTime.map { "elapsed=\($0)" },
                 update.playbackRate.map { "rate=\($0)" },
             ].compactMap { $0 }
             if !parts.isEmpty {
                 Log.companion.report(
-                    "AirPlay → now-playing update [\(parts.joined(separator: " "))]" +
-                    ((titleChanged || artistChanged || durationChanged)
-                        ? " — track change, cohort reset" : "")
+                    "AirPlay → now-playing [\(parts.joined(separator: " "))]" +
+                    ((titleChanged || artistChanged || durationChanged) ? " — track change, cohort reset" : "")
                 )
             }
         }
@@ -573,14 +574,18 @@ final class CompanionConnection: ObservableObject {
         if let v = update.artist       { info.artist       = v }
         if let v = update.album        { info.album        = v }
         if let v = update.app          { info.app          = v }
-        if let v = update.elapsedTime  {
-            info.elapsedTime = v
-            info.elapsedAnchor = Date()
-        }
+        if let v = update.elapsedTime  { info.elapsedTime  = v }
         if let v = update.duration     { info.duration     = v }
         if let v = update.playbackRate {
+            if v == 0, let live = info.liveElapsed() {
+                info.elapsedTime = live
+            }
             info.playbackRate = v
-            if info.elapsedTime != nil { info.elapsedAnchor = Date() }
+        }
+        // Companion _iMC never carries elapsed — don't anchor here.
+        // On pause, clear the anchor so liveElapsed returns the frozen value.
+        if (info.playbackRate ?? 0) == 0 {
+            info.elapsedAnchor = nil
         }
         info.raw.merge(update.raw) { _, new in new }
         nowPlaying = info
@@ -649,10 +654,7 @@ public struct NowPlayingInfo: Equatable, Sendable {
     public var duration: Double?
     /// 0.0 = paused, 1.0 = playing at normal speed. Some apps report other rates.
     public var playbackRate: Double?
-    /// Local Mac timestamp captured at the moment `elapsedTime` was last set.
-    /// Used by views to compute live elapsed = elapsedTime + (now - anchor) * rate
-    /// while playing — the ATV pushes elapsed only on start / seek / pause,
-    /// not every second.
+    /// Wall-clock time on this Mac when `elapsedTime` was last stamped by the ATV.
     public var elapsedAnchor: Date?
     /// Every key/value we saw, stringified. Useful for debugging and for any
     /// field we haven't named above yet.
@@ -665,8 +667,8 @@ public struct NowPlayingInfo: Equatable, Sendable {
         self.raw = [:]
     }
 
-    /// Live elapsed time, interpolated from the anchor when playing.
-    /// Falls back to the stored elapsed when paused, missing, or unanchored.
+    /// Elapsed time ticking forward from the last ATV push while playing.
+    /// Returns the raw `elapsedTime` when paused or unanchored.
     public func liveElapsed(at date: Date = Date()) -> Double? {
         guard let elapsed = elapsedTime else { return nil }
         guard let anchor = elapsedAnchor, let rate = playbackRate, rate > 0 else {
