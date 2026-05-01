@@ -791,7 +791,7 @@ public struct NowPlayingInfo: Equatable, Sendable {
     /// pattern and is preserved.
     static func filterAlbum(_ album: String?) -> String? {
         guard let album else { return nil }
-        return album.range(of: #"^Season \d+, Episode \d+$"#,
+        return album.range(of: #"^\p{L}+\s+\d+,\s*\p{L}+\s+\d+$"#,
                            options: .regularExpression) != nil ? nil : album
     }
 }
