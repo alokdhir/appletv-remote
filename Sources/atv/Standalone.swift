@@ -39,9 +39,9 @@ enum StandaloneDiscovery {
     static func discover(timeout: TimeInterval = 3.0) -> [AppleTVDevice] {
         let queue = DispatchQueue(label: "atv.standalone.discovery")
         let lock  = NSLock()
-        var found: [String: AppleTVDevice] = [:]
-        var seenNames: Set<String> = []
-        var resolvers: [NWConnection] = []
+        nonisolated(unsafe) var found: [String: AppleTVDevice] = [:]
+        nonisolated(unsafe) var seenNames: Set<String> = []
+        nonisolated(unsafe) var resolvers: [NWConnection] = []
 
         let params = NWParameters.tcp
         params.includePeerToPeer = false

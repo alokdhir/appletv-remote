@@ -163,7 +163,7 @@ public final class PairingFlow {
 
     /// Called from `CompanionConnection.submitPairingPin(_:)` after the user
     /// enters their PIN. Runs SRP off-main to avoid beachballing.
-    public func submitPin(_ pin: String, onSend: @escaping (Data) -> Void, onError: @escaping (String) -> Void) {
+    public func submitPin(_ pin: String, onSend: @escaping @Sendable @MainActor (Data) -> Void, onError: @escaping @Sendable @MainActor (String) -> Void) {
         guard let m2 = pendingM2Data else { return }
         let capturedPairing = pairing
         Task.detached {

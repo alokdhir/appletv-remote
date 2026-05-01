@@ -17,10 +17,17 @@ final class WindowHider: NSObject, NSWindowDelegate {
 /// NSView subclass that intercepts window attachment to hide the window before
 /// it ever appears on screen (avoiding the startup flash), and to configure
 /// translucency so the sibling NSVisualEffectView background shows through.
+@MainActor
 class WindowSetupView: NSView {
     private var observers: [NSObjectProtocol] = []
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers.removeAll()
+            return
+        }
         guard let window else { return }
         window.delegate = WindowHider.shared
         // Store a direct reference so MenuBarController can show it reliably.
@@ -65,15 +72,19 @@ class WindowSetupView: NSView {
 
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak window] _ in
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
-                window?.animator().alphaValue = 1.0
+            MainActor.assumeIsolated {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    window?.animator().alphaValue = 1.0
+                }
             }
         })
         observers.append(nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak window] _ in
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
-                window?.animator().alphaValue = 0.8
+            MainActor.assumeIsolated {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.2
+                    window?.animator().alphaValue = 0.8
+                }
             }
         })
 
@@ -90,10 +101,6 @@ class WindowSetupView: NSView {
             window.orderOut(nil)
             window.alphaValue = 1
         }
-    }
-
-    deinit {
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 }
 

@@ -28,7 +28,12 @@ final class AutoReconnector: ObservableObject {
 
     deinit {
         retryTask?.cancel()
+    }
+
+    func tearDown() {
+        retryTask?.cancel()
         cancellable?.cancel()
+        cancellable = nil
     }
 
     private var cancellable: AnyCancellable?

@@ -162,7 +162,7 @@ enum IPCClientError: Error, LocalizedError {
 
 /// Braille spinner frame glyphs — single-width, renders nicely in any terminal.
 let spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-var didJustLaunchApp = false
+nonisolated(unsafe) var didJustLaunchApp = false
 
 func connectOrLaunch() -> IPCConnection {
     // Fast path: app is running, answer in <50ms.
@@ -663,9 +663,16 @@ func cmdAirPlayTunnel(_ conn: IPCConnection, device: String) throws {
     }
 }
 
+private actor MRPMessageCollector {
+    private var messages: [Data] = []
+    func add(_ msg: Data) { messages.append(msg) }
+    var isEmpty: Bool { messages.isEmpty }
+    var all: [Data] { messages }
+}
+
 /// Phase 2b gate: open the full AirPlay MRP tunnel (control + data channels).
 /// Waits up to 10s for at least one MRP message from the ATV, then prints it.
-func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
+func cmdAirPlayMRP(_ conn: IPCConnection, device: String) async throws {
     let listResp = try conn.request(.list)
     guard let devices = listResp.devices else { die("no device list from server") }
     guard let tv = devices.first(where: { $0.name == device || $0.id == device }) else {
@@ -678,41 +685,29 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) throws {
     let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
 
     print(cyan("AirPlay MRP tunnel: opening to \(tv.name) (\(host))…"))
-    let lock = NSCondition()
-    var received: [Data] = []
-    let msgCallback: (Data) -> Void = { msg in
-        lock.lock()
-        received.append(msg)
-        lock.broadcast()
-        lock.unlock()
+    let collector = MRPMessageCollector()
+    let msgCallback: @Sendable (Data) -> Void = { msg in
+        Task { await collector.add(msg) }
     }
 
     let tunnel: AirPlayTunnel.Tunnel
-    do { tunnel = try AirPlayTunnel.open(host: host, credentials: creds,
-                                         mrpClientID: airPlayClientID,
-                                         onMessage: msgCallback) }
+    do { tunnel = try await AirPlayTunnel.open(host: host, credentials: creds,
+                                               mrpClientID: airPlayClientID,
+                                               onMessage: msgCallback) }
     catch { die("tunnel open failed: \(error)") }
     defer { tunnel.close() }
-    print(green("✓ MRP data channel up — waiting for messages (10s)…"))
+    print(green("✓ MRP data channel up — waiting for messages (15s)…"))
 
-    // Wait up to 15 seconds collecting all messages.
-    // The ATV typically sends a burst: SET_CONNECTION_STATE then
-    // SET_STATE (type 30) + CONTENT_ITEM_UPDATE (40/45) with
-    // now-playing metadata, then goes quiet. We wait for the first
-    // message, then hold for 5 more seconds to catch the full burst.
-    let firstDeadline = Date().addingTimeInterval(15)
-    lock.lock()
-    while received.isEmpty && Date() < firstDeadline {
-        lock.wait(until: firstDeadline)
+    // Wait up to 15s for the first message, then 5s more to collect the burst.
+    let firstDeadline = ContinuousClock.now + .seconds(15)
+    while await collector.isEmpty {
+        if ContinuousClock.now > firstDeadline { break }
+        try? await Task.sleep(for: .milliseconds(100))
     }
-    if !received.isEmpty {
-        let burstDeadline = Date().addingTimeInterval(5)
-        while Date() < burstDeadline {
-            lock.wait(until: burstDeadline)
-        }
+    if await !collector.isEmpty {
+        try? await Task.sleep(for: .seconds(5))
     }
-    let msgs = received
-    lock.unlock()
+    let msgs = await collector.all
 
     if msgs.isEmpty {
         print(yellow("No MRP messages received in 10s — ATV may need media playing."))
@@ -1131,7 +1126,7 @@ do {
         try cmdAirPlayTunnel(conn, device: args[1])
     case "airplay-mrp":
         guard args.count >= 2 else { die("airplay-mrp requires a device name") }
-        try cmdAirPlayMRP(conn, device: args[1])
+        try await cmdAirPlayMRP(conn, device: args[1])
     case "l", "rew":  try cmdKey(conn, key: .left)
     case "r", "ff":   try cmdKey(conn, key: .right)
     case "u":           try cmdKey(conn, key: .up)

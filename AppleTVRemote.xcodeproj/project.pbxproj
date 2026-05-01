@@ -291,7 +291,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.adhir.appletv-remote";
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6;
 			};
 			name = Release;
 		};
@@ -312,7 +312,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.adhir.appletv-remote";
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6;
 			};
 			name = Debug;
 		};

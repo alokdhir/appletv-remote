@@ -241,11 +241,11 @@ final class IPCServer {
                 if connection.nowPlaying == nil, connection.state == .connected {
                     Task { @MainActor [weak self, weak client] in
                         guard let self, let client else { return }
-                        _ = await self.connection.$nowPlaying
-                            .first(where: { $0 != nil })
-                            .timeout(.seconds(4), scheduler: DispatchQueue.main)
-                            .values
-                            .first(where: { _ in true })
+                        let deadline = ContinuousClock.now + .seconds(4)
+                        while ContinuousClock.now < deadline {
+                            if self.connection.nowPlaying != nil { break }
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
                         client.send(.response(IPCResponse(id: req.id, ok: true,
                                                            status: self.currentStatus())))
                     }

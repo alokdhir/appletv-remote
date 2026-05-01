@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -16,7 +16,8 @@ let package = Package(
     targets: [
         .target(
             name: "AppleTVLogging",
-            path: "Sources/AppleTVLogging"
+            path: "Sources/AppleTVLogging",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "AppleTVProtocol",
@@ -24,11 +25,13 @@ let package = Package(
                 "AppleTVLogging",
                 .product(name: "BigInt", package: "BigInt")
             ],
-            path: "Sources/AppleTVProtocol"
+            path: "Sources/AppleTVProtocol",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "AppleTVIPC",
-            path: "Sources/AppleTVIPC"
+            path: "Sources/AppleTVIPC",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "AppleTVRemote",
@@ -42,7 +45,8 @@ let package = Package(
             resources: [
                 .process("Resources/Assets.xcassets"),
                 .copy("Resources/AppIcons")
-            ]
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "atv",
@@ -51,17 +55,20 @@ let package = Package(
                 "AppleTVProtocol",
                 "AppleTVLogging"
             ],
-            path: "Sources/atv"
+            path: "Sources/atv",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "AppleTVProtocolTests",
             dependencies: ["AppleTVProtocol"],
-            path: "Tests/AppleTVProtocolTests"
+            path: "Tests/AppleTVProtocolTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "AppleTVIPCTests",
             dependencies: ["AppleTVIPC"],
-            path: "Tests/AppleTVIPCTests"
+            path: "Tests/AppleTVIPCTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         )
     ]
 )

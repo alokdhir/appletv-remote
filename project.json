@@ -55,7 +55,7 @@
       "settings": {
         "base": {
           "PRODUCT_BUNDLE_IDENTIFIER": "com.adhir.appletv-remote",
-          "SWIFT_VERSION": "5.0",
+          "SWIFT_VERSION": "6",
           "SWIFT_STRICT_CONCURRENCY": "minimal",
           "MACOSX_DEPLOYMENT_TARGET": "13.0",
           "ENABLE_HARDENED_RUNTIME": "YES",

@@ -372,25 +372,21 @@ final class CompanionConnection: ObservableObject {
               let host = device.host,
               let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
         let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
-        let writeQueue = self.writeQueue
-        writeQueue.async { [weak self] in
+        Task.detached { [weak self] in
             do {
-                let tunnel = try AirPlayTunnel.open(
+                let tunnel = try await AirPlayTunnel.open(
                     host: host,
                     credentials: creds,
                     mrpClientID: airPlayClientID,
                     onMessage: { [weak self] msgData in
                         guard let update = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
-                        DispatchQueue.main.async { [weak self] in
+                        Task { @MainActor [weak self] in
                             self?.applyAirPlayUpdate(update)
                         }
                     }
                 )
-                DispatchQueue.main.async { [weak self] in
+                await MainActor.run { [weak self] in
                     self?.airPlayTunnel = tunnel
-                    // No need to re-send CLIENT_UPDATES_CONFIG / GET_KEYBOARD_SESSION
-                    // here — AirPlayTunnel.open already issues both as part of its
-                    // standard init sequence.
                 }
             } catch {
                 Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")

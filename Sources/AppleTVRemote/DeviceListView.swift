@@ -17,6 +17,7 @@ struct DelayedTooltip: NSViewRepresentable {
         nsView.delay = delay
     }
 
+    @MainActor
     final class TooltipView: NSView {
         var tooltipText: String
         var delay: TimeInterval
@@ -32,14 +33,12 @@ struct DelayedTooltip: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError() }
 
-        /// Without this, a SwiftUI parent that disappears between
-        /// mouseEntered and mouseExited can leave a Timer scheduled or a
-        /// panel on screen with no view left to dismiss it. SwiftUI tears
-        /// down NSViewRepresentables on the main thread, so AppKit access
-        /// here is safe.
-        deinit {
+        override func removeFromSuperview() {
             timer?.invalidate()
+            timer = nil
             tooltipPanel?.orderOut(nil)
+            tooltipPanel = nil
+            super.removeFromSuperview()
         }
 
         override var acceptsFirstResponder: Bool { false }
@@ -63,9 +62,8 @@ struct DelayedTooltip: NSViewRepresentable {
 
         override func mouseEntered(with event: NSEvent) {
             timer?.invalidate()
-            let capturedEvent = event
             timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                self?.showPanel(near: capturedEvent)
+                MainActor.assumeIsolated { self?.showPanel() }
             }
         }
 
@@ -75,7 +73,7 @@ struct DelayedTooltip: NSViewRepresentable {
             hidePanel()
         }
 
-        private func showPanel(near event: NSEvent) {
+        private func showPanel() {
             hidePanel()
 
             let label = NSTextField(labelWithString: tooltipText)
