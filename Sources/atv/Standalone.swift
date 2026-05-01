@@ -37,11 +37,26 @@ enum StandaloneDiscovery {
     /// delegate callbacks never fired because this CLI tool doesn't run the
     /// main loop by default.
     static func discover(timeout: TimeInterval = 3.0) -> [AppleTVDevice] {
+        final class State: @unchecked Sendable {
+            private let lock = NSLock()
+            private var found:     [String: AppleTVDevice] = [:]
+            private var seenNames: Set<String> = []
+            private(set) var resolvers: [NWConnection] = []
+
+            func insertIfNew(_ name: String) -> Bool {
+                lock.withLock { seenNames.insert(name).inserted }
+            }
+            func addResolver(_ conn: NWConnection) {
+                lock.withLock { resolvers.append(conn) }
+            }
+            func setDevice(_ dev: AppleTVDevice, for name: String) {
+                lock.withLock { found[name] = dev }
+            }
+            var hasAny: Bool { lock.withLock { !found.isEmpty } }
+            var devices: [AppleTVDevice] { lock.withLock { Array(found.values).sorted { $0.name < $1.name } } }
+        }
+        let state = State()
         let queue = DispatchQueue(label: "atv.standalone.discovery")
-        let lock  = NSLock()
-        nonisolated(unsafe) var found: [String: AppleTVDevice] = [:]
-        nonisolated(unsafe) var seenNames: Set<String> = []
-        nonisolated(unsafe) var resolvers: [NWConnection] = []
 
         let params = NWParameters.tcp
         params.includePeerToPeer = false
@@ -53,10 +68,7 @@ enum StandaloneDiscovery {
                 guard case .service(let name, _, _, _) = result.endpoint else { continue }
 
                 // Deduplicate — the browser fires again when TXT records update.
-                lock.lock()
-                let isNew = seenNames.insert(name).inserted
-                lock.unlock()
-                if !isNew { continue }
+                if !state.insertIfNew(name) { continue }
 
                 // Filter at browse time using the shared TXT-based Apple TV detection.
                 if case .bonjour(let txt) = result.metadata {
@@ -72,10 +84,10 @@ enum StandaloneDiscovery {
                     ipOpts.version = .v4
                 }
                 let conn = NWConnection(to: result.endpoint, using: udpParams)
-                lock.lock(); resolvers.append(conn); lock.unlock()
+                state.addResolver(conn)
 
-                conn.stateUpdateHandler = { state in
-                    switch state {
+                conn.stateUpdateHandler = { nwState in
+                    switch nwState {
                     case .ready, .preparing:
                         if case .hostPort(let host, let port) = conn.currentPath?.remoteEndpoint ?? .hostPort(host: "0.0.0.0", port: 0) {
                             let h: String = {
@@ -87,12 +99,10 @@ enum StandaloneDiscovery {
                                 }
                             }()
                             if !h.isEmpty, h != "0.0.0.0" {
-                                lock.lock()
                                 var dev = AppleTVDevice(id: name, name: name, endpoint: result.endpoint)
                                 dev.host = h.split(separator: "%").first.map(String.init) ?? h
                                 dev.port = port.rawValue
-                                found[name] = dev
-                                lock.unlock()
+                                state.setDevice(dev, for: name)
                                 conn.cancel()
                             }
                         }
@@ -114,21 +124,14 @@ enum StandaloneDiscovery {
         var graceUntil: Date?
         while Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
-            lock.lock()
-            let anyResolved = !found.isEmpty
-            lock.unlock()
-            if anyResolved && graceUntil == nil {
+            if state.hasAny && graceUntil == nil {
                 graceUntil = Date().addingTimeInterval(0.3)
             }
             if let g = graceUntil, Date() >= g { break }
         }
         browser.cancel()
-        for r in resolvers { r.cancel() }
-
-        lock.lock()
-        let devices = Array(found.values).sorted { $0.name < $1.name }
-        lock.unlock()
-        return devices
+        for r in state.resolvers { r.cancel() }
+        return state.devices
     }
 }
 

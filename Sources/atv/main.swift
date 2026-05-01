@@ -162,12 +162,11 @@ enum IPCClientError: Error, LocalizedError {
 
 /// Braille spinner frame glyphs — single-width, renders nicely in any terminal.
 let spinnerFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
-nonisolated(unsafe) var didJustLaunchApp = false
 
-func connectOrLaunch() -> IPCConnection {
+func connectOrLaunch() -> (conn: IPCConnection, justLaunched: Bool) {
     // Fast path: app is running, answer in <50ms.
     if let c = IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 2) {
-        return c
+        return (c, false)
     }
 
     // Launch the app. -g (background/no-window) is intentionally omitted: with
@@ -196,8 +195,7 @@ func connectOrLaunch() -> IPCConnection {
                 fflush(stdout)
             }
             print(cyan("✓ started"))
-            didJustLaunchApp = true
-            return c
+            return (c, true)
         }
         if showSpinner {
             let glyph = spinnerFrames[frame % spinnerFrames.count]
@@ -376,11 +374,11 @@ _atv() {
 complete -F _atv atv
 """#
 
-func cmdStatus(_ conn: IPCConnection) throws {
+func cmdStatus(_ conn: IPCConnection, justLaunched: Bool = false) throws {
     // If we just launched the app, wait up to 8s for it to connect to a device
     // before reporting status — otherwise we'd always show "Disconnected" on
     // first launch even when an auto-connect device is configured.
-    if didJustLaunchApp {
+    if justLaunched {
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
             let r = try conn.request(.status)
@@ -1076,7 +1074,7 @@ do {
         exit(0)
     }
 
-    let conn = connectOrLaunch()
+    let (conn, didJustLaunchApp) = connectOrLaunch()
 
     // Run a chain over the one established IPC connection, then exit.
     if let chain {
@@ -1108,7 +1106,7 @@ do {
 
     switch resolvedCommand {
     case "list":        try cmdList(conn, namesOnly: args.contains("--names"))
-    case "status":      try cmdStatus(conn)
+    case "status":      try cmdStatus(conn, justLaunched: didJustLaunchApp)
     case "select":
         guard args.count >= 2 else { die("select requires a device name") }
         try cmdSelect(conn, device: args[1])
