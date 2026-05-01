@@ -20,7 +20,7 @@ swift test        # run tests
 swift build -c release
 ```
 
-The Swift language mode is **Swift 5** — do not bump to Swift 6 mode without auditing strict-concurrency in `AutoReconnector`, `WindowManagement`, and `IPCServer`.
+The project uses **Swift 6** language mode with strict concurrency checking enabled on all targets.
 
 To install a local build:
 
