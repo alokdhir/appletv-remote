@@ -15,6 +15,7 @@ Do NOT add "Assisted-by", "Co-Authored-By", or any attribution lines to commit m
 ```bash
 swift build          # debug build
 swift build -c release
+swift test           # run tests (AppleTVProtocolTests, AppleTVIPCTests)
 ```
 
 The project requires macOS 13+ and Xcode 26.
@@ -77,6 +78,15 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 | `AppleTVProtocol` | Core protocol library — testable, no UI dependencies |
 | `AppleTVIPC` | IPC wire types shared between app and CLI |
 | `AppleTVLogging` | `os.Logger` instances |
+
+**External dependency:** `BigInt` (attaswift/BigInt) — arbitrary-precision integers for SRP-6a big-number math.
+
+### Source files (`Sources/atv/`)
+
+| File | Role |
+|------|------|
+| `main.swift` | CLI entry point; routes commands over the IPC Unix socket to the running app |
+| `Standalone.swift` | `--standalone` mode: connects directly via Companion without the app |
 
 ### Source files (`Sources/AppleTVRemote/`)
 
