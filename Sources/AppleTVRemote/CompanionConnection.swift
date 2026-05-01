@@ -477,45 +477,103 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Now Playing merge
 
-    /// Merge an AirPlay-MRP push into `nowPlaying`. Mirrors `mergeNowPlaying`'s
-    /// track-change detection so an old episode's album field doesn't bleed
-    /// into a new one when the new push doesn't include it.
-    ///
-    /// AirPlay pushes are the actual source of title/artist/album/elapsed/
-    /// duration metadata — Companion `_iMC` only carries `_mcF` flags — so
-    /// the bleed bug lives entirely on this path.
-    private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
+    /// Source-agnostic snapshot of the fields we may receive in a single
+    /// now-playing push, as fed into `mergeNowPlaying(_:)`. Lets the AirPlay
+    /// (MRPNowPlayingUpdate) and Companion (`NowPlayingInfo` from a `_iMC`
+    /// inner dict) paths share one merge implementation — without it, the
+    /// two had to be kept in lockstep by hand and a fix to one routinely
+    /// missed the other.
+    private struct NowPlayingMergeInput {
+        var title: String?
+        var artist: String?
+        var album: String?
+        /// User-facing app name (Companion-only).
+        var app: String?
+        var duration: Double?
+        var elapsedTime: Double?
+        var playbackRate: Double?
+        var playbackStateTimestamp: Double?
+        /// MRP playback state enum (1=playing, 2=paused, 3=stopped, 5=seeking).
+        /// AirPlay-only — used to nudge a refresh during scrubs.
+        var playbackState: Int?
+        /// Companion `_iMC` raw dict, merged into `NowPlayingInfo.raw` for
+        /// debugging. AirPlay path passes nil.
+        var rawCompanion: [String: String]?
+
+        static func from(airplay u: MRPNowPlayingUpdate) -> Self {
+            Self(title: u.title, artist: u.artist, album: u.album,
+                 duration: u.duration, elapsedTime: u.elapsedTime,
+                 playbackRate: u.playbackRate,
+                 playbackStateTimestamp: u.playbackStateTimestamp,
+                 playbackState: u.playbackState)
+        }
+
+        static func from(companion u: NowPlayingInfo) -> Self {
+            Self(title: u.title, artist: u.artist, album: u.album,
+                 app: u.app,
+                 duration: u.duration, elapsedTime: u.elapsedTime,
+                 playbackRate: u.playbackRate,
+                 rawCompanion: u.raw)
+        }
+    }
+
+    private struct NowPlayingMergeResult {
+        let trackChanged: Bool
+        let didResume: Bool
+        let didPause: Bool
+    }
+
+    /// Apply an incoming now-playing update to `self.nowPlaying`. Handles:
+    ///   • cohort reset on app/title/artist change or duration shift >5s
+    ///   • album-injection filter (`Season N, Episode M`)
+    ///   • play→pause edge: freeze interpolated elapsed into elapsedTime
+    ///   • anchor invariant: set while playing, nil while paused
+    ///   • Companion `raw` merge for debugging
+    @discardableResult
+    private func mergeNowPlaying(_ input: NowPlayingMergeInput) -> NowPlayingMergeResult {
         var info = nowPlaying ?? NowPlayingInfo()
 
-        let titleChanged    = (update.title    != nil) && (update.title    != info.title)
-        let artistChanged   = (update.artist   != nil) && (update.artist   != info.artist)
+        // Cohort reset triggers — kept as named locals so the result struct
+        // can report `trackChanged` to callers (used for verbose logging).
+        let appChanged    = (input.app    != nil) && (input.app    != info.app)
+        let titleChanged  = (input.title  != nil) && (input.title  != info.title)
+        let artistChanged = (input.artist != nil) && (input.artist != info.artist)
         let durationChanged: Bool = {
-            guard let new = update.duration, let old = info.duration else { return false }
+            guard let new = input.duration, let old = info.duration else { return false }
             return abs(new - old) > 5
         }()
-        if titleChanged || artistChanged || durationChanged {
-            info.title        = nil
-            info.artist       = nil
-            info.album        = nil
-            info.elapsedTime  = nil
-            info.duration     = nil
+        let trackChanged = appChanged || titleChanged || artistChanged || durationChanged
+        if trackChanged {
+            info.title       = nil
+            info.artist      = nil
+            info.album       = nil
+            info.elapsedTime = nil
+            info.duration    = nil
             info.playbackRate = nil
             info.elapsedAnchor = nil
         }
 
-        if let v = update.title       { info.title        = v }
-        if let v = update.artist      { info.artist       = v }
-        if let v = update.album       { info.album        = NowPlayingInfo.filterAlbum(v) }
-        if let v = update.duration    { info.duration     = v }
-        if let v = update.elapsedTime  { info.elapsedTime  = v }
+        if let v = input.title       { info.title       = v }
+        if let v = input.artist      { info.artist      = v }
+        if let v = input.album       { info.album       = NowPlayingInfo.filterAlbum(v) }
+        if let v = input.app         { info.app         = v }
+        if let v = input.duration    { info.duration    = v }
+        if let v = input.elapsedTime { info.elapsedTime = v }
+
         let prevRate = info.playbackRate ?? 0
-        if let v = update.playbackRate {
-            let ts = update.playbackStateTimestamp ?? 0
-            if ts >= lastPlaybackStateTimestamp {
-                lastPlaybackStateTimestamp = ts
-                // On the play → pause edge, freeze the interpolated value
-                // into elapsedTime before flipping the rate so liveElapsed
-                // returns the right "where we paused" number afterwards.
+        if let v = input.playbackRate {
+            // Loosened ordering gate: a push with `ts == 0` (or missing
+            // entirely) is allowed through — without this, a pause arriving
+            // with a reset timestamp would be silently dropped, leaving us
+            // ticking forward forever (P2 issue 3ht). Strict-greater-or-equal
+            // is enforced only when we have a non-zero ts to compare to.
+            let ts = input.playbackStateTimestamp ?? 0
+            let pass = ts == 0 || ts >= lastPlaybackStateTimestamp
+            if pass {
+                if ts > 0 { lastPlaybackStateTimestamp = ts }
+                // play → pause edge: bake the live-interpolated value before
+                // flipping rate so liveElapsed returns the right
+                // "where we paused" number after the flip.
                 if v == 0, prevRate > 0, let live = info.liveElapsed() {
                     info.elapsedTime = live
                 }
@@ -525,18 +583,32 @@ final class CompanionConnection: ObservableObject {
         let nowRate = info.playbackRate ?? 0
 
         // Anchor invariant: while playing (rate > 0), `elapsedAnchor` MUST be set
-        // — liveElapsed needs it to interpolate. While paused, the anchor is nil.
-        //   • elapsedTime fresh from the push → re-anchor to now (covers seek + start).
-        //   • rate just flipped 0 → >0 (resume) → anchor the existing elapsedTime
-        //     to now even though no fresh elapsedTime came in this push.
-        //     Without this, the resume push doesn't tick because anchor stays nil.
-        //   • paused now → clear anchor (liveElapsed falls back to elapsedTime).
+        // — liveElapsed needs it to interpolate. While paused, anchor is nil.
+        //   • elapsedTime fresh from the push → re-anchor to now (start, seek).
+        //   • paused → playing transition → anchor existing elapsedTime to now,
+        //     even when the resume push didn't carry a fresh elapsed.
+        //   • now paused → clear anchor (liveElapsed returns frozen value).
         if nowRate == 0 {
             info.elapsedAnchor = nil
-        } else if update.elapsedTime != nil || prevRate == 0 {
+        } else if input.elapsedTime != nil || prevRate == 0 {
             info.elapsedAnchor = Date()
         }
+
+        if let raw = input.rawCompanion {
+            info.raw.merge(raw) { _, new in new }
+        }
         nowPlaying = info
+
+        return NowPlayingMergeResult(
+            trackChanged: trackChanged,
+            didResume:    nowRate > 0 && prevRate == 0,
+            didPause:     nowRate == 0 && prevRate > 0
+        )
+    }
+
+    /// AirPlay-MRP path (where elapsed/title/artist/album really come from).
+    private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
+        let result = mergeNowPlaying(.from(airplay: update))
 
         if Log.verbose {
             let parts: [String] = [
@@ -549,92 +621,28 @@ final class CompanionConnection: ObservableObject {
             if !parts.isEmpty {
                 Log.companion.report(
                     "AirPlay → now-playing [\(parts.joined(separator: " "))]" +
-                    ((titleChanged || artistChanged || durationChanged) ? " — track change, cohort reset" : "")
+                    (result.trackChanged ? " — track change, cohort reset" : "")
                 )
             }
         }
 
-        // Pull a fresh state from the ATV any time playback context just
-        // changed — the first push describing the change often arrives
-        // before the ATV has its real elapsed value to share, or arrives
-        // without elapsedTime at all (rate-only push). Asking again
-        // promptly closes the gap and replaces our interpolated/zeroed
-        // estimate with ground truth:
-        //   • didResume   : 0 → playing edge (rate flip)
-        //   • didPause    : playing → 0 edge (rate flip)
-        //   • trackChanged: cohort reset just fired (new episode, song,
-        //                   video, etc.) — first push may lack elapsed.
-        //   • isSeeking   : playbackState == 5 (MRP "seeking")
-        let didResume = nowRate > 0 && prevRate == 0
-        let didPause  = nowRate == 0 && prevRate > 0
-        let trackChanged = titleChanged || artistChanged || durationChanged
+        // Pull fresh state from the ATV when playback context likely just
+        // changed. The first push often arrives without elapsedTime (rate-
+        // only push) or before the ATV has stamped the real position; asking
+        // again promptly replaces our interpolated estimate with ground truth.
         let isSeeking = update.playbackState == 5
-        if didResume || didPause || trackChanged || isSeeking {
+        if result.didResume || result.didPause || result.trackChanged || isSeeking {
             requestNowPlayingRefresh()
         }
     }
 
+    /// Companion `_iMC` path. Companion only carries `_mcF` flags in practice
+    /// — title/artist/elapsed/rate are all from AirPlay — but we still wire
+    /// it through the same merge so the (rare) push that does include
+    /// metadata is handled consistently.
     private func mergeNowPlaying(from inner: [String: Any]) {
         let update = NowPlayingInfo(from: inner)
-        var info = nowPlaying ?? NowPlayingInfo()
-
-        // Clear the cohort whenever we detect a new track/episode. Without this,
-        // fields from an earlier track stick around forever if the next push
-        // doesn't include them — e.g. a previous show's album field bleeding
-        // into "title — artist — album" of the current one. Trigger on:
-        //   • app change (tvOS switched apps), OR
-        //   • title change (new song / movie / different show), OR
-        //   • artist change with same title (new episode of a series — title
-        //     stays "The Expanse", artist goes "S2 E5 Home" → "S2 E6 Paradigm
-        //     Shift"), OR
-        //   • duration change of >5s while there's an existing track (per-
-        //     episode runtime differs even when title+artist coincidentally
-        //     don't change).
-        let appChanged    = (update.app      != nil) && (update.app      != info.app)
-        let titleChanged  = (update.title    != nil) && (update.title    != info.title)
-        let artistChanged = (update.artist   != nil) && (update.artist   != info.artist)
-        let durationChanged: Bool = {
-            guard let new = update.duration, let old = info.duration else { return false }
-            return abs(new - old) > 5
-        }()
-        if appChanged || titleChanged || artistChanged || durationChanged {
-            info.title       = nil
-            info.artist      = nil
-            info.album       = nil
-            info.elapsedTime = nil
-            info.duration    = nil
-            info.playbackRate = nil
-            info.elapsedAnchor = nil
-        }
-
-        if let v = update.title        { info.title        = v }
-        if let v = update.artist       { info.artist       = v }
-        if let v = update.album        { info.album        = v }
-        if let v = update.app          { info.app          = v }
-        if let v = update.elapsedTime  { info.elapsedTime  = v }
-        if let v = update.duration     { info.duration     = v }
-        let prevRate = info.playbackRate ?? 0
-        if let v = update.playbackRate {
-            // play → pause edge: bake the live-interpolated elapsed before
-            // flipping rate so the frozen value is correct.
-            if v == 0, prevRate > 0, let live = info.liveElapsed() {
-                info.elapsedTime = live
-            }
-            info.playbackRate = v
-        }
-        let nowRate = info.playbackRate ?? 0
-        // Anchor invariant: anchor must be set while rate > 0, nil while paused.
-        //   • elapsedTime fresh from the push → re-anchor (Companion rarely
-        //     carries elapsed, but if it does, honour it).
-        //   • paused → playing transition → anchor existing elapsedTime to now.
-        //   • now paused → clear anchor.
-        if nowRate == 0 {
-            info.elapsedAnchor = nil
-        } else if update.elapsedTime != nil || prevRate == 0 {
-            info.elapsedAnchor = Date()
-        }
-        info.raw.merge(update.raw) { _, new in new }
-        nowPlaying = info
+        mergeNowPlaying(.from(companion: update))
         Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
     }
 }
