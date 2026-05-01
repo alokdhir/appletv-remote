@@ -139,15 +139,18 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 
 ## Issue tracking
 
-This project uses **bd (beads)** for all issue tracking. Do NOT create markdown TODO lists.
+This project uses **bd (beads)** for all issue tracking. Do NOT create markdown TODO lists. Run `bd prime` for full workflow context.
 
 ```bash
 bd ready                    # find available work
 bd show <id>                # view issue details
-bd update <id> --claim      # claim work
+bd update <id> --claim      # claim work atomically
 bd close <id>               # complete work
 bd dolt push                # sync to remote
 ```
+
+- Use `bd` for ALL task tracking — do NOT use markdown TODO lists
+- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
 ## Shell safety
 
@@ -157,49 +160,3 @@ Always use non-interactive flags to avoid hanging on confirmation prompts:
 ## Git
 
 **NEVER push to remote unless the user explicitly asks.** Commit freely, but do not run `git push` without a direct instruction to do so.
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:b9766037 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- **NEVER push unless the user explicitly says to push** — this overrides all other rules
-- Work is complete when committed; pushing is the user's call
-<!-- END BEADS INTEGRATION -->
