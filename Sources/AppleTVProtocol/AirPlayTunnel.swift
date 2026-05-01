@@ -52,7 +52,7 @@ public enum AirPlayTunnel {
     }
 
     /// Result of a successful tunnel open.
-    public struct Tunnel {
+    public struct Tunnel: @unchecked Sendable {
         /// The encrypted RTSP control channel (keep alive / send feedback).
         public let rtsp:      EncryptedAirPlayRTSP
         /// The MRP data channel — ready to receive now-playing pushes.
@@ -92,6 +92,31 @@ public enum AirPlayTunnel {
                             mrpClientID: String? = nil,
                             onMessage: ((Data) -> Void)? = nil,
                             connectTimeout: TimeInterval = 5) async throws -> Tunnel {
+        // All BSD socket I/O (openHTTP + RTSP requests) is blocking — run it on a
+        // dedicated thread so we never stall the cooperative thread pool.
+        try await withCheckedThrowingContinuation { cont in
+            Thread.detachNewThread {
+                do {
+                    let tunnel = try openOnThread(host: host,
+                                                 credentials: credentials,
+                                                 mrpClientID: mrpClientID,
+                                                 onMessage: onMessage,
+                                                 connectTimeout: connectTimeout)
+                    cont.resume(returning: tunnel)
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Synchronous implementation — must be called from a dedicated thread, not
+    /// from the Swift cooperative thread pool.
+    private static func openOnThread(host: String,
+                                     credentials: AirPlayCredentials,
+                                     mrpClientID: String?,
+                                     onMessage: ((Data) -> Void)?,
+                                     connectTimeout: TimeInterval) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
         // Hoist so the catch can cancel whichever channels were already started
@@ -154,20 +179,24 @@ public enum AirPlayTunnel {
             port: eventPortValue
         )
         let eventConn = NWConnection(to: eventEndpoint, using: .tcp)
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let once = OnceFlag()
-            eventConn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if once.fire() { cont.resume() }
-                case .failed(let err):
-                    if once.fire() { cont.resume(throwing: OpenError.setup("event channel TCP connect failed: \(err)")) }
-                case .cancelled, .waiting:
-                    if once.fire() { cont.resume(throwing: OpenError.setup("event channel TCP connect to \(host):\(eventPort) failed")) }
-                default: break
-                }
+        let eventGroup = DispatchGroup()
+        let eventReady = OnceFlag()
+        eventGroup.enter()
+        eventConn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                if eventReady.fire() { eventGroup.leave() }
+            case .failed, .cancelled, .waiting:
+                if eventReady.fire() { eventGroup.leave() }
+            default: break
             }
-            eventConn.start(queue: DispatchQueue(label: "AirPlayTunnel.event"))
+        }
+        eventConn.start(queue: DispatchQueue(label: "AirPlayTunnel.event"))
+        guard eventGroup.wait(timeout: .now() + 10) == .success else {
+            throw OpenError.setup("event channel TCP connect to \(host):\(eventPort) timed out")
+        }
+        guard eventConn.state == .ready else {
+            throw OpenError.setup("event channel TCP connect to \(host):\(eventPort) failed — state=\(eventConn.state)")
         }
         Log.pairing.report("AirPlayTunnel: event channel TCP connected (\(host):\(eventPort))")
         let evSession = HAPSession(
@@ -225,20 +254,24 @@ public enum AirPlayTunnel {
         )
         let _dataConn = NWConnection(to: dataEndpoint, using: .tcp)
         dataConn = _dataConn
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let once = OnceFlag()
-            _dataConn.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if once.fire() { cont.resume() }
-                case .failed(let err):
-                    if once.fire() { cont.resume(throwing: OpenError.dataConnect("TCP connect to \(host):\(dataPort) failed: \(err)")) }
-                case .cancelled, .waiting:
-                    if once.fire() { cont.resume(throwing: OpenError.dataConnect("TCP connect to \(host):\(dataPort) timed out or failed")) }
-                default: break
-                }
+        let dataGroup = DispatchGroup()
+        let dataConnReady = OnceFlag()
+        dataGroup.enter()
+        _dataConn.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                if dataConnReady.fire() { dataGroup.leave() }
+            case .failed, .cancelled, .waiting:
+                if dataConnReady.fire() { dataGroup.leave() }
+            default: break
             }
-            _dataConn.start(queue: DispatchQueue(label: "MRPDataChannel.connect"))
+        }
+        _dataConn.start(queue: DispatchQueue(label: "MRPDataChannel.connect"))
+        guard dataGroup.wait(timeout: .now() + 10) == .success else {
+            throw OpenError.dataConnect("TCP connect to \(host):\(dataPort) timed out")
+        }
+        guard _dataConn.state == .ready else {
+            throw OpenError.dataConnect("TCP connect to \(host):\(dataPort) failed — state=\(_dataConn.state)")
         }
         Log.pairing.report("AirPlayTunnel: data TCP connected to \(host):\(dataPort)")
 
