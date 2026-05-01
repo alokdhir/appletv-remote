@@ -301,6 +301,7 @@ final class CompanionConnection: ObservableObject {
         attentionState = nil
         keyboardActive = false
         lastPlaybackStateTimestamp = 0
+        lastNowPlayingRefreshAt = nil
         nowPlaying = nil
         airPlayTunnel?.close()
         airPlayTunnel = nil
@@ -397,14 +398,32 @@ final class CompanionConnection: ObservableObject {
         }
     }
 
+    /// Minimum interval between nudges. Prevents a cascade if the ATV's
+    /// response to our nudge itself contains a state we treat as a change
+    /// trigger (e.g., playbackState == 5 during a long scrub).
+    private static let nowPlayingRefreshDebounce: TimeInterval = 1.0
+    /// Wall-clock timestamp of the most recent fired nudge, used by
+    /// `requestNowPlayingRefresh` for debouncing.
+    private var lastNowPlayingRefreshAt: Date?
+
     /// Ask the ATV to push a fresh now-playing SET_STATE so elapsed time
     /// snaps to ground truth. Used after the user issues a command that
     /// likely changed playback position (resume, scrub, ff/rew). Cheap —
     /// two MRP frames; the ATV ignores GET_STATE post-init, but the
     /// CLIENT_UPDATES_CONFIG + GET_KEYBOARD_SESSION pair is the sequence
     /// that empirically triggers a fresh push including elapsed time.
+    ///
+    /// Debounced to once per `nowPlayingRefreshDebounce` so callers fired
+    /// in rapid succession (e.g. seek-state echo + ff/rew tap landing
+    /// within the same animation frame) don't spam the wire.
     private func requestNowPlayingRefresh() {
         guard let tunnel = airPlayTunnel else { return }
+        let now = Date()
+        if let last = lastNowPlayingRefreshAt,
+           now.timeIntervalSince(last) < Self.nowPlayingRefreshDebounce {
+            return
+        }
+        lastNowPlayingRefreshAt = now
         writeQueue.async {
             try? tunnel.mrp.send(MRPMessage.clientUpdatesConfig())
             try? tunnel.mrp.send(MRPMessage.getKeyboardSession())
