@@ -14,8 +14,8 @@ Do NOT add "Assisted-by", "Co-Authored-By", or any attribution lines to commit m
 
 ```bash
 swift build          # debug build
-swift build -c release
 swift test           # run tests (AppleTVProtocolTests, AppleTVIPCTests)
+swift build -c release
 ```
 
 The project requires macOS 13+ and Xcode 26.
