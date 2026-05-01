@@ -21,7 +21,7 @@ swift build -c release
 The project requires macOS 13+ and Xcode 26.
 
 Swift toolchain is 6.x but the language mode is **Swift 5** — Package.swift
-uses `swift-tools-version: 5.9`, and `project.yml` sets `SWIFT_VERSION: "5.0"`
+uses `swift-tools-version: 5.9`, and `project.json` sets `SWIFT_VERSION: "5.0"`
 so xcodebuild matches. Don't bump to Swift 6 mode without auditing deinits
 (AutoReconnector, WindowManagement) and AsyncPublisher sites (IPCServer) —
 they trigger strict-concurrency errors only the Swift 6 mode catches.

@@ -1,0 +1,68 @@
+{
+  "name": "AppleTVRemote",
+  "options": {
+    "bundleIdPrefix": "com.adhir",
+    "deploymentTarget": {
+      "macOS": "13.0"
+    },
+    "defaultConfig": "Debug",
+    "xcodeVersion": "16"
+  },
+  "packages": {
+    "AppleTV": {
+      "path": "."
+    },
+    "BigInt": {
+      "url": "https://github.com/attaswift/BigInt",
+      "from": "5.3.0"
+    }
+  },
+  "targets": {
+    "AppleTVRemote": {
+      "type": "application",
+      "platform": "macOS",
+      "sources": [
+        {
+          "path": "Sources/AppleTVRemote",
+          "excludes": [
+            "Resources/Info.plist"
+          ]
+        }
+      ],
+      "dependencies": [
+        { "package": "AppleTV", "product": "AppleTVLogging" },
+        { "package": "AppleTV", "product": "AppleTVProtocol" },
+        { "package": "AppleTV", "product": "AppleTVIPC" },
+        { "package": "BigInt" }
+      ],
+      "info": {
+        "path": "Sources/AppleTVRemote/Resources/Info.plist",
+        "properties": {
+          "CFBundleDisplayName": "AppleTV Remote",
+          "CFBundleIconName": "AppIcon",
+          "NSBonjourServices": [
+            "_companion-link._tcp"
+          ],
+          "NSLocalNetworkUsageDescription": "AppleTV Remote needs local network access to discover and control Apple TVs."
+        }
+      },
+      "entitlements": {
+        "path": "AppleTVRemote.entitlements",
+        "properties": {
+          "com.apple.security.network.client": true
+        }
+      },
+      "settings": {
+        "base": {
+          "PRODUCT_BUNDLE_IDENTIFIER": "com.adhir.appletv-remote",
+          "SWIFT_VERSION": "5.0",
+          "SWIFT_STRICT_CONCURRENCY": "minimal",
+          "MACOSX_DEPLOYMENT_TARGET": "13.0",
+          "ENABLE_HARDENED_RUNTIME": "YES",
+          "CODE_SIGN_STYLE": "Automatic",
+          "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"
+        }
+      }
+    }
+  }
+}
