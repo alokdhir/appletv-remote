@@ -146,7 +146,6 @@ bd ready                    # find available work
 bd show <id>                # view issue details
 bd update <id> --claim      # claim work atomically
 bd close <id>               # complete work
-bd dolt push                # sync to remote
 ```
 
 - Use `bd` for ALL task tracking — do NOT use markdown TODO lists
