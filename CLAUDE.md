@@ -55,6 +55,7 @@ After building, copy binaries into place and restart the app:
 ```bash
 swift build -c release
 cp -f .build/release/AppleTVRemote /Applications/AppleTVRemote.app/Contents/MacOS/AppleTVRemote
+cp -rf .build/release/AppleTVRemote_AppleTVRemote.bundle /Applications/AppleTVRemote.app/Contents/Resources/
 cp -f .build/release/atv /usr/local/bin/atv
 pkill -x AppleTVRemote   # user relaunches from /Applications
 ```
@@ -82,10 +83,17 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 | File | Role |
 |------|------|
 | `AppleTVRemoteApp.swift` | `@main` SwiftUI entry point |
+| `DeviceDiscovery.swift` | Bonjour browser (`_companion-link._tcp`) using `NWBrowser` |
 | `CompanionConnection.swift` | App-layer orchestrator: TCP connect/disconnect, WoL, pairing delegation, `@Published` state for SwiftUI |
 | `ContentView.swift` | Root split layout (sidebar + detail) |
 | `DeviceListView.swift` | Sidebar: discovered device list |
 | `RemoteControlView.swift` | D-pad, playback, volume, now-playing card |
+| `AppLauncherView.swift` | App grid with search, keyboard navigation, responsive columns |
+| `MenuBarController.swift` | Menu bar status item, popover, right-click menu |
+| `AppIconCache.swift` | Fetches and caches app icons from iTunes + bundled system icons |
+| `KeyboardNotificationManager.swift` | Manages keyboard-input notifications for Apple TV remote requests |
+| `PopoverActivationGuard.swift` | Suppresses the first tap that activates the popover window |
+| `VisualEffectBackground.swift` | NSVisualEffectView wrapper for SwiftUI translucency |
 | `IPCServer.swift` | Unix socket IPC server for `atv` CLI |
 | `AutoReconnector.swift` | Watches for unexpected disconnects and retries |
 | `WindowManagement.swift` | NSWindow setup: translucency, focus-fade, hide-on-close |
@@ -94,16 +102,31 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 
 | File | Role |
 |------|------|
-| `CompanionSession.swift` | Live session: socket I/O, frame dispatch, keepalive, txn/callbacks, all feature send methods. Conforms to `CompanionSessionDelegate` contract |
-| `PairingFlow.swift` | Pair-setup (SRP-6a) and pair-verify (ECDH) state machines |
-| `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
+| `AppleTVDevice.swift` | Device model, `ConnectionState`, `RemoteCommand` enums |
+| `CompanionSession.swift` | Live session: socket I/O, frame dispatch, keepalive, txn/callbacks, all feature send methods |
 | `CompanionFrame.swift` | Wire frame encode/decode |
+| `CompanionPairVerify.swift` | HAP pair-verify over Companion protocol framing |
+| `PairingFlow.swift` | Pair-setup (SRP-6a) state machine |
+| `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
 | `OPACK.swift` | OPACK serialization (Apple's binary dict format) |
 | `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
+| `MRPMessage.swift` | Constructs MRP wire messages (varint-length-prefixed protobuf frames) |
+| `MRPDataChannel.swift` | MRP data channel over AirPlay connection |
 | `AirPlayTunnel.swift` | AirPlay MRP tunnel for real-time now-playing |
-| `CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
+| `AirPlayHTTP.swift` | Minimal HTTP/1.1 client for AirPlay long-lived TCP connections |
+| `AirPlayPairing.swift` | AirPlay pair-setup and pair-verify (SRP + TLV8) |
+| `AirPlayEventChannel.swift` | AirPlay event channel over established session |
+| `EncryptedAirPlayRTSP.swift` | RTSP-over-ChaCha20-Poly1305 transport post pair-verify |
 | `HAPPairing.swift` / `SRPClient.swift` | HAP pairing crypto |
+| `HAPSession.swift` | Bidirectional ChaCha20-Poly1305 frame codec for AirPlay sockets |
+| `TLV8.swift` | HAP TLV8 encoder/decoder |
+| `CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
+| `MACStore.swift` | Persists Apple TV MAC addresses for Wake-on-LAN when device is asleep |
+| `WakeOnLAN.swift` | Magic packet broadcast |
 | `RTITextOperations.swift` | RTI binary plist encoder for text input |
+| `BinaryPlist.swift` | Minimal binary plist (bplist00) writer for NSKeyedArchiver UID references |
+| `CryptoUtils.swift` | Shared crypto utilities (Data extensions) |
+| `PrimaryInterface.swift` | Resolves the primary network interface for socket binding |
 
 ### Key protocol notes
 
