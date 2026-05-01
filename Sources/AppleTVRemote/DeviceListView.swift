@@ -32,6 +32,16 @@ struct DelayedTooltip: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError() }
 
+        /// Without this, a SwiftUI parent that disappears between
+        /// mouseEntered and mouseExited can leave a Timer scheduled or a
+        /// panel on screen with no view left to dismiss it. SwiftUI tears
+        /// down NSViewRepresentables on the main thread, so AppKit access
+        /// here is safe.
+        deinit {
+            timer?.invalidate()
+            tooltipPanel?.orderOut(nil)
+        }
+
         override var acceptsFirstResponder: Bool { false }
 
         override func keyDown(with event: NSEvent) {
