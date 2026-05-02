@@ -317,7 +317,7 @@ struct RemoteControlView: View {
                         RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
                         HStack(spacing: 4) {
                             RemoteButton(label: "chevron.left",   action: { connection.send(.left) })
-                            RemoteButton(label: "circle.fill",     action: { connection.send(.select) }, size: 52)
+                            SelectButton(action: { connection.send(.select) }, size: 52)
                             RemoteButton(label: "chevron.right",  action: { connection.send(.right) })
                         }
                         RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
@@ -575,6 +575,20 @@ struct RemoteButton: View {
                 .font(.system(size: size * 0.38, weight: .medium))
                 .frame(width: size, height: size)
                 .background(.quaternary, in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct SelectButton: View {
+    let action: () -> Void
+    var size: CGFloat = 52
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(.primary)
+                .frame(width: size, height: size)
         }
         .buttonStyle(.plain)
     }
