@@ -87,15 +87,26 @@ public enum AirPlayTunnel {
     /// Open the control channel + negotiate the MRP data stream.
     /// On return, `mrp.onMessage` is ready to be set; the MRP init sequence
     /// (DEVICE_INFO → SET_CONNECTION_STATE → CLIENT_UPDATES_CONFIG) has been sent.
+    /// Long-lived serial queue for blocking tunnel-open work. Reused across
+    /// every `open()` call so we don't allocate a kernel thread per
+    /// invocation (matters under reconnect storms — flaky network, repeated
+    /// auto-reconnect cycles, dev iteration).
+    ///
+    /// Serial because open() runs a self-contained handshake; concurrent
+    /// opens against the same ATV would race on the device-side state
+    /// machine anyway.
+    private static let openQueue = DispatchQueue(label: "AirPlayTunnel.open",
+                                                 qos: .userInitiated)
+
     public static func open(host: String,
                             credentials: AirPlayCredentials,
                             mrpClientID: String? = nil,
                             onMessage: ((Data) -> Void)? = nil,
                             connectTimeout: TimeInterval = 5) async throws -> Tunnel {
-        // All BSD socket I/O (openHTTP + RTSP requests) is blocking — run it on a
-        // dedicated thread so we never stall the cooperative thread pool.
+        // All BSD socket I/O (openHTTP + RTSP requests) is blocking — run it on
+        // a dedicated queue so we never stall the cooperative thread pool.
         try await withCheckedThrowingContinuation { cont in
-            Thread.detachNewThread {
+            openQueue.async {
                 do {
                     let tunnel = try openOnThread(host: host,
                                                  credentials: credentials,
