@@ -243,16 +243,17 @@ struct RemoteControlView: View {
     private var nowPlayingFooter: some View {
         if let np = connection.nowPlaying, hasFooterContent(np) {
             TimelineView(.periodic(from: .now, by: 1.0)) { ctx in
+                let live = connection.nowPlaying ?? np
                 HStack(alignment: .center, spacing: 8) {
-                    Text(footerTitle(np) ?? "")
+                    Text(footerTitle(live) ?? "")
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(footerDetail(np).map { tip in
+                        .overlay(footerDetail(live).map { tip in
                             DelayedTooltip(text: tip, delay: 0.4)
                                 .allowsHitTesting(true)
                         })
-                    Text(footerTime(np, at: ctx.date) ?? "")
+                    Text(footerTime(live, at: ctx.date) ?? "")
                         .monospacedDigit()
                         .lineLimit(1)
                         .layoutPriority(1)
