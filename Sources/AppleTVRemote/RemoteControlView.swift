@@ -243,6 +243,16 @@ struct RemoteControlView: View {
     private var nowPlayingFooter: some View {
         if let np = connection.nowPlaying, hasFooterContent(np) {
             TimelineView(.periodic(from: .now, by: 1.0)) { ctx in
+                // Read connection.nowPlaying fresh on each tick rather than
+                // relying on the outer `np` capture. SwiftUI sometimes reuses
+                // a TimelineView's content closure across body re-evaluations,
+                // so a play→pause that changes np (new playbackRate, new
+                // elapsedAnchor) doesn't always rebuild the closure — leaving
+                // it ticking off a stale NowPlayingInfo. Reading the
+                // @Published value inside the closure picks up the live
+                // anchor on the next tick (≤1s staleness, fine for a clock).
+                // The `?? np` fallback covers the unlikely case where
+                // connection.nowPlaying went back to nil mid-render.
                 let live = connection.nowPlaying ?? np
                 HStack(alignment: .center, spacing: 8) {
                     Text(footerTitle(live) ?? "")
