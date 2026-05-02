@@ -372,7 +372,10 @@ final class CompanionConnection: ObservableObject {
               let host = device.host,
               let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
         let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
-        Task.detached { [weak self] in
+        // Inherit MainActor from the calling @MainActor context. AirPlayTunnel.open
+        // suspends while its dedicated openQueue does the blocking I/O, so MainActor
+        // isn't held during the wait — no need for Task.detached + MainActor.run.
+        Task { [weak self] in
             do {
                 let tunnel = try await AirPlayTunnel.open(
                     host: host,
@@ -385,9 +388,7 @@ final class CompanionConnection: ObservableObject {
                         }
                     }
                 )
-                await MainActor.run { [weak self] in
-                    self?.airPlayTunnel = tunnel
-                }
+                self?.airPlayTunnel = tunnel
             } catch {
                 Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")
             }

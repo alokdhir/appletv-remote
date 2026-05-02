@@ -101,7 +101,7 @@ public enum AirPlayTunnel {
     public static func open(host: String,
                             credentials: AirPlayCredentials,
                             mrpClientID: String? = nil,
-                            onMessage: ((Data) -> Void)? = nil,
+                            onMessage: (@Sendable (Data) -> Void)? = nil,
                             connectTimeout: TimeInterval = 5) async throws -> Tunnel {
         // All BSD socket I/O (openHTTP + RTSP requests) is blocking — run it on
         // a dedicated queue so we never stall the cooperative thread pool.
@@ -126,7 +126,7 @@ public enum AirPlayTunnel {
     private static func openOnThread(host: String,
                                      credentials: AirPlayCredentials,
                                      mrpClientID: String?,
-                                     onMessage: ((Data) -> Void)?,
+                                     onMessage: (@Sendable (Data) -> Void)?,
                                      connectTimeout: TimeInterval) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)

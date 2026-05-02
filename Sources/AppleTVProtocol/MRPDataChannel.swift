@@ -133,7 +133,7 @@ public final class MRPDataChannel: @unchecked Sendable {
     private var sendSeqno: UInt64 = UInt64.random(in: 0x1_0000_0000..<0x2_0000_0000)
 
     /// Called on the internal queue whenever a decoded MRP ProtocolMessage arrives.
-    public var onMessage: ((Data) -> Void)?
+    public var onMessage: (@Sendable (Data) -> Void)?
 
     public init(connection: NWConnection, session: HAPSession) {
         self.connection = connection
