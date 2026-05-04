@@ -254,7 +254,17 @@ struct RemoteControlView: View {
                 // The `?? np` fallback covers the unlikely case where
                 // connection.nowPlaying went back to nil mid-render.
                 let live = connection.nowPlaying ?? np
-                HStack(alignment: .center, spacing: 8) {
+                VStack(spacing: 0) {
+                    // Progress bar — only when duration is known
+                    if let duration = live.duration, duration > 0 {
+                        let progress = min(max((live.liveElapsed(at: ctx.date) ?? 0) / duration, 0), 1)
+                        GeometryReader { geo in
+                            Color.accentColor
+                                .frame(width: geo.size.width * progress)
+                        }
+                        .frame(height: 4)
+                    }
+                    HStack(alignment: .center, spacing: 8) {
                     Text(footerTitle(live) ?? "")
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -267,11 +277,12 @@ struct RemoteControlView: View {
                         .monospacedDigit()
                         .lineLimit(1)
                         .layoutPriority(1)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
                 .background(.quaternary.opacity(0.4))
             }
         }
