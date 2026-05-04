@@ -689,7 +689,10 @@ struct SwipeChevronButton: View {
                 .foregroundStyle(Color.accentColor)
         }
         .buttonStyle(PressableChevronStyle())
-        .help(label)
+        .overlay(
+            DelayedTooltip(text: label, delay: 0.4)
+                .allowsHitTesting(false)
+        )
     }
 }
 
