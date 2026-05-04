@@ -168,11 +168,6 @@ public final class CompanionSession {
         keepaliveTimer = timer
     }
 
-    public func stopKeepalive() {
-        keepaliveTimer?.cancel()
-        keepaliveTimer = nil
-    }
-
     // MARK: - Remote Commands
 
     public func send(_ command: RemoteCommand) {

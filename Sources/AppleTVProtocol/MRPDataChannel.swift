@@ -122,10 +122,10 @@ public final class MRPDataChannel: @unchecked Sendable {
     private let session:    HAPSession
     private let queue:      DispatchQueue
 
-    private let bufferCond   = NSCondition()
+    /// Receive-side reassembly buffer. Only mutated from the NWConnection
+    /// receive callback (`receiveLoop`), which runs serially on `queue`, so
+    /// no locking is needed.
     private var plainBuffer  = Data()
-    private var receiveError: Error?
-    private var receiveClosed = false
 
     /// Initial seqno matches pyatv's DataStreamChannel: a random 33-bit value
     /// in `[0x1_0000_0000, 0x2_0000_0000)`. Some ATV firmware appears to reject
@@ -189,31 +189,14 @@ public final class MRPDataChannel: @unchecked Sendable {
                 do {
                     let plain = try self.session.feed(data)
                     if !plain.isEmpty {
-                            self.processPlaintext(plain)
+                        self.processPlaintext(plain)
                     }
                 } catch {
                     Log.pairing.fail("MRPDataChannel: decrypt error: \(error)")
-                    self.bufferCond.lock()
-                    self.receiveError = error
-                    self.receiveClosed = true
-                    self.bufferCond.broadcast()
-                    self.bufferCond.unlock()
                     return
                 }
             }
-            if let err {
-                self.bufferCond.lock()
-                self.receiveError = err
-                self.receiveClosed = true
-                self.bufferCond.broadcast()
-                self.bufferCond.unlock()
-                return
-            }
-            if isComplete {
-                self.bufferCond.lock()
-                self.receiveClosed = true
-                self.bufferCond.broadcast()
-                self.bufferCond.unlock()
+            if err != nil || isComplete {
                 return
             }
             self.receiveLoop()
@@ -221,19 +204,14 @@ public final class MRPDataChannel: @unchecked Sendable {
     }
 
     private func processPlaintext(_ plain: Data) {
-        bufferCond.lock()
         plainBuffer.append(plain)
         // Drain complete DataStreamMessages
         while plainBuffer.count >= DataStreamHeader.length {
             guard let (hdr, payload) = DataStreamHeader.decode(plainBuffer) else { break }
             let consumed = DataStreamHeader.length + payload.count
             plainBuffer = Data(plainBuffer[plainBuffer.index(plainBuffer.startIndex, offsetBy: consumed)...])
-            bufferCond.unlock()
             handleIncoming(hdr: hdr, payload: payload)
-            bufferCond.lock()
         }
-        bufferCond.broadcast()
-        bufferCond.unlock()
     }
 
     private func handleIncoming(hdr: DataStreamHeader, payload: Data) {
