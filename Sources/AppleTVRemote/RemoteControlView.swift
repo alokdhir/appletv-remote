@@ -379,19 +379,19 @@ struct RemoteControlView: View {
                     // Each is offset by `swipeChevronRadius` so the glyphs sit
                     // just inside the d-pad rim at the four compass points.
                     Group {
-                        SwipeChevronButton(symbol: "chevron.up.2") {
+                        SwipeChevronButton(symbol: "chevron.up.2", label: "Swipe up") {
                             connection.sendSwipe(.up)
                         }
                         .offset(y: -RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.down.2") {
+                        SwipeChevronButton(symbol: "chevron.down.2", label: "Swipe down") {
                             connection.sendSwipe(.down)
                         }
                         .offset(y: RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.left.2") {
+                        SwipeChevronButton(symbol: "chevron.left.2", label: "Swipe left") {
                             connection.sendSwipe(.left)
                         }
                         .offset(x: -RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.right.2") {
+                        SwipeChevronButton(symbol: "chevron.right.2", label: "Swipe right") {
                             connection.sendSwipe(.right)
                         }
                         .offset(x: RemoteControlView.swipeChevronRadius)
@@ -675,9 +675,11 @@ struct RemoteButton: View {
 
 /// Small chevron button positioned at a compass point inside the d-pad rim.
 /// Uses `PressableChevronStyle` so the glyph dims and shrinks on press —
-/// `.buttonStyle(.plain)` would render dead.
+/// `.buttonStyle(.plain)` would render dead. The `label` becomes the hover
+/// tooltip — the chevrons read as decoration without it.
 struct SwipeChevronButton: View {
     let symbol: String
+    let label: String
     let action: () -> Void
 
     var body: some View {
@@ -687,6 +689,7 @@ struct SwipeChevronButton: View {
                 .foregroundStyle(Color.accentColor)
         }
         .buttonStyle(PressableChevronStyle())
+        .help(label)
     }
 }
 
