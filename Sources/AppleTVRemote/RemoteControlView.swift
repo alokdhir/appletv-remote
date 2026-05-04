@@ -316,6 +316,7 @@ struct RemoteControlView: View {
         ScrollView {
             VStack(spacing: 20) {
                 KeyCatcher(onCommand: { connection.send($0) },
+                            onSwipe: { connection.sendSwipe($0) },
                             onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } },
                             onBackspace: connection.keyboardActive ? { connection.sendBackspace { _ in } } : nil)
                     .frame(width: 0, height: 0)
@@ -323,15 +324,46 @@ struct RemoteControlView: View {
                 ZStack {
                     Circle()
                         .fill(.quaternary)
-                        .frame(width: 164, height: 164)
+                        .frame(width: 182, height: 182)
                     VStack(spacing: 4) {
-                        RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
+                        RemoteButton(label: "chevron.up",    action: { connection.send(.up) },    size: 38)
                         HStack(spacing: 4) {
-                            RemoteButton(label: "chevron.left",   action: { connection.send(.left) })
+                            RemoteButton(label: "chevron.left",   action: { connection.send(.left) },  size: 38)
                             SelectButton(action: { connection.send(.select) }, size: 52)
-                            RemoteButton(label: "chevron.right",  action: { connection.send(.right) })
+                            RemoteButton(label: "chevron.right",  action: { connection.send(.right) }, size: 38)
                         }
-                        RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
+                        RemoteButton(label: "chevron.down",  action: { connection.send(.down) },  size: 38)
+                    }
+                    // Swipe chevrons — rendered after VStack so they sit on top
+                    Group {
+                        Button(action: { connection.sendSwipe(.up) }) {
+                            Image(systemName: "chevron.up.2")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(y: -79)
+                        Button(action: { connection.sendSwipe(.down) }) {
+                            Image(systemName: "chevron.down.2")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(y: 79)
+                        Button(action: { connection.sendSwipe(.left) }) {
+                            Image(systemName: "chevron.left.2")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: -80)
+                        Button(action: { connection.sendSwipe(.right) }) {
+                            Image(systemName: "chevron.right.2")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 80)
                     }
                 }
 
@@ -486,12 +518,14 @@ struct RemoteControlView: View {
 /// passed through so app-level shortcuts (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
+    var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSView {
         let v = KeyCatcherView()
         v.onCommand = onCommand
+        v.onSwipe = onSwipe
         v.onShowApps = onShowApps
         v.onBackspace = onBackspace
         return v
@@ -499,6 +533,7 @@ private struct KeyCatcher: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView as? KeyCatcherView)?.onCommand = onCommand
+        (nsView as? KeyCatcherView)?.onSwipe = onSwipe
         (nsView as? KeyCatcherView)?.onShowApps = onShowApps
         (nsView as? KeyCatcherView)?.onBackspace = onBackspace
     }
@@ -506,6 +541,7 @@ private struct KeyCatcher: NSViewRepresentable {
 
 private final class KeyCatcherView: NSView {
     var onCommand: (RemoteCommand) -> Void = { _ in }
+    var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
 
@@ -522,13 +558,25 @@ private final class KeyCatcherView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let mods = event.modifierFlags.intersection([.command, .control, .option])
+        let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+
+        // ⇧↑↓←→ → trackpad swipe
+        if mods == .shift {
+            switch event.keyCode {
+            case 126: onSwipe(.up);    return
+            case 125: onSwipe(.down);  return
+            case 123: onSwipe(.left);  return
+            case 124: onSwipe(.right); return
+            default:  break
+            }
+        }
 
         // ⌥↑ / ⌥↓ → volume up / down. Using Option rather than Control
         // because macOS reserves ⌃↑ / ⌃↓ for Mission Control. Caught before
         // the modifier bail-out below; only fires on plain ⌥ (not ⌘⌥, ⌃⌥)
         // so we don't shadow other shortcuts.
-        if mods == .option {
+        let modsNoShift = event.modifierFlags.intersection([.command, .control, .option])
+        if modsNoShift == .option {
             switch event.keyCode {
             case 126: onCommand(.volumeUp);   return
             case 125: onCommand(.volumeDown); return
@@ -537,7 +585,7 @@ private final class KeyCatcherView: NSView {
         }
 
         // Let other ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
-        if !mods.isEmpty { super.keyDown(with: event); return }
+        if !modsNoShift.isEmpty { super.keyDown(with: event); return }
 
         if event.charactersIgnoringModifiers?.lowercased() == "a" {
             onShowApps()

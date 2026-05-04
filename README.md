@@ -157,6 +157,7 @@ atv --standalone --device "Living Room" l
 | Key | Action |
 |-----|--------|
 | `↑ ↓ ← →` | D-pad up / down / left / right |
+| `⇧ ↑ ↓ ← →` | Trackpad swipe up / down / left / right |
 | `Return` | Select (D-pad centre) |
 | `M` | Menu / Back |
 | `H` | Home |
