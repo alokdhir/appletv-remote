@@ -41,10 +41,20 @@ public struct CredentialStore {
 
     /// Execute `body` under an exclusive (write) flock on `path`.
     private func withExclusiveLock<T>(on path: String, body: () throws -> T) rethrows -> T {
+        try withFileLock(on: path, kind: LOCK_EX, body: body)
+    }
+
+    /// Execute `body` under a shared (read) flock on `path`. Multiple readers
+    /// can hold this concurrently; a writer (LOCK_EX) blocks until they drain.
+    private func withSharedLock<T>(on path: String, body: () throws -> T) rethrows -> T {
+        try withFileLock(on: path, kind: LOCK_SH, body: body)
+    }
+
+    private func withFileLock<T>(on path: String, kind: Int32, body: () throws -> T) rethrows -> T {
         let lockPath = lockURL(for: path).path
         let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
         defer { if fd >= 0 { close(fd) } }
-        if fd >= 0 { flock(fd, LOCK_EX) }
+        if fd >= 0 { flock(fd, kind) }
         return try body()
     }
 
@@ -79,8 +89,11 @@ public struct CredentialStore {
     // MARK: - Load
 
     public func load(deviceID: String) -> PairingCredentials? {
-        guard let data = try? Data(contentsOf: url(for: deviceID)) else { return nil }
-        return try? JSONDecoder().decode(PairingCredentials.self, from: data)
+        let path = url(for: deviceID).path
+        return withSharedLock(on: path) {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+            return try? JSONDecoder().decode(PairingCredentials.self, from: data)
+        }
     }
 
     // MARK: - Delete
@@ -112,8 +125,11 @@ public struct CredentialStore {
     }
 
     public func loadAirPlay(deviceID: String) -> AirPlayCredentials? {
-        guard let data = try? Data(contentsOf: airPlayURL(for: deviceID)) else { return nil }
-        return try? JSONDecoder().decode(AirPlayCredentials.self, from: data)
+        let path = airPlayURL(for: deviceID).path
+        return withSharedLock(on: path) {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+            return try? JSONDecoder().decode(AirPlayCredentials.self, from: data)
+        }
     }
 
     public func deleteAirPlay(deviceID: String) {
