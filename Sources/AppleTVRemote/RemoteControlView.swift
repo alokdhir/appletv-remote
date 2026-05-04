@@ -4,6 +4,11 @@ import AppleTVProtocol
 import AppleTVLogging
 
 struct RemoteControlView: View {
+    /// Distance from the d-pad centre to each swipe chevron, in points.
+    /// The d-pad circle is 182pt across (radius 91); 80pt places the
+    /// 11pt chevron glyphs just inside the rim with ~5pt visual margin.
+    static let swipeChevronRadius: CGFloat = 80
+
     let device: AppleTVDevice
     @ObservedObject var connection: CompanionConnection
     @EnvironmentObject var discovery: DeviceDiscovery
@@ -255,28 +260,37 @@ struct RemoteControlView: View {
                 // connection.nowPlaying went back to nil mid-render.
                 let live = connection.nowPlaying ?? np
                 VStack(spacing: 0) {
-                    // Progress bar — only when duration is known
+                    // Progress bar — only when duration is known. ZStack +
+                    // scaleEffect avoids GeometryReader's per-frame layout
+                    // invalidation; the background rect provides a track so
+                    // 0% playback doesn't look like a missing bar.
                     if let duration = live.duration, duration > 0 {
                         let progress = min(max((live.liveElapsed(at: ctx.date) ?? 0) / duration, 0), 1)
-                        GeometryReader { geo in
-                            Color.accentColor
-                                .frame(width: geo.size.width * progress)
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(.quaternary)
+                            Rectangle()
+                                .fill(Color.accentColor)
+                                .scaleEffect(x: progress, y: 1, anchor: .leading)
                         }
                         .frame(height: 4)
+                        .accessibilityElement()
+                        .accessibilityLabel("Playback progress")
+                        .accessibilityValue("\(Int(progress * 100)) percent")
                     }
                     HStack(alignment: .center, spacing: 8) {
-                    Text(footerTitle(live) ?? "")
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .overlay(footerDetail(live).map { tip in
-                            DelayedTooltip(text: tip, delay: 0.4)
-                                .allowsHitTesting(true)
-                        })
-                    Text(footerTime(live, at: ctx.date) ?? "")
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .layoutPriority(1)
+                        Text(footerTitle(live) ?? "")
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(footerDetail(live).map { tip in
+                                DelayedTooltip(text: tip, delay: 0.4)
+                                    .allowsHitTesting(true)
+                            })
+                        Text(footerTime(live, at: ctx.date) ?? "")
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .layoutPriority(1)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -345,36 +359,26 @@ struct RemoteControlView: View {
                         }
                         RemoteButton(label: "chevron.down",  action: { connection.send(.down) },  size: 38)
                     }
-                    // Swipe chevrons — rendered after VStack so they sit on top
+                    // Swipe chevrons — rendered after VStack so they sit on top.
+                    // Each is offset by `swipeChevronRadius` so the glyphs sit
+                    // just inside the d-pad rim at the four compass points.
                     Group {
-                        Button(action: { connection.sendSwipe(.up) }) {
-                            Image(systemName: "chevron.up.2")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                        SwipeChevronButton(symbol: "chevron.up.2") {
+                            connection.sendSwipe(.up)
                         }
-                        .buttonStyle(.plain)
-                        .offset(y: -79)
-                        Button(action: { connection.sendSwipe(.down) }) {
-                            Image(systemName: "chevron.down.2")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                        .offset(y: -RemoteControlView.swipeChevronRadius)
+                        SwipeChevronButton(symbol: "chevron.down.2") {
+                            connection.sendSwipe(.down)
                         }
-                        .buttonStyle(.plain)
-                        .offset(y: 79)
-                        Button(action: { connection.sendSwipe(.left) }) {
-                            Image(systemName: "chevron.left.2")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                        .offset(y: RemoteControlView.swipeChevronRadius)
+                        SwipeChevronButton(symbol: "chevron.left.2") {
+                            connection.sendSwipe(.left)
                         }
-                        .buttonStyle(.plain)
-                        .offset(x: -80)
-                        Button(action: { connection.sendSwipe(.right) }) {
-                            Image(systemName: "chevron.right.2")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                        .offset(x: -RemoteControlView.swipeChevronRadius)
+                        SwipeChevronButton(symbol: "chevron.right.2") {
+                            connection.sendSwipe(.right)
                         }
-                        .buttonStyle(.plain)
-                        .offset(x: 80)
+                        .offset(x: RemoteControlView.swipeChevronRadius)
                     }
                 }
 
@@ -569,10 +573,14 @@ private final class KeyCatcherView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        // `mods` excludes shift on purpose — shift is a modifier we own (for
+        // swipe shortcuts) but never combines with ⌘/⌃/⌥ in our bindings.
+        // Tracking it separately keeps the bail-out check below uncluttered.
+        let mods  = event.modifierFlags.intersection([.command, .control, .option])
+        let shift = event.modifierFlags.contains(.shift)
 
-        // ⇧↑↓←→ → trackpad swipe
-        if mods == .shift {
+        // ⇧↑↓←→ → trackpad swipe (plain shift only — no ⌘⇧, ⌃⇧, ⌥⇧).
+        if shift, mods.isEmpty {
             switch event.keyCode {
             case 126: onSwipe(.up);    return
             case 125: onSwipe(.down);  return
@@ -586,8 +594,7 @@ private final class KeyCatcherView: NSView {
         // because macOS reserves ⌃↑ / ⌃↓ for Mission Control. Caught before
         // the modifier bail-out below; only fires on plain ⌥ (not ⌘⌥, ⌃⌥)
         // so we don't shadow other shortcuts.
-        let modsNoShift = event.modifierFlags.intersection([.command, .control, .option])
-        if modsNoShift == .option {
+        if mods == .option {
             switch event.keyCode {
             case 126: onCommand(.volumeUp);   return
             case 125: onCommand(.volumeDown); return
@@ -596,7 +603,7 @@ private final class KeyCatcherView: NSView {
         }
 
         // Let other ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
-        if !modsNoShift.isEmpty { super.keyDown(with: event); return }
+        if !mods.isEmpty { super.keyDown(with: event); return }
 
         if event.charactersIgnoringModifiers?.lowercased() == "a" {
             onShowApps()
@@ -647,6 +654,34 @@ struct RemoteButton: View {
                 .background(.quaternary, in: Circle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Small chevron button positioned at a compass point inside the d-pad rim.
+/// Uses `PressableChevronStyle` so the glyph dims and shrinks on press —
+/// `.buttonStyle(.plain)` would render dead.
+struct SwipeChevronButton: View {
+    let symbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(PressableChevronStyle())
+    }
+}
+
+/// Press feedback for chevron-style accent buttons that don't have their own
+/// background. Default `.plain` style on macOS gives no visual on press.
+private struct PressableChevronStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
+            .opacity(configuration.isPressed ? 0.55 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
