@@ -23,6 +23,10 @@ final class CompanionConnection: ObservableObject {
     private var connectionEpoch: Int = 0
     private let writeQueue = DispatchQueue(label: "companion.write", qos: .userInitiated)
     private let readQueue  = DispatchQueue(label: "companion.read",  qos: .userInitiated)
+    /// Queue for blocking MRP sends (now-playing refresh). Kept separate from
+    /// `writeQueue` so a stalled Companion socket doesn't also block AirPlay
+    /// refreshes — the two transports are independent.
+    private let mrpSendQueue = DispatchQueue(label: "companion.mrp-send", qos: .userInitiated)
     private let credentialStore = CredentialStore()
     @Published var currentDevice: AppleTVDevice?
 
@@ -421,7 +425,7 @@ final class CompanionConnection: ObservableObject {
             return
         }
         lastNowPlayingRefreshAt = now
-        writeQueue.async {
+        mrpSendQueue.async {
             try? tunnel.mrp.send(MRPMessage.clientUpdatesConfig())
             try? tunnel.mrp.send(MRPMessage.getKeyboardSession())
         }
