@@ -18,6 +18,9 @@ public enum Log {
     private static let subsystem = "com.adhir.appletv-remote"
 
     /// When true, all trace/report/fail messages are also written to stderr.
+    /// Also used by call sites to gate expensive log-payload formatting —
+    /// `Logger.isEnabled(type:)` would do the same job but is macOS 15+, and
+    /// we deploy to macOS 13.
     public nonisolated(unsafe) static var verbose: Bool = false
 
     /// Active log sinks, keyed by forwarder identity.
