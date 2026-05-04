@@ -242,6 +242,18 @@ struct RemoteControlView: View {
             remoteScrollContent
             nowPlayingFooter
         }
+        // Drive the footer's slide-up/fade-in transition off its visibility
+        // predicate (not on `connection.nowPlaying != nil`) so a track
+        // change between two non-nil values doesn't re-animate.
+        .animation(.easeOut(duration: 0.25), value: footerVisible)
+    }
+
+    /// True when the now-playing footer should be on-screen. Mirrors the
+    /// condition inside `nowPlayingFooter` so `.animation(_:value:)` can
+    /// observe a single Equatable bool rather than the whole NowPlayingInfo.
+    private var footerVisible: Bool {
+        guard let np = connection.nowPlaying else { return false }
+        return hasFooterContent(np)
     }
 
     @ViewBuilder
@@ -299,6 +311,10 @@ struct RemoteControlView: View {
                 }
                 .background(.quaternary.opacity(0.4))
             }
+            .transition(.asymmetric(
+                insertion: .move(edge: .bottom).combined(with: .opacity),
+                removal: .opacity
+            ))
         }
     }
 
