@@ -60,6 +60,11 @@ public final class CompanionSession {
     private var sessionStartTxn: UInt32?
     private var currentTextInputData: Data?
     private var keepaliveTimer: DispatchSourceTimer?
+    /// Wall-clock of the most recent text-input op (sendText/sendBackspace/
+    /// sendClearText). Used to skip the keepalive's stop+start poll while the
+    /// user is actively typing — otherwise that poll's transient stale-UUID
+    /// window can race with a user send.
+    private var lastTextOpAt: Date?
 
     /// Create a session over an already-connected socket fd.
     /// - Parameters:
@@ -136,6 +141,14 @@ public final class CompanionSession {
             let txn = self.nextTxn()
             self.sendEncrypted(OPACK.encodeFetchAttentionState(txn: txn))
             if self.currentTextInputData != nil {
+                // Skip the stop+start poll if the user typed within the last
+                // keepalive interval — recent activity already confirms the
+                // keyboard is alive, and racing the poll's stale-UUID window
+                // against a user send breaks sendText with sessionUUIDMissing.
+                if let last = self.lastTextOpAt,
+                   Date().timeIntervalSince(last) < 25 {
+                    return
+                }
                 let stopTxn = self.nextTxn()
                 self.sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
                 let tiTxn = self.nextTxn()
@@ -219,6 +232,7 @@ public final class CompanionSession {
         guard let uuid = RTITextOperations.extractSessionUUID(from: tiD) else {
             completion(TextInputError.sessionUUIDMissing); return
         }
+        lastTextOpAt = Date()
         let payload = RTITextOperations.inputPayload(sessionUUID: uuid, text: text)
         sendEncrypted(OPACK.encodeTextInputCommand(tiD: payload, txn: nextTxn()))
         Log.companion.report("Companion: sent text input (\(text.count) chars)")
@@ -226,6 +240,7 @@ public final class CompanionSession {
     }
 
     public func sendBackspace(completion: @escaping (Error?) -> Void) {
+        lastTextOpAt = Date()
         let stopTxn = nextTxn()
         sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
         let startTxn = nextTxn()
@@ -249,6 +264,7 @@ public final class CompanionSession {
     }
 
     public func sendClearText(completion: @escaping (Error?) -> Void) {
+        lastTextOpAt = Date()
         let stopTxn = nextTxn()
         sendEncrypted(OPACK.encodeTextInputStop(txn: stopTxn))
         let startTxn = nextTxn()
