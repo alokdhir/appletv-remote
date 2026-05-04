@@ -497,138 +497,24 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Now Playing merge
 
-    /// Source-agnostic snapshot of the fields we may receive in a single
-    /// now-playing push, as fed into `mergeNowPlaying(_:)`. Lets the AirPlay
-    /// (MRPNowPlayingUpdate) and Companion (`NowPlayingInfo` from a `_iMC`
-    /// inner dict) paths share one merge implementation — without it, the
-    /// two had to be kept in lockstep by hand and a fix to one routinely
-    /// missed the other.
-    private struct NowPlayingMergeInput {
-        var title: String?
-        var artist: String?
-        var album: String?
-        /// User-facing app name (Companion-only).
-        var app: String?
-        var duration: Double?
-        var elapsedTime: Double?
-        var playbackRate: Double?
-        var playbackStateTimestamp: Double?
-        /// MRP playback state enum (1=playing, 2=paused, 3=stopped, 5=seeking).
-        /// AirPlay-only — used to nudge a refresh during scrubs.
-        var playbackState: Int?
-        /// Companion `_iMC` raw dict, merged into `NowPlayingInfo.raw` for
-        /// debugging. AirPlay path passes nil.
-        var rawCompanion: [String: String]?
-
-        static func from(airplay u: MRPNowPlayingUpdate) -> Self {
-            Self(title: u.title, artist: u.artist, album: u.album,
-                 duration: u.duration, elapsedTime: u.elapsedTime,
-                 playbackRate: u.playbackRate,
-                 playbackStateTimestamp: u.playbackStateTimestamp,
-                 playbackState: u.playbackState)
-        }
-
-        static func from(companion u: NowPlayingInfo) -> Self {
-            Self(title: u.title, artist: u.artist, album: u.album,
-                 app: u.app,
-                 duration: u.duration, elapsedTime: u.elapsedTime,
-                 playbackRate: u.playbackRate,
-                 rawCompanion: u.raw)
-        }
-    }
-
-    private struct NowPlayingMergeResult {
-        let trackChanged: Bool
-        let didResume: Bool
-        let didPause: Bool
-    }
-
-    /// Apply an incoming now-playing update to `self.nowPlaying`. Handles:
-    ///   • cohort reset on app/title/artist change or duration shift >5s
-    ///   • album-injection filter (`Season N, Episode M`)
-    ///   • play→pause edge: freeze interpolated elapsed into elapsedTime
-    ///   • anchor invariant: set while playing, nil while paused
-    ///   • Companion `raw` merge for debugging
+    /// Apply an incoming now-playing update to `self.nowPlaying`.
+    /// Delegates all logic to `NowPlayingInfo.merging(_:lastTimestamp:anchorDate:)`
+    /// in `AppleTVProtocol`.
     @discardableResult
     private func mergeNowPlaying(_ input: NowPlayingMergeInput) -> NowPlayingMergeResult {
-        var info = nowPlaying ?? NowPlayingInfo()
-
-        // Cohort reset triggers — kept as named locals so the result struct
-        // can report `trackChanged` to callers (used for verbose logging).
-        let appChanged    = (input.app    != nil) && (input.app    != info.app)
-        let titleChanged  = (input.title  != nil) && (input.title  != info.title)
-        let artistChanged = (input.artist != nil) && (input.artist != info.artist)
-        let durationChanged: Bool = {
-            guard let new = input.duration, let old = info.duration else { return false }
-            return abs(new - old) > 5
-        }()
-        let trackChanged = appChanged || titleChanged || artistChanged || durationChanged
-        if trackChanged {
-            info.title       = nil
-            info.artist      = nil
-            info.album       = nil
-            info.elapsedTime = nil
-            info.duration    = nil
-            info.playbackRate = nil
-            info.elapsedAnchor = nil
-        }
-
-        if let v = input.title       { info.title       = v }
-        if let v = input.artist      { info.artist      = v }
-        if let v = input.album       { info.album       = NowPlayingInfo.filterAlbum(v) }
-        if let v = input.app         { info.app         = v }
-        if let v = input.duration    { info.duration    = v }
-        if let v = input.elapsedTime { info.elapsedTime = v }
-
-        let prevRate = info.playbackRate ?? 0
-        if let v = input.playbackRate {
-            // Loosened ordering gate: a push with `ts == 0` (or missing
-            // entirely) is allowed through — without this, a pause arriving
-            // with a reset timestamp would be silently dropped, leaving us
-            // ticking forward forever (P2 issue 3ht). Strict-greater-or-equal
-            // is enforced only when we have a non-zero ts to compare to.
-            let ts = input.playbackStateTimestamp ?? 0
-            let pass = ts == 0 || ts >= lastPlaybackStateTimestamp
-            if pass {
-                if ts > 0 { lastPlaybackStateTimestamp = ts }
-                // play → pause edge: bake the live-interpolated value before
-                // flipping rate so liveElapsed returns the right
-                // "where we paused" number after the flip.
-                if v == 0, prevRate > 0, let live = info.liveElapsed() {
-                    info.elapsedTime = live
-                }
-                info.playbackRate = v
-            }
-        }
-        let nowRate = info.playbackRate ?? 0
-
-        // Anchor invariant: while playing (rate > 0), `elapsedAnchor` MUST be set
-        // — liveElapsed needs it to interpolate. While paused, anchor is nil.
-        //   • elapsedTime fresh from the push → re-anchor to now (start, seek).
-        //   • paused → playing transition → anchor existing elapsedTime to now,
-        //     even when the resume push didn't carry a fresh elapsed.
-        //   • now paused → clear anchor (liveElapsed returns frozen value).
-        if nowRate == 0 {
-            info.elapsedAnchor = nil
-        } else if input.elapsedTime != nil || prevRate == 0 {
-            info.elapsedAnchor = Date()
-        }
-
-        if let raw = input.rawCompanion {
-            info.raw.merge(raw) { _, new in new }
-        }
-        nowPlaying = info
-
-        return NowPlayingMergeResult(
-            trackChanged: trackChanged,
-            didResume:    nowRate > 0 && prevRate == 0,
-            didPause:     nowRate == 0 && prevRate > 0
+        let current = nowPlaying ?? NowPlayingInfo()
+        let (merged, result, newTimestamp) = current.merging(
+            input,
+            lastTimestamp: lastPlaybackStateTimestamp
         )
+        lastPlaybackStateTimestamp = newTimestamp
+        nowPlaying = merged
+        return result
     }
 
     /// AirPlay-MRP path (where elapsed/title/artist/album really come from).
     private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
-        let result = mergeNowPlaying(.from(airplay: update))
+        let result = mergeNowPlaying(NowPlayingMergeInput.from(airplay: update))
 
         if Log.verbose {
             let parts: [String] = [
@@ -662,7 +548,7 @@ final class CompanionConnection: ObservableObject {
     /// metadata is handled consistently.
     private func mergeNowPlaying(from inner: [String: Any]) {
         let update = NowPlayingInfo(from: inner)
-        mergeNowPlaying(.from(companion: update))
+        mergeNowPlaying(NowPlayingMergeInput.from(companion: update))
         Log.companion.report("Companion: now-playing update (keys: \(inner.keys.sorted().joined(separator: ",")))")
     }
 }
@@ -712,92 +598,6 @@ extension CompanionConnection: CompanionSessionDelegate {
         case .pvNext: pairingFlow.handlePvNext(frame.payload, deviceID: currentDevice?.id ?? "")
         default: break
         }
-    }
-}
-
-// MARK: - Now Playing
-
-/// Snapshot of the Apple TV's current media-playback state, as pushed via
-/// Companion `_iMC` event subscription. All fields are optional because tvOS
-/// is inconsistent about which keys populate for which apps — the `raw` map
-/// preserves everything we saw (stringified) so unknown keys stay inspectable.
-public struct NowPlayingInfo: Equatable, Sendable {
-    public var title: String?
-    public var artist: String?
-    public var album: String?
-    /// User-facing app name (e.g. "TV", "Music", "Netflix"). Usually under key
-    /// `clientName` or `displayName` — we check both.
-    public var app: String?
-    public var elapsedTime: Double?
-    public var duration: Double?
-    /// 0.0 = paused, 1.0 = playing at normal speed. Some apps report other rates.
-    public var playbackRate: Double?
-    /// Wall-clock time on this Mac when `elapsedTime` was last stamped by the ATV.
-    public var elapsedAnchor: Date?
-    /// Every key/value we saw, stringified. Useful for debugging and for any
-    /// field we haven't named above yet.
-    public var raw: [String: String]
-
-    public init() {
-        self.title = nil; self.artist = nil; self.album = nil; self.app = nil
-        self.elapsedTime = nil; self.duration = nil; self.playbackRate = nil
-        self.elapsedAnchor = nil
-        self.raw = [:]
-    }
-
-    /// Elapsed time ticking forward from the last ATV push while playing.
-    /// Returns the raw `elapsedTime` when paused or unanchored.
-    public func liveElapsed(at date: Date = Date()) -> Double? {
-        guard let elapsed = elapsedTime else { return nil }
-        guard let anchor = elapsedAnchor, let rate = playbackRate, rate > 0 else {
-            return elapsed
-        }
-        let computed = elapsed + date.timeIntervalSince(anchor) * rate
-        if let dur = duration { return min(computed, dur) }
-        return computed
-    }
-
-    public init(from dict: [String: Any]) {
-        func str(_ keys: String...) -> String? {
-            for k in keys {
-                if let v = dict[k] as? String, !v.isEmpty { return v }
-            }
-            return nil
-        }
-        func num(_ keys: String...) -> Double? {
-            for k in keys {
-                if let v = dict[k] as? Double { return v }
-                if let v = dict[k] as? Int    { return Double(v) }
-                if let v = dict[k] as? String, let d = Double(v) { return d }
-            }
-            return nil
-        }
-        self.title        = str("title", "kMRMediaRemoteNowPlayingInfoTitle")
-        self.artist       = str("artist", "kMRMediaRemoteNowPlayingInfoArtist")
-        self.album        = NowPlayingInfo.filterAlbum(
-            str("album", "kMRMediaRemoteNowPlayingInfoAlbum"))
-        self.app          = str("clientName", "displayName", "bundleIdentifier")
-        self.elapsedTime  = num("elapsedTime", "kMRMediaRemoteNowPlayingInfoElapsedTime")
-        self.duration     = num("duration", "kMRMediaRemoteNowPlayingInfoDuration")
-        self.playbackRate = num("playbackRate", "kMRMediaRemoteNowPlayingInfoPlaybackRate")
-
-        var r: [String: String] = [:]
-        for (k, v) in dict {
-            r[k] = String(describing: v)
-        }
-        self.raw = r
-    }
-
-    /// Drop "Season N, Episode N" album values that Apple TV's catalog injects
-    /// for video content. Those numbers are the catalog's internal index, not
-    /// the show's real season/episode (we've seen the same "Season 8,
-    /// Episode 3" string attached to two unrelated shows). Real album
-    /// metadata for music ("A Night at the Opera" etc.) doesn't match the
-    /// pattern and is preserved.
-    static func filterAlbum(_ album: String?) -> String? {
-        guard let album else { return nil }
-        return album.range(of: #"^\p{L}+\s+\d+,\s*\p{L}+\s+\d+$"#,
-                           options: .regularExpression) != nil ? nil : album
     }
 }
 
