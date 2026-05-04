@@ -504,6 +504,60 @@ func standaloneLaunchApp(deviceName: String?, bundleID: String) throws {
     print(green("✓ launched \(bundleID)"))
 }
 
+/// Run a chain of standalone commands against a single shared session —
+/// avoids re-running Bonjour discovery + pair-verify per command, which
+/// `atv --standalone <N> r` would otherwise pay multiple times.
+///
+/// Only chainable commands (HID + swipe) are supported; the chain detector
+/// in main.swift already enforces this.
+func runStandaloneChain(commands: [String], deviceName: String?) throws {
+    let devices = StandaloneDiscovery.discover(timeout: 8.0)
+    let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)
+    let store = CredentialStore()
+    guard store.hasCredentials(for: device.id), let creds = store.load(deviceID: device.id) else {
+        throw StandaloneError.noCredentials(device.name)
+    }
+    let session = StandaloneSession(device: device, credentials: creds)
+    try session.open()
+    try session.pairVerify()
+    try session.startSession()
+    for cmd in commands {
+        if let direction = chainSwipe(for: cmd) {
+            try session.sendSwipe(direction)
+        } else if let command = chainKey(for: cmd) {
+            try session.sendHID(command)
+        } else {
+            throw StandaloneError.protocolFailure("chain: unsupported command \(cmd)")
+        }
+    }
+}
+
+private func chainKey(for cmd: String) -> RemoteCommand? {
+    switch cmd {
+    case "l", "rew":  return .left
+    case "r", "ff":   return .right
+    case "u":         return .up
+    case "d":         return .down
+    case "click":     return .select
+    case "pp":        return .playPause
+    case "menu":      return .menu
+    case "home":      return .home
+    case "vol+":      return .volumeUp
+    case "vol-":      return .volumeDown
+    default:          return nil
+    }
+}
+
+private func chainSwipe(for cmd: String) -> SwipeDirection? {
+    switch cmd {
+    case "sl": return .left
+    case "sr": return .right
+    case "su": return .up
+    case "sd": return .down
+    default:   return nil
+    }
+}
+
 func standaloneSwipe(deviceName: String?, direction: SwipeDirection) throws {
     let devices = StandaloneDiscovery.discover(timeout: 8.0)
     let device = try pickStandaloneDevice(nameOrNil: deviceName, discovered: devices)

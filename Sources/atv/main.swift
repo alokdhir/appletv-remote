@@ -1041,9 +1041,7 @@ do {
     // works without a live app session — see Standalone.swift for the list.
     if useStandalone {
         if let chain {
-            for cmd in chain {
-                try runStandalone(args: [cmd], device: standaloneDevice)
-            }
+            try runStandaloneChain(commands: chain, deviceName: standaloneDevice)
         } else {
             try runStandalone(args: dispatchArgs, device: standaloneDevice)
         }
@@ -1065,9 +1063,7 @@ do {
        IPCConnection.open(path: IPCSocket.path, timeoutSeconds: 1) == nil {
         fputs(dim("(headless session — falling back to --standalone)\n"), stderr)
         if let chain {
-            for cmd in chain {
-                try runStandalone(args: [cmd], device: standaloneDevice)
-            }
+            try runStandaloneChain(commands: chain, deviceName: standaloneDevice)
         } else {
             try runStandalone(args: dispatchArgs, device: standaloneDevice)
         }
