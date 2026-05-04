@@ -71,10 +71,21 @@ public struct NowPlayingMergeResult: Sendable {
     public let didPause: Bool
 }
 
+/// Full output of a single merge call. Boxed as a struct (not a labeled
+/// tuple) so field meanings stay documented and call sites read as
+/// `out.info` / `out.result.didPause` instead of positional unpacking.
+public struct NowPlayingMergeOutput: Sendable {
+    public let info: NowPlayingInfo
+    public let result: NowPlayingMergeResult
+    /// The (possibly updated) timestamp to feed into the next merge as
+    /// `lastTimestamp`. Owned by the caller.
+    public let newTimestamp: Double
+}
+
 extension NowPlayingInfo {
-    /// Pure functional merge. Apply `input` on top of `self` and return the
-    /// updated `NowPlayingInfo`, a result struct, and the updated
-    /// `lastTimestamp` to carry forward in the caller.
+    /// Pure functional merge. Apply `input` on top of `self` and return a
+    /// `NowPlayingMergeOutput` with the merged info, edge flags, and the
+    /// updated `lastTimestamp` to carry forward in the caller.
     ///
     /// - Parameters:
     ///   - input: Incoming push fields (all optional).
@@ -83,13 +94,11 @@ extension NowPlayingInfo {
     ///   - anchorDate: Wall-clock time to stamp `elapsedAnchor` when the
     ///     anchor invariant fires. Defaults to `Date()`. Tests inject a
     ///     fixed value to avoid real-clock sensitivity.
-    /// - Returns: The merged `NowPlayingInfo`, a `NowPlayingMergeResult`, and
-    ///   the (possibly updated) timestamp to use as `lastTimestamp` next call.
     public func merging(
         _ input: NowPlayingMergeInput,
         lastTimestamp: Double,
         anchorDate: Date = Date()
-    ) -> (info: NowPlayingInfo, result: NowPlayingMergeResult, newTimestamp: Double) {
+    ) -> NowPlayingMergeOutput {
         var info = self
 
         // Cohort reset triggers.
@@ -141,8 +150,13 @@ extension NowPlayingInfo {
         }
         let nowRate = info.playbackRate ?? 0
 
-        // Anchor invariant: while playing (rate > 0), `elapsedAnchor` MUST be set
-        // — liveElapsed needs it to interpolate. While paused, anchor is nil.
+        // Anchor invariant: while playing (rate > 0), `elapsedAnchor` MUST be
+        // set — liveElapsed needs it to interpolate. While paused, anchor is
+        // nil. Three transitions matter:
+        //   • elapsedTime fresh from the push → re-anchor to now (start, seek).
+        //   • paused → playing transition → anchor existing elapsedTime to now,
+        //     even when the resume push didn't carry a fresh elapsed.
+        //   • now paused → clear anchor (liveElapsed returns frozen value).
         if nowRate == 0 {
             info.elapsedAnchor = nil
         } else if input.elapsedTime != nil || prevRate == 0 {
@@ -153,7 +167,7 @@ extension NowPlayingInfo {
             info.raw.merge(raw) { _, new in new }
         }
 
-        return (
+        return NowPlayingMergeOutput(
             info: info,
             result: NowPlayingMergeResult(
                 trackChanged: trackChanged,

@@ -11,14 +11,12 @@ final class NowPlayingMergeTests: XCTestCase {
 
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    private func base() -> NowPlayingInfo { NowPlayingInfo() }
-
     /// Shorthand: merge `input` into an empty info with zero lastTimestamp.
     private func merge(
         _ input: NowPlayingMergeInput,
         into info: NowPlayingInfo? = nil,
         lastTimestamp: Double = 0
-    ) -> (info: NowPlayingInfo, result: NowPlayingMergeResult, newTimestamp: Double) {
+    ) -> NowPlayingMergeOutput {
         (info ?? NowPlayingInfo()).merging(input, lastTimestamp: lastTimestamp, anchorDate: t0)
     }
 
@@ -35,16 +33,16 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.elapsedAnchor = t0
 
         let input = NowPlayingMergeInput(title: "New Song")
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.trackChanged)
-        XCTAssertEqual(merged.title, "New Song")
-        XCTAssertNil(merged.artist,      "cohort reset must clear artist")
-        XCTAssertNil(merged.album,       "cohort reset must clear album")
-        XCTAssertNil(merged.elapsedTime, "cohort reset must clear elapsed")
-        XCTAssertNil(merged.duration,    "cohort reset must clear duration")
-        XCTAssertNil(merged.playbackRate,"cohort reset must clear rate")
-        XCTAssertNil(merged.elapsedAnchor)
+        XCTAssertTrue(out.result.trackChanged)
+        XCTAssertEqual(out.info.title, "New Song")
+        XCTAssertNil(out.info.artist,      "cohort reset must clear artist")
+        XCTAssertNil(out.info.album,       "cohort reset must clear album")
+        XCTAssertNil(out.info.elapsedTime, "cohort reset must clear elapsed")
+        XCTAssertNil(out.info.duration,    "cohort reset must clear duration")
+        XCTAssertNil(out.info.playbackRate,"cohort reset must clear rate")
+        XCTAssertNil(out.info.elapsedAnchor)
     }
 
     func testArtistChangeTriggersReset() {
@@ -53,9 +51,9 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.artist = "Artist A"
 
         let input = NowPlayingMergeInput(artist: "Artist B")
-        let (_, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.trackChanged)
+        XCTAssertTrue(out.result.trackChanged)
     }
 
     func testAppChangeTriggersReset() {
@@ -64,11 +62,11 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.title = "Song"
 
         let input = NowPlayingMergeInput(app: "Netflix")
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.trackChanged)
-        XCTAssertEqual(merged.app, "Netflix")
-        XCTAssertNil(merged.title)
+        XCTAssertTrue(out.result.trackChanged)
+        XCTAssertEqual(out.info.app, "Netflix")
+        XCTAssertNil(out.info.title)
     }
 
     func testDurationDeltaOver5sTriggersReset() {
@@ -77,9 +75,9 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.duration = 100.0
 
         let input = NowPlayingMergeInput(duration: 106.0)
-        let (_, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.trackChanged)
+        XCTAssertTrue(out.result.trackChanged)
     }
 
     func testDurationDeltaUnder5sDoesNotTriggerReset() {
@@ -88,9 +86,9 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.duration = 100.0
 
         let input = NowPlayingMergeInput(duration: 104.0)
-        let (_, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertFalse(result.trackChanged)
+        XCTAssertFalse(out.result.trackChanged)
     }
 
     func testSameTitleDoesNotTriggerReset() {
@@ -98,11 +96,11 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.title = "Same Song"
 
         let input = NowPlayingMergeInput(title: "Same Song", elapsedTime: 10)
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertFalse(result.trackChanged)
-        XCTAssertEqual(merged.title, "Same Song")
-        XCTAssertEqual(merged.elapsedTime, 10)
+        XCTAssertFalse(out.result.trackChanged)
+        XCTAssertEqual(out.info.title, "Same Song")
+        XCTAssertEqual(out.info.elapsedTime, 10)
     }
 
     // MARK: - play → pause edge bakes elapsed
@@ -116,14 +114,14 @@ final class NowPlayingMergeTests: XCTestCase {
         // Pause arrives 10 seconds after t0.
         let pauseDate = Date(timeIntervalSince1970: t0.timeIntervalSince1970 + 10)
         let input = NowPlayingMergeInput(playbackRate: 0)
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: pauseDate)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: pauseDate)
 
-        XCTAssertTrue(result.didPause)
-        XCTAssertFalse(result.didResume)
+        XCTAssertTrue(out.result.didPause)
+        XCTAssertFalse(out.result.didResume)
         // elapsed should be baked as 50 + 10*1 = 60
-        XCTAssertEqual(try XCTUnwrap(merged.elapsedTime), 60.0, accuracy: 0.001)
-        XCTAssertNil(merged.elapsedAnchor, "anchor cleared on pause")
-        XCTAssertEqual(merged.playbackRate, 0)
+        XCTAssertEqual(try XCTUnwrap(out.info.elapsedTime), 60.0, accuracy: 0.001)
+        XCTAssertNil(out.info.elapsedAnchor, "anchor cleared on pause")
+        XCTAssertEqual(out.info.playbackRate, 0)
     }
 
     func testPlayToPauseClampsToDuration() {
@@ -135,9 +133,9 @@ final class NowPlayingMergeTests: XCTestCase {
 
         let pauseDate = Date(timeIntervalSince1970: t0.timeIntervalSince1970 + 30)
         let input = NowPlayingMergeInput(playbackRate: 0)
-        let (merged, _, _) = initial.merging(input, lastTimestamp: 0, anchorDate: pauseDate)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: pauseDate)
 
-        XCTAssertEqual(try XCTUnwrap(merged.elapsedTime), 200.0, accuracy: 0.001, "must clamp to duration")
+        XCTAssertEqual(try XCTUnwrap(out.info.elapsedTime), 200.0, accuracy: 0.001, "must clamp to duration")
     }
 
     // MARK: - pause → play edge sets anchor
@@ -150,13 +148,13 @@ final class NowPlayingMergeTests: XCTestCase {
 
         // Resume push carries rate=1 but no elapsedTime.
         let input = NowPlayingMergeInput(playbackRate: 1.0)
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.didResume)
-        XCTAssertFalse(result.didPause)
-        XCTAssertEqual(merged.elapsedAnchor, t0, "anchor must be set on resume")
-        XCTAssertEqual(merged.elapsedTime, 42.0, "existing elapsed preserved")
-        XCTAssertEqual(merged.playbackRate, 1.0)
+        XCTAssertTrue(out.result.didResume)
+        XCTAssertFalse(out.result.didPause)
+        XCTAssertEqual(out.info.elapsedAnchor, t0, "anchor must be set on resume")
+        XCTAssertEqual(out.info.elapsedTime, 42.0, "existing elapsed preserved")
+        XCTAssertEqual(out.info.playbackRate, 1.0)
     }
 
     func testPauseToPlayWithFreshElapsedAlsoSetsAnchor() {
@@ -165,11 +163,11 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.playbackRate = 0.0
 
         let input = NowPlayingMergeInput(elapsedTime: 15.0, playbackRate: 1.0)
-        let (merged, result, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertTrue(result.didResume)
-        XCTAssertEqual(merged.elapsedTime, 15.0)
-        XCTAssertEqual(merged.elapsedAnchor, t0)
+        XCTAssertTrue(out.result.didResume)
+        XCTAssertEqual(out.info.elapsedTime, 15.0)
+        XCTAssertEqual(out.info.elapsedAnchor, t0)
     }
 
     // MARK: - ts == 0 ordering gate (regression: P2 issue 3ht)
@@ -182,11 +180,11 @@ final class NowPlayingMergeTests: XCTestCase {
         let lastTS: Double = 9999
         // Pause arrives with ts == 0 (reset/missing).
         let input = NowPlayingMergeInput(playbackRate: 0, playbackStateTimestamp: 0)
-        let (merged, result, newTS) = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
 
-        XCTAssertTrue(result.didPause, "ts==0 push must pass the ordering gate")
-        XCTAssertEqual(merged.playbackRate, 0)
-        XCTAssertEqual(newTS, lastTS, "timestamp not updated when ts==0")
+        XCTAssertTrue(out.result.didPause, "ts==0 push must pass the ordering gate")
+        XCTAssertEqual(out.info.playbackRate, 0)
+        XCTAssertEqual(out.newTimestamp, lastTS, "timestamp not updated when ts==0")
     }
 
     func testTimestampNilPassesGate() {
@@ -195,10 +193,10 @@ final class NowPlayingMergeTests: XCTestCase {
 
         let lastTS: Double = 5000
         let input = NowPlayingMergeInput(playbackRate: 0)   // nil timestamp
-        let (merged, result, _) = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
 
-        XCTAssertTrue(result.didPause)
-        XCTAssertEqual(merged.playbackRate, 0)
+        XCTAssertTrue(out.result.didPause)
+        XCTAssertEqual(out.info.playbackRate, 0)
     }
 
     func testOutOfOrderTimestampIsDropped() {
@@ -208,11 +206,11 @@ final class NowPlayingMergeTests: XCTestCase {
         let lastTS: Double = 100
         // Stale resume push with ts < lastTimestamp.
         let input = NowPlayingMergeInput(playbackRate: 1.0, playbackStateTimestamp: 50)
-        let (merged, result, newTS) = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: lastTS, anchorDate: t0)
 
-        XCTAssertFalse(result.didResume, "stale push must be dropped")
-        XCTAssertEqual(merged.playbackRate, 0.0, "rate unchanged")
-        XCTAssertEqual(newTS, lastTS, "timestamp unchanged when push dropped")
+        XCTAssertFalse(out.result.didResume, "stale push must be dropped")
+        XCTAssertEqual(out.info.playbackRate, 0.0, "rate unchanged")
+        XCTAssertEqual(out.newTimestamp, lastTS, "timestamp unchanged when push dropped")
     }
 
     func testTimestampUpdatedOnValidNonZeroPush() {
@@ -220,9 +218,9 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.playbackRate = 1.0
 
         let input = NowPlayingMergeInput(playbackRate: 0, playbackStateTimestamp: 200)
-        let (_, _, newTS) = initial.merging(input, lastTimestamp: 100, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 100, anchorDate: t0)
 
-        XCTAssertEqual(newTS, 200)
+        XCTAssertEqual(out.newTimestamp, 200)
     }
 
     // MARK: - Album filter
@@ -245,14 +243,14 @@ final class NowPlayingMergeTests: XCTestCase {
 
     func testMergeAlbumInjectedFieldIsFiltered() {
         let input = NowPlayingMergeInput(album: "Season 3, Episode 10")
-        let (merged, _, _) = merge(input)
-        XCTAssertNil(merged.album, "Season/Episode album must be dropped by merge")
+        let out = merge(input)
+        XCTAssertNil(out.info.album, "Season/Episode album must be dropped by merge")
     }
 
     func testMergeRealAlbumIsPreserved() {
         let input = NowPlayingMergeInput(album: "Kind of Blue")
-        let (merged, _, _) = merge(input)
-        XCTAssertEqual(merged.album, "Kind of Blue")
+        let out = merge(input)
+        XCTAssertEqual(out.info.album, "Kind of Blue")
     }
 
     // MARK: - liveElapsed clamps to duration
@@ -299,8 +297,8 @@ final class NowPlayingMergeTests: XCTestCase {
 
     func testAnchorSetWhenPlayingWithFreshElapsed() {
         let input = NowPlayingMergeInput(elapsedTime: 5.0, playbackRate: 1.0)
-        let (merged, _, _) = merge(input)
-        XCTAssertEqual(merged.elapsedAnchor, t0)
+        let out = merge(input)
+        XCTAssertEqual(out.info.elapsedAnchor, t0)
     }
 
     func testAnchorNilWhenPaused() {
@@ -309,8 +307,8 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.elapsedAnchor = t0
 
         let input = NowPlayingMergeInput(playbackRate: 0.0)
-        let (merged, _, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
-        XCTAssertNil(merged.elapsedAnchor)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        XCTAssertNil(out.info.elapsedAnchor)
     }
 
     func testAnchorNotUpdatedWhenPlayingWithoutFreshElapsedOrRateChange() {
@@ -320,12 +318,14 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.playbackRate  = 1.0
         initial.elapsedAnchor = existingAnchor
 
-        // Push only carries title update, no elapsed or rate.
-        let input = NowPlayingMergeInput(title: initial.title)
-        let (merged, _, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        // Empty push (no rate, no elapsed) must not move the anchor — neither
+        // branch of the invariant should fire because nowRate != 0 AND the
+        // input carried neither elapsedTime nor a rate change.
+        let input = NowPlayingMergeInput()
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
         // anchor should be unchanged (still existingAnchor), not reset to t0
-        XCTAssertEqual(merged.elapsedAnchor, existingAnchor)
+        XCTAssertEqual(out.info.elapsedAnchor, existingAnchor)
     }
 
     // MARK: - Raw companion merge
@@ -335,9 +335,9 @@ final class NowPlayingMergeTests: XCTestCase {
         initial.raw = ["key1": "val1"]
 
         let input = NowPlayingMergeInput(rawCompanion: ["key2": "val2", "key1": "updated"])
-        let (merged, _, _) = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
+        let out = initial.merging(input, lastTimestamp: 0, anchorDate: t0)
 
-        XCTAssertEqual(merged.raw["key1"], "updated")
-        XCTAssertEqual(merged.raw["key2"], "val2")
+        XCTAssertEqual(out.info.raw["key1"], "updated")
+        XCTAssertEqual(out.info.raw["key2"], "val2")
     }
 }

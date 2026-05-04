@@ -503,13 +503,10 @@ final class CompanionConnection: ObservableObject {
     @discardableResult
     private func mergeNowPlaying(_ input: NowPlayingMergeInput) -> NowPlayingMergeResult {
         let current = nowPlaying ?? NowPlayingInfo()
-        let (merged, result, newTimestamp) = current.merging(
-            input,
-            lastTimestamp: lastPlaybackStateTimestamp
-        )
-        lastPlaybackStateTimestamp = newTimestamp
-        nowPlaying = merged
-        return result
+        let out = current.merging(input, lastTimestamp: lastPlaybackStateTimestamp)
+        lastPlaybackStateTimestamp = out.newTimestamp
+        nowPlaying = out.info
+        return out.result
     }
 
     /// AirPlay-MRP path (where elapsed/title/artist/album really come from).
