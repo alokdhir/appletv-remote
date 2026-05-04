@@ -52,6 +52,9 @@ public final class PairingFlow {
     private var pairing: HAPPairing?
     private var pairVerify: CompanionPairVerify?
     private var pendingM2Data: Data?
+    /// In-flight SRP M3 computation kicked off by `submitPin`. Tracked so
+    /// `reset()` can cancel it before its completion lands on a torn-down flow.
+    private var pinTask: Task<Void, Never>?
     private let delegate: Delegate
 
     public init(delegate: Delegate) {
@@ -63,6 +66,8 @@ public final class PairingFlow {
         pairing    = nil
         pairVerify = nil
         pendingM2Data = nil
+        pinTask?.cancel()
+        pinTask = nil
     }
 
     // MARK: - Entry points (called by CompanionConnection)
@@ -166,12 +171,26 @@ public final class PairingFlow {
     public func submitPin(_ pin: String, onSend: @escaping @Sendable @MainActor (Data) -> Void, onError: @escaping @Sendable @MainActor (String) -> Void) {
         guard let m2 = pendingM2Data else { return }
         let capturedPairing = pairing
-        Task.detached {
+        pinTask?.cancel()
+        pinTask = Task.detached { [weak self] in
             do {
                 let m3 = try capturedPairing?.processM2(m2, pin: pin) ?? Data()
-                await MainActor.run { onSend(m3) }
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    // The flow may have been reset() while M3 was being
+                    // computed — in that case `pairing` is nil and any M3 we
+                    // send out is against a half-torn-down state machine.
+                    guard let self, self.pairing != nil else { return }
+                    self.pinTask = nil
+                    onSend(m3)
+                }
             } catch {
-                await MainActor.run { onError("Pairing M3 failed: \(error)") }
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    guard let self, self.pairing != nil else { return }
+                    self.pinTask = nil
+                    onError("Pairing M3 failed: \(error)")
+                }
             }
         }
     }
