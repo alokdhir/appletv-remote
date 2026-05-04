@@ -194,10 +194,11 @@ public enum AirPlayTunnel {
         let eventReady = OnceFlag()
         eventGroup.enter()
         eventConn.stateUpdateHandler = { state in
+            // .waiting is transient (interface temporarily unavailable) — let
+            // the wait timeout handle a true failure rather than tripping out
+            // on a brief Wi-Fi blip that NWConnection would have recovered from.
             switch state {
-            case .ready:
-                if eventReady.fire() { eventGroup.leave() }
-            case .failed, .cancelled, .waiting:
+            case .ready, .failed, .cancelled:
                 if eventReady.fire() { eventGroup.leave() }
             default: break
             }
