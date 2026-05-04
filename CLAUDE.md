@@ -117,6 +117,8 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 | `PairingFlow.swift` | Pair-setup (SRP-6a) state machine |
 | `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
 | `OPACK.swift` | OPACK serialization (Apple's binary dict format) |
+| `NowPlayingInfo.swift` | `NowPlayingInfo` struct: now-playing snapshot, live-elapsed interpolation, album filter |
+| `NowPlayingMerge.swift` | `NowPlayingMergeInput` / `NowPlayingMergeResult` and `NowPlayingInfo.merging(_:)` |
 | `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
 | `MRPMessage.swift` | Constructs MRP wire messages (varint-length-prefixed protobuf frames) |
 | `MRPDataChannel.swift` | MRP data channel over AirPlay connection |

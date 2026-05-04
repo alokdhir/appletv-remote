@@ -220,6 +220,8 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 | `PairingFlow.swift` | Pair-setup (SRP-6a) state machine |
 | `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
 | `OPACK.swift` | OPACK binary encoder/decoder |
+| `NowPlayingInfo.swift` | `NowPlayingInfo` struct: now-playing snapshot, live-elapsed interpolation, album filter |
+| `NowPlayingMerge.swift` | `NowPlayingMergeInput` / `NowPlayingMergeResult` and `NowPlayingInfo.merging(_:)` |
 | `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
 | `MRPMessage.swift` | Constructs MRP wire messages (varint-length-prefixed protobuf frames) |
 | `MRPDataChannel.swift` | MRP data channel over AirPlay connection |
