@@ -700,7 +700,11 @@ extension CompanionConnection: CompanionSessionDelegate {
 
     func sessionDidReceivePairingFrame(_ frame: CompanionFrame) {
         switch frame.type {
-        case .psNext: pairingFlow.handlePsNext(frame.payload, device: currentDevice!)
+        case .psNext:
+            // currentDevice is niled by disconnect(); a frame already in flight
+            // from the read loop can land here after that, so guard.
+            guard let device = currentDevice else { return }
+            pairingFlow.handlePsNext(frame.payload, device: device)
         case .pvNext: pairingFlow.handlePvNext(frame.payload, deviceID: currentDevice?.id ?? "")
         default: break
         }
