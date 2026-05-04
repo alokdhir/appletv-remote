@@ -151,7 +151,7 @@ public final class MRPDataChannel: @unchecked Sendable {
     /// Send one or more varint-framed MRP protobuf messages wrapped in a
     /// DataStreamMessage → binary plist → HAP-encrypted TCP frame.
     public func send(_ mrpFrames: Data, timeoutSeconds: TimeInterval = 10) throws {
-        let payload = encodePlist(mrpFrames: mrpFrames)
+        let payload = try encodePlist(mrpFrames: mrpFrames)
         sendSeqno += 1
         var hdr = Data()
 
@@ -282,9 +282,11 @@ public final class MRPDataChannel: @unchecked Sendable {
     // MARK: - Plist encode / decode
 
     /// Wrap varint-framed MRP bytes in the plist envelope the ATV expects.
-    private func encodePlist(mrpFrames: Data) -> Data {
+    /// Throws on encoder failure — callers MUST propagate so the ATV is never
+    /// sent a zero-byte sync payload (which silently desyncs the data channel).
+    private func encodePlist(mrpFrames: Data) throws -> Data {
         let plist: [String: Any] = ["params": ["data": mrpFrames]]
-        return (try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)) ?? Data()
+        return try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
     }
 
     /// Extract MRP bytes from the plist envelope the ATV sends.
