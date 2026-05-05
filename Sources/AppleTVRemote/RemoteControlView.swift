@@ -357,6 +357,7 @@ struct RemoteControlView: View {
         ScrollView {
             VStack(spacing: 20) {
                 KeyCatcher(onCommand: { connection.send($0) },
+                            onLongCommand: { connection.sendLongPress($0) },
                             onSwipe: { connection.sendSwipe($0) },
                             onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } },
                             onBackspace: connection.keyboardActive ? { connection.sendBackspace { _ in } } : nil)
@@ -549,6 +550,7 @@ struct RemoteControlView: View {
 /// passed through so app-level shortcuts (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
+    var onLongCommand: (RemoteCommand) -> Void = { _ in }
     var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
@@ -556,6 +558,7 @@ private struct KeyCatcher: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let v = KeyCatcherView()
         v.onCommand = onCommand
+        v.onLongCommand = onLongCommand
         v.onSwipe = onSwipe
         v.onShowApps = onShowApps
         v.onBackspace = onBackspace
@@ -564,6 +567,7 @@ private struct KeyCatcher: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView as? KeyCatcherView)?.onCommand = onCommand
+        (nsView as? KeyCatcherView)?.onLongCommand = onLongCommand
         (nsView as? KeyCatcherView)?.onSwipe = onSwipe
         (nsView as? KeyCatcherView)?.onShowApps = onShowApps
         (nsView as? KeyCatcherView)?.onBackspace = onBackspace
@@ -572,9 +576,22 @@ private struct KeyCatcher: NSViewRepresentable {
 
 private final class KeyCatcherView: NSView {
     var onCommand: (RemoteCommand) -> Void = { _ in }
+    var onLongCommand: (RemoteCommand) -> Void = { _ in }
     var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
+
+    /// Long-press tracking for keys whose UI buttons support a hold gesture
+    /// (Menu, Home). The first non-repeat keyDown schedules a 0.4s
+    /// DispatchWorkItem; if the user releases first we cancel it and fire
+    /// `onCommand`, otherwise the work item fires `onLongCommand` and the
+    /// eventual keyUp is consumed without re-firing. Without this, holding
+    /// `H` produces a stream of auto-repeat keyDowns and the long-press
+    /// behaviour (Control Center) never triggers.
+    private var pressedKeyCode: UInt16?
+    private var pressedCommand: RemoteCommand?
+    private var longPressItem: DispatchWorkItem?
+    private var longPressFired = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -622,7 +639,7 @@ private final class KeyCatcherView: NSView {
         if !mods.isEmpty { super.keyDown(with: event); return }
 
         if event.charactersIgnoringModifiers?.lowercased() == "a" {
-            onShowApps()
+            if !event.isARepeat { onShowApps() }
             return
         }
         // Backspace while ATV has a text field focused — delete last character.
@@ -631,10 +648,55 @@ private final class KeyCatcherView: NSView {
             return
         }
         if let cmd = command(for: event) {
-            onCommand(cmd)
+            if Self.supportsLongPress(cmd) {
+                // Long-press-able keys: track the press so keyUp can decide
+                // tap vs long-press. Auto-repeat keyDowns are ignored — the
+                // timer or release will produce the right event.
+                if event.isARepeat { return }
+                startPressTracking(cmd: cmd, keyCode: event.keyCode)
+            } else {
+                // Other commands fire on every keyDown including auto-repeats
+                // — useful so holding ↑ scrolls a tvOS list smoothly.
+                onCommand(cmd)
+            }
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard pressedKeyCode == event.keyCode, let cmd = pressedCommand else {
+            super.keyUp(with: event)
+            return
+        }
+        longPressItem?.cancel()
+        longPressItem = nil
+        let fired = longPressFired
+        pressedKeyCode = nil
+        pressedCommand = nil
+        longPressFired = false
+        if !fired { onCommand(cmd) }
+    }
+
+    private static func supportsLongPress(_ cmd: RemoteCommand) -> Bool {
+        cmd == .home || cmd == .menu
+    }
+
+    private func startPressTracking(cmd: RemoteCommand, keyCode: UInt16) {
+        longPressItem?.cancel()
+        pressedKeyCode = keyCode
+        pressedCommand = cmd
+        longPressFired = false
+        // Capture cmd locally so a delayed item firing after a fast re-press
+        // can't fire with the wrong (newly-pressed) command.
+        let cmdToFire = cmd
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.longPressFired = true
+            self.onLongCommand(cmdToFire)
+        }
+        longPressItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
     private func command(for event: NSEvent) -> RemoteCommand? {
@@ -727,7 +789,12 @@ struct LabeledRemoteButton: View {
     let action: () -> Void
     var longPressAction: (() -> Void)? = nil
 
-    @GestureState private var isPressed = false
+    @State private var isPressed = false
+    /// Set true when the long-press gesture meets its minimum duration. The
+    /// release handler reads it to decide whether `action()` should also fire
+    /// (it shouldn't, if a long-press already succeeded — otherwise the tap's
+    /// quick down/up collapses the held press into a short tap on the ATV).
+    @State private var longPressFired = false
 
     var body: some View {
         let content = Image(systemName: sfSymbol)
@@ -738,20 +805,22 @@ struct LabeledRemoteButton: View {
             .help(label)
 
         if let longPress = longPressAction {
-            content
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.4)
-                        .updating($isPressed) { v, s, _ in s = v }
-                        .onEnded { _ in longPress() }
-                )
-                .simultaneousGesture(TapGesture().onEnded { action() })
+            content.onLongPressGesture(
+                minimumDuration: 0.4,
+                perform: {
+                    longPressFired = true
+                    longPress()
+                },
+                onPressingChanged: { pressing in
+                    isPressed = pressing
+                    if !pressing {
+                        if !longPressFired { action() }
+                        longPressFired = false
+                    }
+                }
+            )
         } else {
-            content
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.001)
-                        .updating($isPressed) { v, s, _ in s = v }
-                        .onEnded { _ in action() }
-                )
+            content.onTapGesture { action() }
         }
     }
 }
