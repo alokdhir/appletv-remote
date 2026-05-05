@@ -16,7 +16,7 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 
 | Remote (`remote.png`) | Remote + sidebar (`remote with sidebar.png`) |
 |--------|-----------------|
-| ![Remote control](screenshots/remote.png) | ![Remote with sidebar](screenshots/remote%20with%20sidebar.png) |
+| <img src="screenshots/remote.png" width="316"> | ![Remote with sidebar](screenshots/remote%20with%20sidebar.png) |
 
 | App grid (`appgrid.png`) | App grid + sidebar (`appgrid with sidebar.png`) |
 |----------|--------------------|
