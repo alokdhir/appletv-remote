@@ -24,6 +24,15 @@ struct RemoteControlView: View {
     @AppStorage("com.adhir.appletv-remote.sidebarCollapsed") private var sidebarCollapsed = false
     @State private var readyToShowState = false
 
+    /// Currently-flashing command from a keyboard shortcut. Set when KeyCatcher
+    /// fires `onCommand` / `onLongCommand`, cleared after `keyFlashDuration`.
+    /// Each button checks if it matches and OR's the result into its press
+    /// visual so keyboard shortcuts feel like mouse presses.
+    @State private var keyFlashCommand: RemoteCommand?
+    /// Same idea for swipe chevrons.
+    @State private var keyFlashSwipe: SwipeDirection?
+    static let keyFlashDuration: TimeInterval = 0.15
+
     var body: some View {
         VStack(spacing: 0) {
             statusBar
@@ -356,9 +365,9 @@ struct RemoteControlView: View {
     private var remoteScrollContent: some View {
         ScrollView {
             VStack(spacing: 20) {
-                KeyCatcher(onCommand: { connection.send($0) },
-                            onLongCommand: { connection.sendLongPress($0) },
-                            onSwipe: { connection.sendSwipe($0) },
+                KeyCatcher(onCommand: { cmd in connection.send(cmd); flashKey(cmd) },
+                            onLongCommand: { cmd in connection.sendLongPress(cmd); flashKey(cmd) },
+                            onSwipe: { dir in connection.sendSwipe(dir); flashKeySwipe(dir) },
                             onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } },
                             onBackspace: connection.keyboardActive ? { connection.sendBackspace { _ in } } : nil)
                     .frame(width: 0, height: 0)
@@ -368,31 +377,40 @@ struct RemoteControlView: View {
                         .fill(.quaternary)
                         .frame(width: 182, height: 182)
                     VStack(spacing: 4) {
-                        RemoteButton(label: "chevron.up",    action: { connection.send(.up) },    size: 38)
+                        RemoteButton(label: "chevron.up",    action: { connection.send(.up) },    size: 38,
+                                     flash: keyFlashCommand == .up)
                         HStack(spacing: 4) {
-                            RemoteButton(label: "chevron.left",   action: { connection.send(.left) },  size: 38)
-                            SelectButton(action: { connection.send(.select) }, size: 52)
-                            RemoteButton(label: "chevron.right",  action: { connection.send(.right) }, size: 38)
+                            RemoteButton(label: "chevron.left",   action: { connection.send(.left) },  size: 38,
+                                         flash: keyFlashCommand == .left)
+                            SelectButton(action: { connection.send(.select) }, size: 52,
+                                         flash: keyFlashCommand == .select)
+                            RemoteButton(label: "chevron.right",  action: { connection.send(.right) }, size: 38,
+                                         flash: keyFlashCommand == .right)
                         }
-                        RemoteButton(label: "chevron.down",  action: { connection.send(.down) },  size: 38)
+                        RemoteButton(label: "chevron.down",  action: { connection.send(.down) },  size: 38,
+                                     flash: keyFlashCommand == .down)
                     }
                     // Swipe chevrons — rendered after VStack so they sit on top.
                     // Each is offset by `swipeChevronRadius` so the glyphs sit
                     // just inside the d-pad rim at the four compass points.
                     Group {
-                        SwipeChevronButton(symbol: "chevron.up.2", label: "Swipe up") {
+                        SwipeChevronButton(symbol: "chevron.up.2", label: "Swipe up",
+                                            flash: keyFlashSwipe == .up) {
                             connection.sendSwipe(.up)
                         }
                         .offset(y: -RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.down.2", label: "Swipe down") {
+                        SwipeChevronButton(symbol: "chevron.down.2", label: "Swipe down",
+                                            flash: keyFlashSwipe == .down) {
                             connection.sendSwipe(.down)
                         }
                         .offset(y: RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.left.2", label: "Swipe left") {
+                        SwipeChevronButton(symbol: "chevron.left.2", label: "Swipe left",
+                                            flash: keyFlashSwipe == .left) {
                             connection.sendSwipe(.left)
                         }
                         .offset(x: -RemoteControlView.swipeChevronRadius)
-                        SwipeChevronButton(symbol: "chevron.right.2", label: "Swipe right") {
+                        SwipeChevronButton(symbol: "chevron.right.2", label: "Swipe right",
+                                            flash: keyFlashSwipe == .right) {
                             connection.sendSwipe(.right)
                         }
                         .offset(x: RemoteControlView.swipeChevronRadius)
@@ -401,12 +419,14 @@ struct RemoteControlView: View {
 
                 // Back + Home — mirrors physical button positions on the Siri Remote
                 HStack(spacing: 48) {
-                    LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
+                    LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back",
+                                        flash: keyFlashCommand == .menu) {
                         connection.send(.menu)
                     } longPressAction: {
                         connection.sendLongPress(.menu)
                     }
-                    LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
+                    LabeledRemoteButton(sfSymbol: "app.fill", label: "Home",
+                                        flash: keyFlashCommand == .home) {
                         connection.send(.home)
                     } longPressAction: {
                         connection.sendLongPress(.home)
@@ -414,14 +434,17 @@ struct RemoteControlView: View {
                 }
 
                 // Play/Pause — centered, matching the physical remote
-                RemoteButton(label: "playpause.fill", action: { connection.send(.playPause) }, size: 52)
+                RemoteButton(label: "playpause.fill", action: { connection.send(.playPause) }, size: 52,
+                             flash: keyFlashCommand == .playPause)
 
                 // Volume — side buttons on the real remote; shown as a row here
                 HStack(spacing: 24) {
-                    LabeledRemoteButton(sfSymbol: "speaker.minus.fill", label: "Vol −") {
+                    LabeledRemoteButton(sfSymbol: "speaker.minus.fill", label: "Vol −",
+                                        flash: keyFlashCommand == .volumeDown) {
                         connection.send(.volumeDown)
                     }
-                    LabeledRemoteButton(sfSymbol: "speaker.plus.fill", label: "Vol +") {
+                    LabeledRemoteButton(sfSymbol: "speaker.plus.fill", label: "Vol +",
+                                        flash: keyFlashCommand == .volumeUp) {
                         connection.send(.volumeUp)
                     }
                 }
@@ -434,6 +457,26 @@ struct RemoteControlView: View {
                 .opacity(connection.keyboardActive ? 1.0 : 0.4)
             }
             .padding(24)
+        }
+    }
+
+    /// Trigger a brief press-style flash on the on-screen button matching `cmd`.
+    /// Captures the value into the closure so a rapid second key event (which
+    /// overwrites `keyFlashCommand`) doesn't get its flash truncated by the
+    /// first event's pending reset.
+    private func flashKey(_ cmd: RemoteCommand) {
+        keyFlashCommand = cmd
+        let captured = cmd
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.keyFlashDuration) {
+            if keyFlashCommand == captured { keyFlashCommand = nil }
+        }
+    }
+
+    private func flashKeySwipe(_ dir: SwipeDirection) {
+        keyFlashSwipe = dir
+        let captured = dir
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.keyFlashDuration) {
+            if keyFlashSwipe == captured { keyFlashSwipe = nil }
         }
     }
 
@@ -723,6 +766,9 @@ struct RemoteButton: View {
     let label: String
     let action: () -> Void
     var size: CGFloat = 44
+    /// Externally-driven press visual — used by `RemoteControlView` to flash
+    /// the button when its keyboard shortcut fires.
+    var flash: Bool = false
 
     var body: some View {
         Button(action: action) {
@@ -731,7 +777,20 @@ struct RemoteButton: View {
                 .frame(width: size, height: size)
                 .background(.quaternary, in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableFillStyle(externalPressed: flash))
+    }
+}
+
+/// Press feedback for filled circular/rounded buttons (RemoteButton, SelectButton).
+/// Mirrors `.plain`'s subtle dim on press AND honours an externally-driven
+/// `externalPressed` so keyboard shortcuts flash the same as mouse presses.
+private struct PressableFillStyle: ButtonStyle {
+    var externalPressed: Bool = false
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed || externalPressed
+        return configuration.label
+            .opacity(pressed ? 0.55 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: pressed)
     }
 }
 
@@ -742,6 +801,7 @@ struct RemoteButton: View {
 struct SwipeChevronButton: View {
     let symbol: String
     let label: String
+    var flash: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -750,7 +810,7 @@ struct SwipeChevronButton: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
         }
-        .buttonStyle(PressableChevronStyle())
+        .buttonStyle(PressableChevronStyle(externalPressed: flash))
         .overlay(
             DelayedTooltip(text: label, delay: 0.4)
                 .allowsHitTesting(false)
@@ -760,18 +820,22 @@ struct SwipeChevronButton: View {
 
 /// Press feedback for chevron-style accent buttons that don't have their own
 /// background. Default `.plain` style on macOS gives no visual on press.
+/// `externalPressed` lets a keyboard-shortcut flash drive the same visual.
 private struct PressableChevronStyle: ButtonStyle {
+    var externalPressed: Bool = false
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.85 : 1.0)
-            .opacity(configuration.isPressed ? 0.55 : 1.0)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        let pressed = configuration.isPressed || externalPressed
+        return configuration.label
+            .scaleEffect(pressed ? 0.85 : 1.0)
+            .opacity(pressed ? 0.55 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: pressed)
     }
 }
 
 struct SelectButton: View {
     let action: () -> Void
     var size: CGFloat = 52
+    var flash: Bool = false
 
     var body: some View {
         Button(action: action) {
@@ -779,13 +843,14 @@ struct SelectButton: View {
                 .fill(.primary)
                 .frame(width: size, height: size)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableFillStyle(externalPressed: flash))
     }
 }
 
 struct LabeledRemoteButton: View {
     let sfSymbol: String
     let label: String
+    var flash: Bool = false
     let action: () -> Void
     var longPressAction: (() -> Void)? = nil
 
@@ -797,11 +862,13 @@ struct LabeledRemoteButton: View {
     @State private var longPressFired = false
 
     var body: some View {
+        let dim = isPressed || flash
         let content = Image(systemName: sfSymbol)
             .font(.system(size: 20, weight: .medium))
             .frame(width: 52, height: 44)
-            .background(.quaternary.opacity(isPressed ? 0.5 : 1),
+            .background(.quaternary.opacity(dim ? 0.5 : 1),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .animation(.easeOut(duration: 0.1), value: dim)
             .help(label)
 
         if let longPress = longPressAction {
