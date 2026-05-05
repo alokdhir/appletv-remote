@@ -662,7 +662,23 @@ private final class KeyCatcherView: NSView {
         }
     }
 
+    override func resignFirstResponder() -> Bool {
+        // Steal focus back on the next tick whenever something else (a SwiftUI
+        // button receiving Tab focus) tries to take it.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            if window.firstResponder !== self {
+                window.makeFirstResponder(self)
+            }
+        }
+        return super.resignFirstResponder()
+    }
+
     override func keyDown(with event: NSEvent) {
+        // Swallow Tab/Shift-Tab so they never reach SwiftUI's focus engine
+        // and shift keyboard focus away from this view.
+        if event.keyCode == 48 { return }
+
         // `mods` excludes shift on purpose — shift is a modifier we own (for
         // swipe shortcuts) but never combines with ⌘/⌃/⌥ in our bindings.
         // Tracking it separately keeps the bail-out check below uncluttered.
@@ -797,6 +813,7 @@ struct RemoteButton: View {
                 .background(.quaternary, in: Circle())
         }
         .buttonStyle(PressableFillStyle(externalPressed: flash))
+        .noFocusRing()
     }
 }
 
@@ -830,6 +847,7 @@ struct SwipeChevronButton: View {
                 .foregroundStyle(Color.accentColor)
         }
         .buttonStyle(PressableChevronStyle(externalPressed: flash))
+        .noFocusRing()
         .overlay(
             DelayedTooltip(text: label, delay: 0.4)
                 .allowsHitTesting(false)
@@ -863,6 +881,7 @@ struct SelectButton: View {
                 .frame(width: size, height: size)
         }
         .buttonStyle(PressableFillStyle(externalPressed: flash))
+        .noFocusRing()
     }
 }
 
@@ -915,6 +934,16 @@ struct LabeledRemoteButton: View {
                 perform: action,
                 onPressingChanged: { isPressed = $0 }
             )
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder func noFocusRing() -> some View {
+        if #available(macOS 14.0, *) {
+            self.focusEffectDisabled()
+        } else {
+            self
         }
     }
 }
