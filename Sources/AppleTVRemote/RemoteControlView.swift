@@ -820,7 +820,13 @@ struct LabeledRemoteButton: View {
                 }
             )
         } else {
-            content.onTapGesture { action() }
+            // No long-press behaviour: fire on press and dim while held,
+            // matching the original LongPressGesture(0.001) feel.
+            content.onLongPressGesture(
+                minimumDuration: 0.001,
+                perform: action,
+                onPressingChanged: { isPressed = $0 }
+            )
         }
     }
 }
