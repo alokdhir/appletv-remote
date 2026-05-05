@@ -184,7 +184,7 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 ~/Library/Application Support/AppleTVRemote/<device-id>.airplay.json # AirPlay
 ```
 
-**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext.
+**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext. The files are written with `0600` permissions (owner read/write only).
 
 ## Architecture
 
