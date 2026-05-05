@@ -366,7 +366,14 @@ struct RemoteControlView: View {
         ScrollView {
             VStack(spacing: 20) {
                 KeyCatcher(onCommand: { cmd in connection.send(cmd); flashKey(cmd) },
-                            onLongCommand: { cmd in connection.sendLongPress(cmd); flashKey(cmd) },
+                            onLongCommand: { cmd in connection.sendLongPress(cmd) },
+                            onPressingChanged: { cmd, pressing in
+                                if pressing {
+                                    keyFlashCommand = cmd
+                                } else if keyFlashCommand == cmd {
+                                    keyFlashCommand = nil
+                                }
+                            },
                             onSwipe: { dir in connection.sendSwipe(dir); flashKeySwipe(dir) },
                             onShowApps: { withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = true } },
                             onBackspace: connection.keyboardActive ? { connection.sendBackspace { _ in } } : nil)
@@ -594,6 +601,10 @@ struct RemoteControlView: View {
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
     var onLongCommand: (RemoteCommand) -> Void = { _ in }
+    /// Fires (cmd, true) on the first non-repeat keyDown of a long-press-able
+    /// command, and (cmd, false) when the key is released. Lets the parent
+    /// drive a sustained press visual that mirrors a held mouse click.
+    var onPressingChanged: (RemoteCommand, Bool) -> Void = { _, _ in }
     var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
@@ -602,6 +613,7 @@ private struct KeyCatcher: NSViewRepresentable {
         let v = KeyCatcherView()
         v.onCommand = onCommand
         v.onLongCommand = onLongCommand
+        v.onPressingChanged = onPressingChanged
         v.onSwipe = onSwipe
         v.onShowApps = onShowApps
         v.onBackspace = onBackspace
@@ -611,6 +623,7 @@ private struct KeyCatcher: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView as? KeyCatcherView)?.onCommand = onCommand
         (nsView as? KeyCatcherView)?.onLongCommand = onLongCommand
+        (nsView as? KeyCatcherView)?.onPressingChanged = onPressingChanged
         (nsView as? KeyCatcherView)?.onSwipe = onSwipe
         (nsView as? KeyCatcherView)?.onShowApps = onShowApps
         (nsView as? KeyCatcherView)?.onBackspace = onBackspace
@@ -620,6 +633,7 @@ private struct KeyCatcher: NSViewRepresentable {
 private final class KeyCatcherView: NSView {
     var onCommand: (RemoteCommand) -> Void = { _ in }
     var onLongCommand: (RemoteCommand) -> Void = { _ in }
+    var onPressingChanged: (RemoteCommand, Bool) -> Void = { _, _ in }
     var onSwipe: (SwipeDirection) -> Void = { _ in }
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
@@ -718,6 +732,10 @@ private final class KeyCatcherView: NSView {
         pressedKeyCode = nil
         pressedCommand = nil
         longPressFired = false
+        // Clear the press visual BEFORE firing onCommand. Order matters: the
+        // tap-release path then re-flashes via onCommand → flashKey for the
+        // brief tap ack, while the long-press path (already-fired) just clears.
+        onPressingChanged(cmd, false)
         if !fired { onCommand(cmd) }
     }
 
@@ -730,6 +748,7 @@ private final class KeyCatcherView: NSView {
         pressedKeyCode = keyCode
         pressedCommand = cmd
         longPressFired = false
+        onPressingChanged(cmd, true)
         // Capture cmd locally so a delayed item firing after a fast re-press
         // can't fire with the wrong (newly-pressed) command.
         let cmdToFire = cmd
