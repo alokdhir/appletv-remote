@@ -805,6 +805,9 @@ struct LabeledRemoteButton: View {
             .help(label)
 
         if let longPress = longPressAction {
+            // Long-press path: fire action() on release if the long-press
+            // threshold wasn't reached, or longPress() if it was. longPressFired
+            // guards against a spurious action() firing after a successful hold.
             content.onLongPressGesture(
                 minimumDuration: 0.4,
                 perform: {
@@ -820,8 +823,7 @@ struct LabeledRemoteButton: View {
                 }
             )
         } else {
-            // No long-press behaviour: fire on press and dim while held,
-            // matching the original LongPressGesture(0.001) feel.
+            // No long-press behaviour: fire on press and dim while held.
             content.onLongPressGesture(
                 minimumDuration: 0.001,
                 perform: action,
