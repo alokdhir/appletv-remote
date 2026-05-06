@@ -588,16 +588,22 @@ struct RemoteControlView: View {
 ///
 ///   ↑ ↓ ← →     — D-pad
 ///   return      — select (D-pad centre)
-///   space, p    — play / pause
-///   m           — menu / back
-///   h           — home
-///   a           — show app grid
+///   space       — play / pause
+///   ⌃A          — show app grid
+///   ⌃H          — home (hold for Control Center)
+///   ⌃M          — menu / back (hold long-press)
+///   ⌃P          — play / pause
 ///   delete      — backspace (when ATV text field is focused)
 ///   ⌥↑ ⌥↓       — volume up / down
 ///                  (⌃↑/⌃↓ would conflict with macOS Mission Control)
+///   ⇧↑ ⇧↓ ⇧← ⇧→ — trackpad swipe
 ///
-/// Other keys with modifiers (⌘/⌃, plus ⌥ outside the volume bindings) are
-/// passed through so app-level shortcuts (⌘Q, ⌘W, ⌘,) keep working.
+/// The letter shortcuts require Control because bare letters were too easy
+/// to fire accidentally when remote-pane focus drifted while the user was
+/// typing in another window.
+///
+/// Other ⌘/⌃/⌥ shortcuts (and ⌥ outside the volume bindings) pass through
+/// so app-level commands (⌘Q, ⌘W, ⌘,) keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
     var onLongCommand: (RemoteCommand) -> Void = { _ in }
@@ -708,33 +714,51 @@ private final class KeyCatcherView: NSView {
             }
         }
 
+        // ⌃ + letter shortcuts. Bare letters used to fire commands but were
+        // too easy to send accidentally if remote-pane focus drifted while
+        // the user was typing elsewhere. Now require Control.
+        if mods == .control, !shift {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "a":
+                if !event.isARepeat { onShowApps() }
+                return
+            case "h":
+                handleLongPressLetter(.home, event: event)
+                return
+            case "m":
+                handleLongPressLetter(.menu, event: event)
+                return
+            case "p":
+                onCommand(.playPause)
+                return
+            default:
+                break  // any other ⌃-letter falls through to system handling
+            }
+        }
+
         // Let other ⌘/⌃/⌥ shortcuts reach the menu bar and other handlers.
         if !mods.isEmpty { super.keyDown(with: event); return }
 
-        if event.charactersIgnoringModifiers?.lowercased() == "a" {
-            if !event.isARepeat { onShowApps() }
-            return
-        }
         // Backspace while ATV has a text field focused — delete last character.
         if event.keyCode == 51, let handler = onBackspace {
             handler()
             return
         }
-        if let cmd = command(for: event) {
-            if Self.supportsLongPress(cmd) {
-                // Long-press-able keys: track the press so keyUp can decide
-                // tap vs long-press. Auto-repeat keyDowns are ignored — the
-                // timer or release will produce the right event.
-                if event.isARepeat { return }
-                startPressTracking(cmd: cmd, keyCode: event.keyCode)
-            } else {
-                // Other commands fire on every keyDown including auto-repeats
-                // — useful so holding ↑ scrolls a tvOS list smoothly.
-                onCommand(cmd)
-            }
+        // Bare arrows / Return / Space.
+        if let cmd = bareCommand(for: event) {
+            // Auto-repeat fires repeatedly — useful so holding ↑ scrolls
+            // a tvOS list smoothly.
+            onCommand(cmd)
             return
         }
         super.keyDown(with: event)
+    }
+
+    /// Press tracking for the ⌃H / ⌃M letter shortcuts so a hold triggers
+    /// the long-press behaviour (Control Center for ⌃H, etc.).
+    private func handleLongPressLetter(_ cmd: RemoteCommand, event: NSEvent) {
+        if event.isARepeat { return }
+        startPressTracking(cmd: cmd, keyCode: event.keyCode)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -755,10 +779,6 @@ private final class KeyCatcherView: NSView {
         if !fired { onCommand(cmd) }
     }
 
-    private static func supportsLongPress(_ cmd: RemoteCommand) -> Bool {
-        cmd == .home || cmd == .menu
-    }
-
     private func startPressTracking(cmd: RemoteCommand, keyCode: UInt16) {
         longPressItem?.cancel()
         pressedKeyCode = keyCode
@@ -777,20 +797,17 @@ private final class KeyCatcherView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
-    private func command(for event: NSEvent) -> RemoteCommand? {
+    /// Bare-modifier keys: arrows, Return, Space. Letters are handled in
+    /// the ⌃-letter branch above and are NOT returned here.
+    private func bareCommand(for event: NSEvent) -> RemoteCommand? {
         switch event.keyCode {
         case 126: return .up
         case 125: return .down
         case 123: return .left
         case 124: return .right
         case 36, 76: return .select          // return, keypad enter
-        default: break
-        }
-        switch event.charactersIgnoringModifiers?.lowercased() {
-        case "m": return .menu
-        case "h": return .home
-        case " ", "p": return .playPause
-        default:  return nil
+        case 49: return .playPause           // space
+        default: return nil
         }
     }
 }
