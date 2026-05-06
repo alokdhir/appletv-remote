@@ -142,6 +142,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         show.target = self
         menu.addItem(show)
 
+        // Keyboard Shortcuts
+        let shortcuts = NSMenuItem(title: "Keyboard Shortcuts…",
+                                   action: #selector(showKeyboardShortcuts), keyEquivalent: "")
+        shortcuts.target = self
+        menu.addItem(shortcuts)
+
         menu.addItem(.separator())
 
         // Refresh App List (only when connected)
@@ -179,6 +185,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     @objc private func showMainWindow(_ sender: Any?) {
         openMainWindow()
+    }
+
+    @objc private func showKeyboardShortcuts(_ sender: Any?) {
+        KeyboardShortcutsWindowController.shared.show()
     }
 
     @objc private func showAbout(_ sender: Any?) {
