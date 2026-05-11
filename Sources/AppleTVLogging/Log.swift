@@ -35,6 +35,7 @@ public enum Log {
     public static let credentials = Logger(subsystem: subsystem, category: "credentials")
     public static let wol         = Logger(subsystem: subsystem, category: "wol")
     public static let app         = Logger(subsystem: subsystem, category: "app")
+    public static let opack       = Logger(subsystem: subsystem, category: "opack")
 }
 
 public extension Logger {

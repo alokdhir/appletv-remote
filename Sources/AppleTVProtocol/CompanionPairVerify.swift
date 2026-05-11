@@ -46,7 +46,7 @@ public final class CompanionPairVerify {
 
     /// Process PV_Next M2 from ATV; returns TLV8 payload for M3.
     public func processM2(_ data: Data) throws -> Data {
-        let tlv = TLV8.decode(data)
+        let tlv = try TLV8.decode(data)
 
         if let err = tlv[.error] { throw VerifyError.serverError(err.first ?? 0) }
         guard let atvEphemeralKeyData = tlv[.publicKey] else {
@@ -74,7 +74,7 @@ public final class CompanionPairVerify {
         let box   = try ChaChaPoly.SealedBox(combined: Data.noncePadded("PV-Msg02") + encData)
         let plain = try ChaChaPoly.open(box, using: encKey)
 
-        let inner = TLV8.decode(plain)
+        let inner = try TLV8.decode(plain)
         guard let atvID = inner[.identifier] else { throw VerifyError.missingTLVField("identifier") }
         // The Companion protocol uses a separate ATV identity (different UUID + signing key) from
         // the HAP pair-setup identity we stored. Skipping server signature verification is safe for
@@ -108,7 +108,7 @@ public final class CompanionPairVerify {
     // MARK: - M4 verification
 
     public func verifyM4(_ data: Data) throws {
-        let tlv = TLV8.decode(data)
+        let tlv = try TLV8.decode(data)
         if let err = tlv[.error] {
             Log.pairing.fail("PV M4: ATV returned error=0x\(String(format: "%02x", err.first ?? 0))")
             throw VerifyError.serverError(err.first ?? 0)

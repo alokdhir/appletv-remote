@@ -16,4 +16,16 @@ extension Data {
 
     /// Lowercase hex string with no separators, e.g. "deadbeef".
     var hexString: String { map { String(format: "%02x", $0) }.joined() }
+
+    /// Constant-time equality. Use when comparing authentication tags, proofs,
+    /// or any other byte string where leaking a matching-prefix length via early
+    /// `==` short-circuit could aid an attacker. Length is allowed to leak.
+    func constantTimeEquals(_ other: Data) -> Bool {
+        guard count == other.count else { return false }
+        var diff: UInt8 = 0
+        for (a, b) in zip(self, other) {
+            diff |= a ^ b
+        }
+        return diff == 0
+    }
 }

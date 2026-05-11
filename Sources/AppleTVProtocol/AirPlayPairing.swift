@@ -162,7 +162,7 @@ public final class AirPlayPairSetup {
         let r = try http.post("/pair-setup", body: tlv.encode(), headers: Self.headers)
         guard r.status == 200 else { throw PairError.httpStatus(r.status, r.body) }
 
-        let resp = TLV8.decode(r.body)
+        let resp = try TLV8.decode(r.body)
         if let err = resp[.error]?.first { throw PairError.serverError(err) }
         guard let salt = resp[.salt]      else { throw PairError.missingTLV("salt") }
         guard let bPub = resp[.publicKey] else { throw PairError.missingTLV("publicKey") }
@@ -189,10 +189,10 @@ public final class AirPlayPairSetup {
 
         let r4 = try http.post("/pair-setup", body: m3.encode(), headers: Self.headers)
         guard r4.status == 200 else { throw PairError.httpStatus(r4.status, r4.body) }
-        let resp4 = TLV8.decode(r4.body)
+        let resp4 = try TLV8.decode(r4.body)
         if let err = resp4[.error]?.first { throw PairError.serverError(err) }
         guard let serverProof = resp4[.proof] else { throw PairError.missingTLV("proof (M4)") }
-        guard serverProof == session.expectedServerProof else {
+        guard serverProof.constantTimeEquals(session.expectedServerProof) else {
             throw PairError.cryptoFailed("server proof mismatch — PIN wrong?")
         }
         Log.pairing.report("AirPlay pair-setup M4 server proof verified ✓")
@@ -234,7 +234,7 @@ public final class AirPlayPairSetup {
 
         let r6 = try http.post("/pair-setup", body: m5.encode(), headers: Self.headers)
         guard r6.status == 200 else { throw PairError.httpStatus(r6.status, r6.body) }
-        let resp6 = TLV8.decode(r6.body)
+        let resp6 = try TLV8.decode(r6.body)
         if let err = resp6[.error]?.first { throw PairError.serverError(err) }
         guard let encData = resp6[.encryptedData] else {
             throw PairError.missingTLV("encryptedData (M6)")
@@ -247,7 +247,7 @@ public final class AirPlayPairSetup {
             combined: nonce6.withUnsafeBytes { Data($0) } + encData
         )
         let plain  = try ChaChaPoly.open(box, using: encryptKey)
-        let innerM6 = TLV8.decode(plain)
+        let innerM6 = try TLV8.decode(plain)
         guard let atvID   = innerM6[.identifier] else { throw PairError.missingTLV("atv identifier") }
         guard let atvLTPK = innerM6[.publicKey]  else { throw PairError.missingTLV("atv ltpk") }
         // Note: we don't verify the ATV's signature in M6. pyatv also skips
@@ -316,7 +316,7 @@ public final class AirPlayPairVerify {
 
         let r2 = try http.post("/pair-verify", body: m1.encode(), headers: AirPlayPairSetup.headers)
         guard r2.status == 200 else { throw VerifyError.httpStatus(r2.status, r2.body) }
-        let resp2 = TLV8.decode(r2.body)
+        let resp2 = try TLV8.decode(r2.body)
         if let err = resp2[.error]?.first { throw VerifyError.serverError(err) }
         guard let atvPub = resp2[.publicKey]     else { throw VerifyError.missingTLV("publicKey") }
         guard let encData = resp2[.encryptedData] else { throw VerifyError.missingTLV("encryptedData") }
@@ -340,11 +340,11 @@ public final class AirPlayPairVerify {
             combined: nonce2.withUnsafeBytes { Data($0) } + encData
         )
         let plain  = try ChaChaPoly.open(box, using: sessionKey)
-        let inner  = TLV8.decode(plain)
+        let inner  = try TLV8.decode(plain)
         guard let atvID   = inner[.identifier] else { throw VerifyError.missingTLV("atv identifier") }
         guard let atvSig  = inner[.signature]  else { throw VerifyError.missingTLV("atv signature") }
 
-        guard atvID == credentials.atvID else {
+        guard atvID.constantTimeEquals(credentials.atvID) else {
             throw VerifyError.cryptoFailed("atv id mismatch — wrong device or stale creds")
         }
         // The ATV signed (atvPub || atvID || ourPub) with its long-term
@@ -375,7 +375,7 @@ public final class AirPlayPairVerify {
 
         let r4 = try http.post("/pair-verify", body: m3.encode(), headers: AirPlayPairSetup.headers)
         guard r4.status == 200 else { throw VerifyError.httpStatus(r4.status, r4.body) }
-        let resp4 = TLV8.decode(r4.body)
+        let resp4 = try TLV8.decode(r4.body)
         if let err = resp4[.error]?.first { throw VerifyError.serverError(err) }
 
         // Derive the two control channel keys from the same shared secret.

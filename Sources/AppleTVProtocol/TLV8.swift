@@ -60,15 +60,31 @@ public struct TLV8 {
 
     // MARK: - Decode
 
-    public static func decode(_ data: Data) -> TLV8 {
+    public enum DecodeError: Error, Equatable {
+        /// Trailing tag byte with no length byte after it.
+        case truncatedHeader
+        /// Declared length runs off the end of the buffer.
+        case undersizedValue(declared: Int, available: Int)
+    }
+
+    /// Parse TLV8 bytes. Throws `DecodeError` on malformed input rather than
+    /// silently truncating — so an attacker-supplied short value surfaces as a
+    /// wire-format error instead of a downstream ChaCha20-Poly1305 open() failure.
+    public static func decode(_ data: Data) throws -> TLV8 {
         var tlv = TLV8()
         var i = data.startIndex
 
         while i < data.endIndex {
-            guard i + 1 < data.endIndex else { break }
+            guard data.index(after: i) < data.endIndex else {
+                throw DecodeError.truncatedHeader
+            }
             let tag  = data[i];  i = data.index(after: i)
             let len  = Int(data[i]); i = data.index(after: i)
-            let end  = data.index(i, offsetBy: len, limitedBy: data.endIndex) ?? data.endIndex
+            let available = data.distance(from: i, to: data.endIndex)
+            guard available >= len else {
+                throw DecodeError.undersizedValue(declared: len, available: available)
+            }
+            let end  = data.index(i, offsetBy: len)
             let value = Data(data[i..<end])
             i = end
 

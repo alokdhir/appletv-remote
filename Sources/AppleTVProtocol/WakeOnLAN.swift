@@ -75,7 +75,12 @@ public enum WakeOnLAN {
             var addr = sockaddr_in()
             addr.sin_family = sa_family_t(AF_INET)
             addr.sin_port   = in_port_t(9).bigEndian
-            inet_pton(AF_INET, dest, &addr.sin_addr)
+            // inet_pton returns 1 on success, 0 on malformed input, -1 on error.
+            // Skip rather than send to whatever's in sin_addr (zero or otherwise).
+            guard inet_pton(AF_INET, dest, &addr.sin_addr) == 1 else {
+                Log.wol.fail("WoL: skipping invalid destination '\(dest)'")
+                continue
+            }
 
             let n = packet.withUnsafeBytes { raw in
                 withUnsafePointer(to: addr) { ptr in

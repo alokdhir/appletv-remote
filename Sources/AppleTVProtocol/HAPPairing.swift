@@ -57,7 +57,7 @@ public final class HAPPairing: @unchecked Sendable {
 
     /// Process server's M2 response; returns TLV8 payload for M3, needs pin.
     public func processM2(_ data: Data, pin: String) throws -> Data {
-        let tlv = TLV8.decode(data)
+        let tlv = try TLV8.decode(data)
         try checkState(tlv, expected: .m2)
 
         guard let salt = tlv[.salt]      else { throw PairingError.missingTLVField("salt") }
@@ -85,14 +85,14 @@ public final class HAPPairing: @unchecked Sendable {
 
     /// Process server's M4 response (server proof verification); returns TLV8 payload for M5.
     public func processM4(_ data: Data) throws -> Data {
-        let tlv = TLV8.decode(data)
+        let tlv = try TLV8.decode(data)
         try checkState(tlv, expected: .m4)
 
         guard let serverProof = tlv[.proof] else { throw PairingError.missingTLVField("proof") }
         guard let expected = sessionResult?.expectedServerProof else {
             throw PairingError.missingTLVField("sessionResult (M3 not completed?)")
         }
-        guard serverProof == expected else { throw PairingError.serverProofMismatch }
+        guard serverProof.constantTimeEquals(expected) else { throw PairingError.serverProofMismatch }
         Log.pairing.report("HAPPairing: server proof verified ✓")
 
         step = .m4
@@ -102,7 +102,7 @@ public final class HAPPairing: @unchecked Sendable {
     /// Process server's M6 response (Apple TV identity); returns PairingCredentials on success.
     @discardableResult
     public func processM6(_ data: Data) throws -> PairingCredentials {
-        let tlv = TLV8.decode(data)
+        let tlv = try TLV8.decode(data)
         try checkState(tlv, expected: .m6)
 
         guard let encData = tlv[.encryptedData] else {
@@ -116,7 +116,7 @@ public final class HAPPairing: @unchecked Sendable {
         let box   = try ChaChaPoly.SealedBox(combined: nonce.withUnsafeBytes { Data($0) } + encData)
         let plain = try ChaChaPoly.open(box, using: key)
 
-        let inner = TLV8.decode(plain)
+        let inner = try TLV8.decode(plain)
         guard let atv_id   = inner[.identifier] else { throw PairingError.missingTLVField("identifier") }
         guard let atv_ltpk = inner[.publicKey]  else { throw PairingError.missingTLVField("publicKey") }
 

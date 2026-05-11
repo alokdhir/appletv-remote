@@ -95,7 +95,13 @@ public final class PairingFlow {
             let hex = payload.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
             Log.companion.fail("Companion psNext: OPACK extraction failed, raw payload hex: \(hex)")
         }
-        let tlv  = TLV8.decode(extracted)
+        let tlv: TLV8
+        do {
+            tlv = try TLV8.decode(extracted)
+        } catch {
+            delegate.setState(.error("Pairing PS_Next: malformed TLV8 (\(error))"))
+            return
+        }
         let step = tlv[.state]?.first ?? 0
 
         switch step {
@@ -133,7 +139,13 @@ public final class PairingFlow {
     /// Handle an incoming PV_Next frame (pair-verify steps M2/M4).
     public func handlePvNext(_ payload: Data, deviceID: String) {
         let extracted = OPACK.extractPairingData(from: payload) ?? payload
-        let tlv  = TLV8.decode(extracted)
+        let tlv: TLV8
+        do {
+            tlv = try TLV8.decode(extracted)
+        } catch {
+            delegate.setState(.error("Pair verify PV_Next: malformed TLV8 (\(error))"))
+            return
+        }
         let step = tlv[.state]?.first ?? 0
         Log.companion.trace("Companion pvNext step=\(step) (\(extracted.count) bytes TLV8)")
 

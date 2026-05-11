@@ -1,4 +1,5 @@
 import Foundation
+import AppleTVLogging
 
 /// Minimal OPACK encoder/decoder for the Companion protocol pairing frames.
 ///
@@ -24,6 +25,8 @@ import Foundation
 ///   0xD0–0xDF    array,  count = byte - 0xD0   (0–15 items)
 ///   0xE0–0xEF    dict,   count = byte - 0xE0   (0–15 key-value pairs)
 public enum OPACK {
+
+    private static let maxDictEntries = 10_000
 
     private static func encodeUInt32(_ value: UInt32, into out: inout Data) {
         out.append(0x32)
@@ -367,6 +370,10 @@ public enum OPACK {
             } else {
                 if iterations >= count { break }
             }
+            if iterations >= maxDictEntries {
+                Log.opack.fail("OPACK decodeDict: bailing at \(maxDictEntries) entries (open-ended attacker amplification?)")
+                break
+            }
             guard let key = readString(data, cursor: &cursor) else { break }
             if let s = peekString(data, cursor: &cursor) {
                 result[key] = s
@@ -404,6 +411,10 @@ public enum OPACK {
                 if cursor >= data.endIndex || data[cursor] == 0x03 { break }
             } else {
                 if iterations >= count { break }
+            }
+            if iterations >= maxDictEntries {
+                Log.opack.fail("OPACK decodeDictShallow: bailing at \(maxDictEntries) entries (open-ended attacker amplification?)")
+                break
             }
             let before = cursor
             guard let key = readString(data, cursor: &cursor) else { break }
