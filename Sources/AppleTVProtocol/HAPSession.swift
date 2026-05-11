@@ -20,12 +20,14 @@ public final class HAPSession: @unchecked Sendable {
 
     public enum FramingError: Error, CustomStringConvertible {
         case authenticationFailed
+        case sessionTerminated
         case frameTooLarge(Int)
         case malformedFrame(String)
 
         public var description: String {
             switch self {
             case .authenticationFailed: return "Poly1305 tag mismatch"
+            case .sessionTerminated:    return "session terminated after auth failure"
             case .frameTooLarge(let n): return "frame plaintext too large: \(n)"
             case .malformedFrame(let m): return "malformed frame: \(m)"
             }
@@ -43,6 +45,13 @@ public final class HAPSession: @unchecked Sendable {
     /// Incoming byte buffer — fed raw bytes from the socket; `decrypt()`
     /// returns whatever complete plaintext frames are now available.
     private var inbound = Data()
+
+    /// Latched on the first Poly1305 tag failure. Once set, subsequent
+    /// encrypt/feed calls throw `.sessionTerminated` instead of silently
+    /// drifting the read counter out of sync with the peer — a recoverable-
+    /// looking error followed by quietly corrupted decryption is worse than
+    /// a hard close. Callers should drop the underlying connection.
+    private var isDead = false
 
     public init(writeKey: Data, readKey: Data) {
         precondition(writeKey.count == 32 && readKey.count == 32,
@@ -72,6 +81,7 @@ public final class HAPSession: @unchecked Sendable {
     /// Encrypt `plaintext` into one or more framed ciphertext chunks.
     /// Plaintexts larger than `maxFramePlaintext` are split automatically.
     public func encrypt(_ plaintext: Data) throws -> Data {
+        if isDead { throw FramingError.sessionTerminated }
         var remaining = plaintext
         var output = Data()
         while !remaining.isEmpty {
@@ -103,6 +113,7 @@ public final class HAPSession: @unchecked Sendable {
     /// Feed raw bytes from the socket. Returns every complete plaintext
     /// frame that is now decryptable; partial frames remain buffered.
     public func feed(_ bytes: Data) throws -> Data {
+        if isDead { throw FramingError.sessionTerminated }
         inbound.append(bytes)
         var output = Data()
         while true {
@@ -138,7 +149,12 @@ public final class HAPSession: @unchecked Sendable {
                     authenticating: Data(lengthAAD)
                 )
             } catch {
-                inbound = Data(inbound[tagEnd...])
+                // Auth failure means we're desynchronised with the peer's
+                // counter — there's no safe recovery. Mark dead, drop any
+                // remaining buffered bytes, and bail. The next encrypt/feed
+                // call will throw .sessionTerminated.
+                isDead = true
+                inbound = Data()
                 throw FramingError.authenticationFailed
             }
             readCounter &+= 1

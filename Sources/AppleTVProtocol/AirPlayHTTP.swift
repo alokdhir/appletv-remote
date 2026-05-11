@@ -129,13 +129,29 @@ public final class AirPlayHTTP: @unchecked Sendable {
     /// forwarded to `sink` — the new owner MUST NOT call `connection.receive`
     /// itself (that would race with our in-flight receive).
     ///
-    /// Caller must ensure no un-consumed response data is left in the buffer.
+    /// Any bytes already received but not yet consumed are replayed to `sink`
+    /// before this returns. Previously they were silently dropped — see
+    /// appletv-remote-6t9z. Now the only way the new owner misses bytes is if
+    /// it ignores its own sink.
+    ///
+    /// Serialised onto `self.queue` so we run after any in-flight receive
+    /// callback completes; the next callback (which will see `detached == true`
+    /// and route to the new sink) is queued strictly behind us.
     public func detach(sink: @escaping (Data?, Error?, Bool) -> Void) -> NWConnection {
-        bufferCond.lock()
-        detachedSink = sink
-        detached = true
-        readBuffer = Data()
-        bufferCond.unlock()
+        queue.sync {
+            bufferCond.lock()
+            let pendingBytes = readBuffer
+            let pendingError = receiveError
+            let pendingEOF   = receiveClosed
+            readBuffer = Data()
+            detached = true
+            detachedSink = sink
+            bufferCond.unlock()
+            if !pendingBytes.isEmpty || pendingError != nil || pendingEOF {
+                trace("detach: replaying \(pendingBytes.count)B buffered, err=\(pendingError.map{"\($0)"} ?? "nil") eof=\(pendingEOF)")
+                sink(pendingBytes.isEmpty ? nil : pendingBytes, pendingError, pendingEOF)
+            }
+        }
         return connection
     }
 
