@@ -12,6 +12,12 @@ struct AppLauncherView: View {
     @State private var focusedIndex: Int = 0
     @FocusState private var searchFocused: Bool
     @State private var stableCols: Int = 3
+    /// Pending column-count update from the resize debounce. Cancelled on
+    /// each new resize so only the last item runs — previously we stacked
+    /// async closures and they fired in scheduled-not-latest order, so
+    /// stableCols ended up reflecting whichever closure ran last rather
+    /// than the latest resize.
+    @State private var pendingColUpdate: DispatchWorkItem?
 
     private let cellSize: CGFloat = 76   // icon 64 + padding 6×2
     private let spacing: CGFloat = 12
@@ -99,11 +105,17 @@ struct AppLauncherView: View {
                             handleKey(keyCode, apps: ordered, cols: stableCols)
                         }
                     )
-                    .onChange(of: rawCols) { newCols in
-                        // Debounce: ignore transient changes during sidebar animation
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            stableCols = columnCount(for: geo.size.width - 24)
+                    .onChange(of: rawCols) { _ in
+                        // Debounce: ignore transient changes during sidebar animation.
+                        // Cancel any prior pending update so we apply only the most
+                        // recent resize — not whichever closure happens to fire last.
+                        pendingColUpdate?.cancel()
+                        let width = geo.size.width
+                        let item = DispatchWorkItem {
+                            stableCols = columnCount(for: width - 24)
                         }
+                        pendingColUpdate = item
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
                     }
                 }
             }
