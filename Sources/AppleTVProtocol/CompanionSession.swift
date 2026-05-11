@@ -429,7 +429,20 @@ public final class CompanionSession {
     }
 
     private func processBuffer() {
-        while let frame = CompanionFrame.read(from: &receiveBuffer) {
+        while true {
+            let frame: CompanionFrame?
+            do {
+                frame = try CompanionFrame.read(from: &receiveBuffer)
+            } catch {
+                // Oversize / desynchronised frame header — there's no safe
+                // recovery; advertised payload would never arrive as a valid
+                // frame. Log + tear down the session so AutoReconnector can
+                // bring up a fresh one.
+                Log.companion.fail("Companion: \(error) — dropping connection")
+                delegate?.sessionDidReadError("Malformed frame: \(error)")
+                return
+            }
+            guard let frame else { return }
             Log.companion.trace("Companion ← frame \(frame.type) (\(frame.payload.count) bytes)")
             switch frame.type {
             case .psNext, .pvNext:

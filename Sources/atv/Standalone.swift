@@ -394,7 +394,13 @@ final class StandaloneSession {
 
     private func readFrame(expected: CompanionFrame.FrameType) throws -> Data {
         while true {
-            if let frame = CompanionFrame.read(from: &buffer) {
+            let frame: CompanionFrame?
+            do {
+                frame = try CompanionFrame.read(from: &buffer)
+            } catch {
+                throw StandaloneError.protocolFailure("\(error)")
+            }
+            if let frame {
                 guard frame.type == expected else {
                     throw StandaloneError.protocolFailure("unexpected frame 0x\(String(frame.type.rawValue, radix: 16)), wanted 0x\(String(expected.rawValue, radix: 16))")
                 }

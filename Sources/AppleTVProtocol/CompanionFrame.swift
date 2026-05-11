@@ -15,6 +15,23 @@ public struct CompanionFrame {
         case eOPACK  = 0x08   // Encrypted OPACK (commands and events after session)
     }
 
+    /// Sanity cap on the 24-bit payload length field. Real Companion frames
+    /// sit comfortably under 64 KiB; anything past 1 MiB is a hostile or
+    /// malformed peer claim and the caller should drop the connection rather
+    /// than buffer up to 16 MiB waiting for bytes that will never arrive
+    /// as a valid frame.
+    public static let maxPayloadLength = 1 << 20
+
+    public enum FrameError: Error, CustomStringConvertible {
+        case oversizePayload(Int)
+        public var description: String {
+            switch self {
+            case .oversizePayload(let n):
+                return "Companion frame payload length \(n) exceeds \(CompanionFrame.maxPayloadLength)"
+            }
+        }
+    }
+
     public let type: FrameType
     public let payload: Data
 
@@ -39,7 +56,11 @@ public struct CompanionFrame {
     // MARK: - Decode
 
     /// Attempt to read one frame from `buffer`, consuming its bytes on success.
-    public static func read(from buffer: inout Data) -> CompanionFrame? {
+    /// - Returns `nil` when more bytes are needed (incomplete frame in buffer).
+    /// - Throws `FrameError.oversizePayload` when the header advertises a
+    ///   payload past `maxPayloadLength` — the caller must drop the connection
+    ///   rather than buffer; we never recover from a desynchronised stream.
+    public static func read(from buffer: inout Data) throws -> CompanionFrame? {
         guard buffer.count >= 4 else { return nil }
 
         let typeByte = buffer[buffer.startIndex]
@@ -47,6 +68,10 @@ public struct CompanionFrame {
         let b2 = buffer[buffer.index(buffer.startIndex, offsetBy: 2)]
         let b3 = buffer[buffer.index(buffer.startIndex, offsetBy: 3)]
         let payloadLen = (Int(b1) << 16) | (Int(b2) << 8) | Int(b3)
+
+        if payloadLen > maxPayloadLength {
+            throw FrameError.oversizePayload(payloadLen)
+        }
 
         guard buffer.count >= 4 + payloadLen else { return nil }
 
