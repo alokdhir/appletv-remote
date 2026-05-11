@@ -690,6 +690,13 @@ public enum OPACK {
         return s
     }
 
+    /// Sanity cap on attacker-controlled OPACK byte-length fields. The Companion
+    /// link runs over a single TCP socket whose frame size is already bounded;
+    /// nothing the ATV legitimately sends approaches this. A malformed or
+    /// hostile length would otherwise drive an Int-sized allocation from the
+    /// 4-byte 0x93 variant (up to 4 GiB).
+    static let maxBytesLength = 1 << 20  // 1 MiB — orders of magnitude over the real payloads we see
+
     private static func readBytes(_ data: Data, cursor: inout Data.Index) -> Data? {
         guard cursor < data.endIndex else { return nil }
         let tag = data[cursor]
@@ -719,6 +726,10 @@ public enum OPACK {
         default:
             return nil
         }
+        // Reject suspicious lengths before even checking buffer bounds — a
+        // negative-after-sign-extension or implausibly-large value should
+        // never produce a partial decode, just a clean nil.
+        guard length >= 0, length <= Self.maxBytesLength else { return nil }
         guard data.distance(from: cursor, to: data.endIndex) >= length else { return nil }
         let end = data.index(cursor, offsetBy: length)
         let result = Data(data[cursor..<end])
