@@ -99,6 +99,13 @@ struct RemoteControlView: View {
                 readyToShowState = true
             }
         }
+        .onDisappear {
+            // Cancel any in-flight notification debounce so it can't post a
+            // notification for a device the user has already switched away
+            // from (the Task's 2-second sleep would otherwise outlive us).
+            keyboardNotifyTask?.cancel()
+            keyboardNotifyTask = nil
+        }
         .sheet(isPresented: $showKeyboardInput, onDismiss: {
             keyboardInputText = ""
         }) {
