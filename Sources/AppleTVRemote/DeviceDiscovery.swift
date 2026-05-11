@@ -19,6 +19,7 @@ final class DeviceDiscovery: ObservableObject {
 
     private var browser: NWBrowser?
     private var resolvers: [String: ServiceResolver] = [:]
+    private var spinnerTask: Task<Void, Never>?
 
     // Bonjour service type for the Apple TV Companion protocol (tvOS 15+)
     private let serviceType = "_companion-link._tcp"
@@ -41,8 +42,11 @@ final class DeviceDiscovery: ObservableObject {
                 case .ready:
                     self?.browserError = nil
                     // Bonjour never signals "done"; stop spinner after 3 s if no results yet.
-                    try? await Task.sleep(for: .seconds(3))
-                    self?.isSearching = false
+                    self?.spinnerTask = Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled else { return }
+                        self?.isSearching = false
+                    }
                 case .failed(let error):
                     self?.isSearching = false
                     self?.browserError = error.localizedDescription
@@ -66,6 +70,8 @@ final class DeviceDiscovery: ObservableObject {
     }
 
     func stopDiscovery() {
+        spinnerTask?.cancel()
+        spinnerTask = nil
         browser?.cancel()
         browser = nil
         resolvers.removeAll()

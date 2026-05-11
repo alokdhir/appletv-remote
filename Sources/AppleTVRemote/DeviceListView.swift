@@ -33,6 +33,13 @@ struct DelayedTooltip: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError() }
 
+        deinit {
+            MainActor.assumeIsolated {
+                timer?.invalidate()
+                tooltipPanel?.orderOut(nil)
+            }
+        }
+
         override func removeFromSuperview() {
             timer?.invalidate()
             timer = nil
