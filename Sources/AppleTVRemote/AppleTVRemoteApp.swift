@@ -15,6 +15,22 @@ struct AppleTVRemoteApp: App {
     @State       private var appListObserver: AnyCancellable?
     @State       private var iconRefreshTimer: Timer?
 
+    init() {
+        // AppKit's NSWindow frame autosave writes under the executable-name
+        // domain (`getprogname()` → "AppleTVRemote.plist"), NOT the bundle-id
+        // domain that UserDefaults.standard reads. Sweep both, since SwiftUI
+        // also persists its derived-signature NSWindow Frame keys here, and
+        // that value gets re-applied to the window AFTER our setFrame in
+        // viewDidMoveToWindow — defeating restoration.
+        for suite in [UserDefaults.standard, UserDefaults(suiteName: "AppleTVRemote")].compactMap({ $0 }) {
+            for key in suite.dictionaryRepresentation().keys
+            where key.hasPrefix("NSWindow Frame ") {
+                suite.removeObject(forKey: key)
+            }
+            suite.synchronize()
+        }
+    }
+
     var body: some Scene {
         // Register setUp on the delegate here — body evaluates before
         // applicationDidFinishLaunching fires on macOS, so this is guaranteed
@@ -36,7 +52,7 @@ struct AppleTVRemoteApp: App {
                     setUp()
                 }
         }
-        .windowResizability(.contentMinSize)
+        .windowResizability(.automatic)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
@@ -143,6 +159,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardNotificationManager.shared.cancelAttention()
         NotificationCenter.default.post(
             name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
+    }
+
+    /// ⌘Q / programmatic quit. Capture the main window's final frame here
+    /// because windowWillClose during termination can fire too late for
+    /// cfprefsd to flush our key before the app exits.
+    func applicationWillTerminate(_ notification: Notification) {
+        if let w = MenuBarController.shared.mainWindow {
+            UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: mainWindowFrameKey)
+            UserDefaults.standard.synchronize()
+        }
     }
 
     weak var connection: CompanionConnection?

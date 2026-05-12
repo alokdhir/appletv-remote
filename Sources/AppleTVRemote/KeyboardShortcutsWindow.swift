@@ -28,8 +28,8 @@ private let shortcutGroups: [ShortcutGroup] = [
         Shortcut(keys: "Space", description: "Play / Pause"),
     ]),
     ShortcutGroup(title: "Volume", entries: [
-        Shortcut(keys: "⌥↑", description: "Volume up"),
-        Shortcut(keys: "⌥↓", description: "Volume down"),
+        Shortcut(keys: "Page Up",   description: "Volume up"),
+        Shortcut(keys: "Page Down", description: "Volume down"),
     ]),
     ShortcutGroup(title: "Trackpad swipe", entries: [
         Shortcut(keys: "⇧↑", description: "Swipe up"),

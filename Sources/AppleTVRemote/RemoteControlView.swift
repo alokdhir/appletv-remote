@@ -601,16 +601,15 @@ struct RemoteControlView: View {
 ///   ⌃M          — menu / back (hold long-press)
 ///   ⌃P          — play / pause
 ///   delete      — backspace (when ATV text field is focused)
-///   ⌥↑ ⌥↓       — volume up / down
-///                  (⌃↑/⌃↓ would conflict with macOS Mission Control)
+///   PgUp PgDn   — volume up / down
 ///   ⇧↑ ⇧↓ ⇧← ⇧→ — trackpad swipe
 ///
 /// The letter shortcuts require Control because bare letters were too easy
 /// to fire accidentally when remote-pane focus drifted while the user was
 /// typing in another window.
 ///
-/// Other ⌘/⌃/⌥ shortcuts (and ⌥ outside the volume bindings) pass through
-/// so app-level commands (⌘Q, ⌘W, ⌘,) keep working.
+/// Other ⌘/⌃/⌥ shortcuts pass through so app-level commands (⌘Q, ⌘W, ⌘,)
+/// keep working.
 private struct KeyCatcher: NSViewRepresentable {
     let onCommand: (RemoteCommand) -> Void
     var onLongCommand: (RemoteCommand) -> Void = { _ in }
@@ -709,18 +708,6 @@ private final class KeyCatcherView: NSView {
             }
         }
 
-        // ⌥↑ / ⌥↓ → volume up / down. Using Option rather than Control
-        // because macOS reserves ⌃↑ / ⌃↓ for Mission Control. Caught before
-        // the modifier bail-out below; only fires on plain ⌥ (not ⌘⌥, ⌃⌥)
-        // so we don't shadow other shortcuts.
-        if mods == .option {
-            switch event.keyCode {
-            case 126: onCommand(.volumeUp);   return
-            case 125: onCommand(.volumeDown); return
-            default:  break
-            }
-        }
-
         // ⌃ + letter shortcuts. Bare letters used to fire commands but were
         // too easy to send accidentally if remote-pane focus drifted while
         // the user was typing elsewhere. Now require Control.
@@ -804,8 +791,8 @@ private final class KeyCatcherView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
-    /// Bare-modifier keys: arrows, Return, Space. Letters are handled in
-    /// the ⌃-letter branch above and are NOT returned here.
+    /// Bare-modifier keys: arrows, Return, Space, Page Up/Down. Letters are
+    /// handled in the ⌃-letter branch above and are NOT returned here.
     private func bareCommand(for event: NSEvent) -> RemoteCommand? {
         switch event.keyCode {
         case 126: return .up
@@ -814,6 +801,8 @@ private final class KeyCatcherView: NSView {
         case 124: return .right
         case 36, 76: return .select          // return, keypad enter
         case 49: return .playPause           // space
+        case 116: return .volumeUp           // Page Up
+        case 121: return .volumeDown         // Page Down
         default: return nil
         }
     }

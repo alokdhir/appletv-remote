@@ -68,7 +68,7 @@ struct ContentView: View {
                idealWidth: effectivelyCollapsed ? SidebarLayout.contentMinWidth
                                                 : SidebarLayout.expandedIdealWidth,
                maxWidth: .infinity,
-               minHeight: 480,
+               minHeight: 620,
                idealHeight: 620,
                maxHeight: .infinity)
         .animation(animateSidebar ? .easeInOut(duration: 0.22) : nil, value: effectivelyCollapsed)

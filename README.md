@@ -164,7 +164,7 @@ atv --standalone --device "Living Room" l
 | `⌃ H` | Home _(hold for Control Center)_ |
 | `⌃ M` | Menu / Back _(hold for long-press)_ |
 | `⌃ P` | Play / Pause |
-| `⌥ ↑` / `⌥ ↓` | Volume up / down |
+| `Page Up` / `Page Down` | Volume up / down |
 | `⌫ Backspace` | Delete last character _(when Apple TV text field is active)_ |
 
 The letter shortcuts require Control so accidental key-presses don't fire commands at the Apple TV when remote-pane focus has drifted while you're typing elsewhere. The full list is also reachable in-app via **Keyboard Shortcuts…** in the menu-bar icon's right-click menu.
