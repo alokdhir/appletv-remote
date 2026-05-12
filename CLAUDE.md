@@ -100,6 +100,7 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 | `MenuBarController.swift` | Menu bar status item, popover, right-click menu |
 | `AppIconCache.swift` | Fetches and caches app icons from iTunes + bundled system icons |
 | `KeyboardNotificationManager.swift` | Manages keyboard-input notifications for Apple TV remote requests |
+| `KeyboardShortcutsWindow.swift` | In-app keyboard shortcuts reference window (menu-bar right-click → Keyboard Shortcuts…) |
 | `PopoverActivationGuard.swift` | Suppresses the first tap that activates the popover window |
 | `VisualEffectBackground.swift` | NSVisualEffectView wrapper for SwiftUI translucency |
 | `IPCServer.swift` | Unix socket IPC server for `atv` CLI |
