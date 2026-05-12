@@ -21,7 +21,8 @@ private struct Shortcut: Identifiable {
 private let shortcutGroups: [ShortcutGroup] = [
     ShortcutGroup(title: "Navigation", entries: [
         Shortcut(keys: "↑  ↓  ←  →", description: "D-pad"),
-        Shortcut(keys: "Return",      description: "Select (D-pad centre)"),
+        Shortcut(keys: "Return",      description: "Select (hold for long-press)"),
+        Shortcut(keys: "Esc",         description: "Menu / Back (hold for long-press)"),
     ]),
     ShortcutGroup(title: "Playback", entries: [
         Shortcut(keys: "⌃P",    description: "Play / Pause"),

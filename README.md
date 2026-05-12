@@ -158,7 +158,8 @@ atv --standalone --device "Living Room" l
 |-----|--------|
 | `↑ ↓ ← →` | D-pad up / down / left / right |
 | `⇧ ↑ ↓ ← →` | Trackpad swipe up / down / left / right |
-| `Return` | Select (D-pad centre) |
+| `Return` | Select _(hold for long-press)_ |
+| `Esc` | Menu / Back _(hold for long-press)_ |
 | `Space` | Play / Pause |
 | `⌃ A` | Open app launcher |
 | `⌃ H` | Home _(hold for Control Center)_ |

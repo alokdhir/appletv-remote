@@ -397,7 +397,8 @@ struct RemoteControlView: View {
                             RemoteButton(label: "chevron.left",   action: { connection.send(.left) },  size: 38,
                                          flash: keyFlashCommand == .left)
                             SelectButton(action: { connection.send(.select) }, size: 52,
-                                         flash: keyFlashCommand == .select)
+                                         flash: keyFlashCommand == .select,
+                                         longPressAction: { connection.sendLongPress(.select) })
                             RemoteButton(label: "chevron.right",  action: { connection.send(.right) }, size: 38,
                                          flash: keyFlashCommand == .right)
                         }
@@ -594,7 +595,8 @@ struct RemoteControlView: View {
 /// hardware keys dispatch to the connected Apple TV:
 ///
 ///   ↑ ↓ ← →     — D-pad
-///   return      — select (D-pad centre)
+///   return      — select (D-pad centre, hold for long-press)
+///   esc         — menu / back (hold for long-press)
 ///   space       — play / pause
 ///   ⌃A          — show app grid
 ///   ⌃H          — home (hold for Control Center)
@@ -740,6 +742,15 @@ private final class KeyCatcherView: NSView {
         }
         // Bare arrows / Return / Space.
         if let cmd = bareCommand(for: event) {
+            // Return/Enter and Escape support long-press.
+            if event.keyCode == 36 || event.keyCode == 76 || event.keyCode == 53 {
+                // Suppress auto-repeat while tracking; first press starts tracking.
+                if pressedKeyCode == event.keyCode { return }
+                if !event.isARepeat {
+                    handleLongPressLetter(cmd, event: event)
+                }
+                return
+            }
             // Auto-repeat fires repeatedly — useful so holding ↑ scrolls
             // a tvOS list smoothly.
             onCommand(cmd)
@@ -800,6 +811,7 @@ private final class KeyCatcherView: NSView {
         case 123: return .left
         case 124: return .right
         case 36, 76: return .select          // return, keypad enter
+        case 53: return .menu               // escape
         case 49: return .playPause           // space
         case 116: return .volumeUp           // Page Up
         case 121: return .volumeDown         // Page Down
@@ -886,15 +898,44 @@ struct SelectButton: View {
     let action: () -> Void
     var size: CGFloat = 52
     var flash: Bool = false
+    var longPressAction: (() -> Void)? = nil
+
+    @State private var isPressed = false
+    @State private var longPressFired = false
 
     var body: some View {
-        Button(action: action) {
-            Circle()
-                .fill(.primary)
-                .frame(width: size, height: size)
+        let content = Circle()
+            .fill(.primary)
+            .frame(width: size, height: size)
+            .overlay(
+                Circle()
+                    .fill(Color.black.opacity((isPressed || flash) ? 0.15 : 0))
+                    .animation(.easeOut(duration: 0.1), value: isPressed || flash)
+            )
+            .noFocusRing()
+
+        if let longPress = longPressAction {
+            content.onLongPressGesture(
+                minimumDuration: 0.4,
+                perform: {
+                    longPressFired = true
+                    longPress()
+                },
+                onPressingChanged: { pressing in
+                    isPressed = pressing
+                    if !pressing {
+                        if !longPressFired { action() }
+                        longPressFired = false
+                    }
+                }
+            )
+        } else {
+            content.onLongPressGesture(
+                minimumDuration: 0.001,
+                perform: action,
+                onPressingChanged: { isPressed = $0 }
+            )
         }
-        .buttonStyle(PressableFillStyle(externalPressed: flash))
-        .noFocusRing()
     }
 }
 
