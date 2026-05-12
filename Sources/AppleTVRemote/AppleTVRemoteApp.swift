@@ -15,22 +15,6 @@ struct AppleTVRemoteApp: App {
     @State       private var appListObserver: AnyCancellable?
     @State       private var iconRefreshTimer: Timer?
 
-    init() {
-        // AppKit's NSWindow frame autosave writes under the executable-name
-        // domain (`getprogname()` → "AppleTVRemote.plist"), NOT the bundle-id
-        // domain that UserDefaults.standard reads. Sweep both, since SwiftUI
-        // also persists its derived-signature NSWindow Frame keys here, and
-        // that value gets re-applied to the window AFTER our setFrame in
-        // viewDidMoveToWindow — defeating restoration.
-        for suite in [UserDefaults.standard, UserDefaults(suiteName: "AppleTVRemote")].compactMap({ $0 }) {
-            for key in suite.dictionaryRepresentation().keys
-            where key.hasPrefix("NSWindow Frame ") {
-                suite.removeObject(forKey: key)
-            }
-            suite.synchronize()
-        }
-    }
-
     var body: some Scene {
         // Register setUp on the delegate here — body evaluates before
         // applicationDidFinishLaunching fires on macOS, so this is guaranteed
@@ -52,6 +36,9 @@ struct AppleTVRemoteApp: App {
                     setUp()
                 }
         }
+        // .automatic (not .contentMinSize) is intentional: .contentMinSize
+        // triggers a SwiftUI centering pass 50-500ms after launch that fights
+        // our frame restoration in WindowSetupView.
         .windowResizability(.automatic)
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -128,6 +115,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set by AppleTVRemoteApp after SwiftUI initialises its @StateObjects.
     var onFinishLaunching: (() -> Void)?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // AppKit's NSWindow frame autosave writes under the executable-name
+        // domain (`getprogname()` → "AppleTVRemote.plist"), NOT the bundle-id
+        // domain that UserDefaults.standard reads. Sweep both here — before
+        // any window appears — so SwiftUI can't re-apply a stale autosave key
+        // after WindowSetupView's setFrame call.
+        // UserDefaults.standard never returns nil; compactMap protects against
+        // the suiteName: init failing (e.g. sandboxed environments).
+        for suite in [UserDefaults.standard, UserDefaults(suiteName: "AppleTVRemote")].compactMap({ $0 }) {
+            for key in suite.dictionaryRepresentation().keys
+            where key.hasPrefix("NSWindow Frame ") {
+                suite.removeObject(forKey: key)
+            }
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         onFinishLaunching?();
     }
@@ -161,13 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
     }
 
-    /// ⌘Q / programmatic quit. Capture the main window's final frame here
-    /// because windowWillClose during termination can fire too late for
-    /// cfprefsd to flush our key before the app exits.
+    /// ⌘Q / programmatic quit. WindowHider.windowWillClose also fires during
+    /// termination, but its timing relative to process exit is not guaranteed
+    /// on all macOS versions. Writing here as well ensures the final frame is
+    /// captured. The duplicate write is harmless (same value, same key).
     func applicationWillTerminate(_ notification: Notification) {
         if let w = MenuBarController.shared.mainWindow {
             UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: mainWindowFrameKey)
-            UserDefaults.standard.synchronize()
         }
     }
 

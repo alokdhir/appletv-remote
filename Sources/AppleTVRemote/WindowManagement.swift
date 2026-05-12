@@ -45,7 +45,6 @@ final class WindowHider: NSObject, NSWindowDelegate {
     private func persistFrame(_ w: NSWindow, forced: Bool = false) {
         guard forced || Date() >= persistenceUnlocksAt else { return }
         UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: mainWindowFrameKey)
-        UserDefaults.standard.synchronize()
     }
 }
 
@@ -124,6 +123,7 @@ class WindowSetupView: NSView {
             window.setFrame(r, display: false)
             for delay in [0.05, 0.2, 0.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                    guard Date() < WindowHider.shared.persistenceUnlocksAt else { return }
                     window?.setFrame(r, display: false)
                 }
             }
@@ -135,7 +135,7 @@ class WindowSetupView: NSView {
         let nc = NotificationCenter.default
 
         observers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak window] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 // Suppress focus-fade reveal while restore is thrashing —
                 // the window must stay at alpha=0 until the reveal hop
                 // below fires, otherwise SwiftUI's centering pass is
@@ -148,7 +148,7 @@ class WindowSetupView: NSView {
             }
         })
         observers.append(nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak window] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 NSAnimationContext.runAnimationGroup { ctx in
                     ctx.duration = 0.2
                     window?.animator().alphaValue = 0.8
