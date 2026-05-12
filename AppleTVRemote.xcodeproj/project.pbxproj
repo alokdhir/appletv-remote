@@ -22,6 +22,7 @@
 		7190FBAB75D95648266F850D /* AppleTVRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52B7FC32DA2B5E6F9269EC4E /* AppleTVRemoteApp.swift */; };
 		76868BD4ABDBB55020655E87 /* AppleTVProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9D4000EF1BA5B3B027BA58 /* AppleTVProtocol */; };
 		790575010B800CDCE832E7EB /* AutoReconnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FDAC9977ABD2F8B8FDF625 /* AutoReconnector.swift */; };
+		6ADAF1DABA154C0EA7D9AB3B /* KeyboardShortcutsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1295520C6AB04A85B2F49FB9 /* KeyboardShortcutsWindow.swift */; };
 		7A966A8C9432E530D01D9257 /* KeyboardNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */; };
 		8B74776E3A1745B16BE85A76 /* IPCServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCA0DD35CBD3CDCDB6F14579 /* IPCServer.swift */; };
 		A3D013EB9C3A6B21973E591B /* BigInt in Frameworks */ = {isa = PBXBuildFile; productRef = 2457F9A5729060F9AAFE6D5D /* BigInt */; };
@@ -51,6 +52,7 @@
 		4BE6E796DC1476ECFEDDB679 /* com.apple.TVAppStore.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = com.apple.TVAppStore.png; sourceTree = "<group>"; };
 		52B7FC32DA2B5E6F9269EC4E /* AppleTVRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTVRemoteApp.swift; sourceTree = "<group>"; };
 		5F7DC03D0A656F41898865DC /* RemoteControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteControlView.swift; sourceTree = "<group>"; };
+		1295520C6AB04A85B2F49FB9 /* KeyboardShortcutsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutsWindow.swift; sourceTree = "<group>"; };
 		61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardNotificationManager.swift; sourceTree = "<group>"; };
 		697023DBDB64775282D57CE8 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7AD795F451DD61537F44810E /* DeviceListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceListView.swift; sourceTree = "<group>"; };
@@ -124,6 +126,7 @@
 				96AA527B2B5D01D7A13520C2 /* DeviceDiscovery.swift */,
 				7AD795F451DD61537F44810E /* DeviceListView.swift */,
 				BCA0DD35CBD3CDCDB6F14579 /* IPCServer.swift */,
+				1295520C6AB04A85B2F49FB9 /* KeyboardShortcutsWindow.swift */,
 				61ADF12098BC06BFD995A46B /* KeyboardNotificationManager.swift */,
 				C3D2FE0AE2A2FD628BD91D5F /* MenuBarController.swift */,
 				033146CEB0BCDAC531A241C7 /* PopoverActivationGuard.swift */,
@@ -262,6 +265,7 @@
 				512A7F66BD725F6F7DC27AD4 /* DeviceDiscovery.swift in Sources */,
 				1FE6E013046C9DB4B787E784 /* DeviceListView.swift in Sources */,
 				8B74776E3A1745B16BE85A76 /* IPCServer.swift in Sources */,
+				6ADAF1DABA154C0EA7D9AB3B /* KeyboardShortcutsWindow.swift in Sources */,
 				7A966A8C9432E530D01D9257 /* KeyboardNotificationManager.swift in Sources */,
 				135F30E2248E1750F7312F68 /* MenuBarController.swift in Sources */,
 				0EE55D6C7CA30F0A57057B73 /* PopoverActivationGuard.swift in Sources */,
