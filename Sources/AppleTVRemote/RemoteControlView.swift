@@ -652,13 +652,13 @@ private final class KeyCatcherView: NSView {
     var onShowApps: () -> Void = {}
     var onBackspace: (() -> Void)? = nil
 
-    /// Long-press tracking for keys whose UI buttons support a hold gesture
-    /// (Menu, Home). The first non-repeat keyDown schedules a 0.4s
-    /// DispatchWorkItem; if the user releases first we cancel it and fire
-    /// `onCommand`, otherwise the work item fires `onLongCommand` and the
-    /// eventual keyUp is consumed without re-firing. Without this, holding
-    /// `H` produces a stream of auto-repeat keyDowns and the long-press
-    /// behaviour (Control Center) never triggers.
+    /// Long-press tracking for keys whose UI buttons support a hold gesture:
+    /// Home (⌃H), Menu (⌃M and Esc), Select (Return/Enter). The first
+    /// non-repeat keyDown schedules a 0.4s DispatchWorkItem; if the user
+    /// releases first we cancel it and fire `onCommand`, otherwise the work
+    /// item fires `onLongCommand` and the eventual keyUp is consumed without
+    /// re-firing. Without this, holding `H` produces a stream of auto-repeat
+    /// keyDowns and the long-press behaviour (Control Center) never triggers.
     private var pressedKeyCode: UInt16?
     private var pressedCommand: RemoteCommand?
     private var longPressItem: DispatchWorkItem?
@@ -719,10 +719,10 @@ private final class KeyCatcherView: NSView {
                 if !event.isARepeat { onShowApps() }
                 return
             case "h":
-                handleLongPressLetter(.home, event: event)
+                handleHoldableKey(.home, event: event)
                 return
             case "m":
-                handleLongPressLetter(.menu, event: event)
+                handleHoldableKey(.menu, event: event)
                 return
             case "p":
                 onCommand(.playPause)
@@ -740,15 +740,12 @@ private final class KeyCatcherView: NSView {
             handler()
             return
         }
-        // Bare arrows / Return / Space.
+        // Bare arrows / Return / Space / Esc / PgUp / PgDn.
         if let cmd = bareCommand(for: event) {
-            // Return/Enter and Escape support long-press.
-            if event.keyCode == 36 || event.keyCode == 76 || event.keyCode == 53 {
-                // Suppress auto-repeat while tracking; first press starts tracking.
-                if pressedKeyCode == event.keyCode { return }
-                if !event.isARepeat {
-                    handleLongPressLetter(cmd, event: event)
-                }
+            // Return (select) and Esc (menu) support long-press —
+            // handleHoldableKey gates auto-repeat and schedules the timer.
+            if cmd == .select || cmd == .menu {
+                handleHoldableKey(cmd, event: event)
                 return
             }
             // Auto-repeat fires repeatedly — useful so holding ↑ scrolls
@@ -759,9 +756,11 @@ private final class KeyCatcherView: NSView {
         super.keyDown(with: event)
     }
 
-    /// Press tracking for the ⌃H / ⌃M letter shortcuts so a hold triggers
-    /// the long-press behaviour (Control Center for ⌃H, etc.).
-    private func handleLongPressLetter(_ cmd: RemoteCommand, event: NSEvent) {
+    /// Begin press tracking on the first non-repeat keyDown of a holdable
+    /// key (⌃H, ⌃M, Return, Esc). Auto-repeat keyDowns are no-ops — the
+    /// release in `keyUp` is what fires `onCommand` or the work item what
+    /// fires `onLongCommand`.
+    private func handleHoldableKey(_ cmd: RemoteCommand, event: NSEvent) {
         if event.isARepeat { return }
         startPressTracking(cmd: cmd, keyCode: event.keyCode)
     }
@@ -904,6 +903,10 @@ struct SelectButton: View {
     @State private var longPressFired = false
 
     var body: some View {
+        // Custom gesture-driven button — the Circle isn't an AppKit Button so
+        // we provide the a11y traits explicitly. The long-press path is
+        // surfaced as a custom action so VoiceOver users can invoke it from
+        // the rotor menu without having to physically hold the gesture.
         let content = Circle()
             .fill(.primary)
             .frame(width: size, height: size)
@@ -913,22 +916,28 @@ struct SelectButton: View {
                     .animation(.easeOut(duration: 0.1), value: isPressed || flash)
             )
             .noFocusRing()
+            .accessibilityElement()
+            .accessibilityLabel("Select")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
 
         if let longPress = longPressAction {
-            content.onLongPressGesture(
-                minimumDuration: 0.4,
-                perform: {
-                    longPressFired = true
-                    longPress()
-                },
-                onPressingChanged: { pressing in
-                    isPressed = pressing
-                    if !pressing {
-                        if !longPressFired { action() }
-                        longPressFired = false
+            content
+                .accessibilityAction(named: Text("Long Press")) { longPress() }
+                .onLongPressGesture(
+                    minimumDuration: 0.4,
+                    perform: {
+                        longPressFired = true
+                        longPress()
+                    },
+                    onPressingChanged: { pressing in
+                        isPressed = pressing
+                        if !pressing {
+                            if !longPressFired { action() }
+                            longPressFired = false
+                        }
                     }
-                }
-            )
+                )
         } else {
             content.onLongPressGesture(
                 minimumDuration: 0.001,
@@ -955,6 +964,10 @@ struct LabeledRemoteButton: View {
 
     var body: some View {
         let dim = isPressed || flash
+        // Custom gesture-driven button — the Image isn't an AppKit Button so
+        // we provide the a11y traits explicitly. The long-press path is
+        // surfaced as a custom action so VoiceOver users can invoke it from
+        // the rotor menu without having to physically hold the gesture.
         let content = Image(systemName: sfSymbol)
             .font(.system(size: 20, weight: .medium))
             .frame(width: 52, height: 44)
@@ -962,25 +975,31 @@ struct LabeledRemoteButton: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .animation(.easeOut(duration: 0.1), value: dim)
             .help(label)
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
 
         if let longPress = longPressAction {
             // Long-press path: fire action() on release if the long-press
             // threshold wasn't reached, or longPress() if it was. longPressFired
             // guards against a spurious action() firing after a successful hold.
-            content.onLongPressGesture(
-                minimumDuration: 0.4,
-                perform: {
-                    longPressFired = true
-                    longPress()
-                },
-                onPressingChanged: { pressing in
-                    isPressed = pressing
-                    if !pressing {
-                        if !longPressFired { action() }
-                        longPressFired = false
+            content
+                .accessibilityAction(named: Text("Long Press")) { longPress() }
+                .onLongPressGesture(
+                    minimumDuration: 0.4,
+                    perform: {
+                        longPressFired = true
+                        longPress()
+                    },
+                    onPressingChanged: { pressing in
+                        isPressed = pressing
+                        if !pressing {
+                            if !longPressFired { action() }
+                            longPressFired = false
+                        }
                     }
-                }
-            )
+                )
         } else {
             // No long-press behaviour: fire on press and dim while held.
             content.onLongPressGesture(

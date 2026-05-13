@@ -31,15 +31,32 @@ final class WindowHider: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        if let w = notification.object as? NSWindow { persistFrame(w) }
+        if let w = notification.object as? NSWindow {
+            if isUserDrivenInteraction(window: w) { persistenceUnlocksAt = .distantPast }
+            persistFrame(w)
+        }
     }
 
     func windowDidResize(_ notification: Notification) {
-        if let w = notification.object as? NSWindow { persistFrame(w) }
+        if let w = notification.object as? NSWindow {
+            if isUserDrivenInteraction(window: w) { persistenceUnlocksAt = .distantPast }
+            persistFrame(w)
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
         if let w = notification.object as? NSWindow { persistFrame(w, forced: true) }
+    }
+
+    /// True when this move/resize notification stems from a user drag rather
+    /// than a programmatic `setFrame`. SwiftUI's launch-time centering pass
+    /// reaches us via `setFrame`; `NSApp.currentEvent` is unrelated (a
+    /// keyDown, nil, etc.) at that point. A user drag drives the run loop
+    /// through `.leftMouseDragged` events, and a resize-edge drag sets
+    /// `inLiveResize` on the window. Either signal is enough to unlock.
+    private func isUserDrivenInteraction(window: NSWindow) -> Bool {
+        if window.inLiveResize { return true }
+        return NSApp.currentEvent?.type == .leftMouseDragged
     }
 
     private func persistFrame(_ w: NSWindow, forced: Bool = false) {
@@ -123,6 +140,10 @@ class WindowSetupView: NSView {
             window.setFrame(r, display: false)
             for delay in [0.05, 0.2, 0.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                    // WindowHider drops `persistenceUnlocksAt` to .distantPast
+                    // the first time it sees a user-driven move/resize during
+                    // the lock window. If that happened, stop snapping the
+                    // user's drag back to the restored frame.
                     guard Date() < WindowHider.shared.persistenceUnlocksAt else { return }
                     window?.setFrame(r, display: false)
                 }
