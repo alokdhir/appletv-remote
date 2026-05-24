@@ -309,9 +309,9 @@ _atv() {
                 _describe 'device' devices
             fi
             ;;
-        home)
+        click|menu|home)
             if (( CURRENT == 3 )); then
-                _describe 'flag' '(--long:long-press\ \(Control\ Center\))'
+                _describe 'flag' '(--long:long-press)'
             fi
             ;;
         completion)
@@ -358,7 +358,7 @@ _atv() {
                 done
             fi
             ;;
-        home)
+        click|menu|home)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "--long" -- "$cur") )
             fi
@@ -912,10 +912,10 @@ func usage() -> Never {
     print(row("l | r | u | d",           "D-pad left / right / up / down"))
     print(row("rew | ff",                "Aliases for l / r (rewind / fast-forward)"))
     print(row("sl | sr | su | sd",       "Trackpad swipe left / right / up / down"))
-    print(row("click",                   "Click (D-pad centre)"))
+    print(row("click [--long]",          "Click (D-pad centre; long-press = select-hold)"))
     print(row("pp",                      "Play / Pause"))
     print(row("home [--long]",           "Home button (long-press opens Control Center)"))
-    print(row("menu",                    "Menu / Back"))
+    print(row("menu [--long]",           "Menu / Back (long-press)"))
     print(row("vol+ | vol-",             "Volume up / down"))
     print(row("power",                   "Toggle (wake if asleep, sleep if on)"))
     print(row("text <string>",            "Send text to active text field"))
@@ -1129,9 +1129,13 @@ do {
     case "sr":          try cmdKey(conn, key: .swipeRight)
     case "su":          try cmdKey(conn, key: .swipeUp)
     case "sd":          try cmdKey(conn, key: .swipeDown)
-    case "click":  try cmdKey(conn, key: .select)
+    case "click":
+        let long = args.contains("--long")
+        try cmdKey(conn, key: .select, longPress: long)
     case "pp":          try cmdKey(conn, key: .playPause)
-    case "menu":        try cmdKey(conn, key: .menu)
+    case "menu":
+        let long = args.contains("--long")
+        try cmdKey(conn, key: .menu, longPress: long)
     case "home":
         let long = args.contains("--long")
         try cmdKey(conn, key: .home, longPress: long)

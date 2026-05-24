@@ -431,6 +431,19 @@ struct RemoteControlView: View {
                         .offset(x: RemoteControlView.swipeChevronRadius)
                     }
                 }
+                .overlay(alignment: .topTrailing) {
+                    Button { connection.send(.sleep) } label: {
+                        Image(systemName: "power")
+                            .font(.system(size: 38 * 0.38, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .frame(width: 38, height: 38)
+                            .background(.quaternary, in: Circle())
+                    }
+                    .buttonStyle(PressableFillStyle())
+                    .noFocusRing()
+                    .help("Sleep")
+                    .offset(x: 20, y: -20)
+                }
 
                 // Back + Home — mirrors physical button positions on the Siri Remote
                 HStack(spacing: 48) {
