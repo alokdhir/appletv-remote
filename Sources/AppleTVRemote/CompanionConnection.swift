@@ -59,6 +59,20 @@ final class CompanionConnection: ObservableObject {
     private var airPlayTunnel: AirPlayTunnel.Tunnel?
     private var lastPlaybackStateTimestamp: Double = 0
 
+    /// Per-bundle now-playing state. tvOS multiplexes several players over
+    /// the same MRP socket (Netflix, the TV app, AirPlay, HBO Max, …); each
+    /// publishes its own SET_STATE_MESSAGE. Without per-bundle tracking the
+    /// chatty paused players overwrite the active foreground player.
+    private var airPlayStateByBundle: [String: NowPlayingInfo] = [:]
+    /// Most-recent timestamp gate per bundle (the merge needs one).
+    private var airPlayLastTSByBundle: [String: Double] = [:]
+    /// Wall-clock time we last received an update for a bundle. Used as the
+    /// fallback ranking when tvOS hasn't announced an active client.
+    private var airPlayLastUpdateAtByBundle: [String: Date] = [:]
+    /// The bundle tvOS told us is the foreground "now playing" client via
+    /// SET_NOW_PLAYING_CLIENT_MESSAGE. Nil when no active client is known.
+    private var activeAirPlayBundle: String?
+
     // MARK: - Connect / Disconnect
 
     /// Smart connect: probes the device first (0.3 s TCP timeout).
@@ -386,9 +400,9 @@ final class CompanionConnection: ObservableObject {
                     credentials: creds,
                     mrpClientID: airPlayClientID,
                     onMessage: { [weak self] msgData in
-                        guard let update = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
+                        guard let decoded = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
                         Task { @MainActor [weak self] in
-                            self?.applyAirPlayUpdate(update)
+                            self?.handleAirPlayMessage(decoded)
                         }
                     }
                 )
@@ -509,34 +523,109 @@ final class CompanionConnection: ObservableObject {
         return out.result
     }
 
+    /// AirPlay-MRP path entry point. Routes one decoded MRP message to the
+    /// per-bundle store and re-publishes whichever bundle is currently the
+    /// foreground / playing one to `nowPlaying`.
+    private func handleAirPlayMessage(_ msg: MRPDecodedMessage) {
+        switch msg {
+        case .activeClient(let bid):
+            activeAirPlayBundle = bid
+            Log.companion.report("AirPlay: active client → \(bid ?? "(none)")")
+            republishActiveBundle()
+
+        case .removeClient(let bid):
+            airPlayStateByBundle.removeValue(forKey: bid)
+            airPlayLastTSByBundle.removeValue(forKey: bid)
+            if activeAirPlayBundle == bid {
+                activeAirPlayBundle = nil
+            }
+            republishActiveBundle()
+
+        case .stateUpdate(let update):
+            applyAirPlayUpdate(update)
+        }
+    }
+
     /// AirPlay-MRP path (where elapsed/title/artist/album really come from).
+    /// Stores the update under its bundle id and re-publishes only if it
+    /// belongs to the foreground player.
     private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
-        let result = mergeNowPlaying(NowPlayingMergeInput.from(airplay: update))
+        let bundle = update.bundleIdentifier ?? "_unknown"
+        let current = airPlayStateByBundle[bundle] ?? NowPlayingInfo()
+        let lastTS = airPlayLastTSByBundle[bundle] ?? 0
+        let out = current.merging(NowPlayingMergeInput.from(airplay: update),
+                                  lastTimestamp: lastTS)
+        airPlayStateByBundle[bundle] = out.info
+        airPlayLastTSByBundle[bundle] = out.newTimestamp
+        airPlayLastUpdateAtByBundle[bundle] = Date()
 
         if Log.verbose {
             let parts: [String] = [
+                "bundle=\(bundle)",
                 update.title.map       { "title=\"\($0)\"" },
                 update.artist.map      { "artist=\"\($0)\"" },
                 update.duration.map    { "duration=\($0)" },
                 update.elapsedTime.map { "elapsed=\($0)" },
                 update.playbackRate.map { "rate=\($0)" },
             ].compactMap { $0 }
-            if !parts.isEmpty {
-                Log.companion.report(
-                    "AirPlay → now-playing [\(parts.joined(separator: " "))]" +
-                    (result.trackChanged ? " — track change, cohort reset" : "")
-                )
-            }
+            Log.companion.report(
+                "AirPlay → state [\(parts.joined(separator: " "))]" +
+                (out.result.trackChanged ? " — track change, cohort reset" : "")
+            )
         }
 
-        // Pull fresh state from the ATV when playback context likely just
-        // changed. The first push often arrives without elapsedTime (rate-
-        // only push) or before the ATV has stamped the real position; asking
-        // again promptly replaces our interpolated estimate with ground truth.
+        // Only the active / foreground bundle drives the published state.
+        if isDisplayBundle(bundle) {
+            nowPlaying = out.info
+            lastPlaybackStateTimestamp = out.newTimestamp
+        } else {
+            // A non-active bundle's state landed; re-evaluate in case our
+            // ranking now prefers it (e.g. user just hit play in Netflix
+            // while the TV app is still our last active client).
+            republishActiveBundle()
+        }
+
         let isSeeking = update.playbackState == 5
-        if result.didResume || result.didPause || result.trackChanged || isSeeking {
+        if out.result.didResume || out.result.didPause || out.result.trackChanged || isSeeking {
             requestNowPlayingRefresh()
         }
+    }
+
+    /// Returns true if `bundle` is the one whose state should drive the UI.
+    /// Preference order (matches `republishActiveBundle()`):
+    ///   1. tvOS-announced active client (SET_NOW_PLAYING_CLIENT_MESSAGE)
+    ///   2. otherwise whichever bundle would win the fallback ranking.
+    private func isDisplayBundle(_ bundle: String) -> Bool {
+        if let active = activeAirPlayBundle { return bundle == active }
+        return bundle == fallbackBundle()
+    }
+
+    /// Pick the best bundle when tvOS hasn't named an active client.
+    /// Prefers a currently-playing bundle; otherwise the most-recently-
+    /// updated one (so paused metadata doesn't disappear).
+    private func fallbackBundle() -> String? {
+        let playing = airPlayStateByBundle.filter { ($0.value.playbackRate ?? 0) > 0 }
+        let pool = playing.isEmpty ? airPlayStateByBundle : playing
+        return pool.keys.max { (a, b) in
+            (airPlayLastUpdateAtByBundle[a] ?? .distantPast)
+                < (airPlayLastUpdateAtByBundle[b] ?? .distantPast)
+        }
+    }
+
+    /// Push whichever bundle currently wins the display rules to
+    /// `nowPlaying`. Never clears existing footer content to nil from a
+    /// republish — we only overwrite when we have a winner. (The footer
+    /// already hides itself if `info` has no displayable content.)
+    private func republishActiveBundle() {
+        let winner = activeAirPlayBundle ?? fallbackBundle()
+        guard let winner, let info = airPlayStateByBundle[winner] else {
+            // No bundles known at all — leave nowPlaying as-is rather than
+            // wiping a value that came in via Companion `_iMC` or sticking
+            // around from a previous session.
+            return
+        }
+        nowPlaying = info
+        lastPlaybackStateTimestamp = airPlayLastTSByBundle[winner] ?? 0
     }
 
     /// Companion `_iMC` path. Companion only carries `_mcF` flags in practice

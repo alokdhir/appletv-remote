@@ -714,16 +714,41 @@ func cmdAirPlayMRP(_ conn: IPCConnection, device: String) async throws {
 
     // Merge all SET_STATE messages into a single now-playing picture.
     var merged = MRPNowPlayingUpdate()
+    var activeBundle: String?
+    var byBundle: [String: MRPNowPlayingUpdate] = [:]
     for msg in msgs {
-        guard let np = MRPDecoder.decodeNowPlaying(from: msg) else { continue }
-        if let v = np.title    { merged.title    = v }
-        if let v = np.artist   { merged.artist   = v }
-        if let v = np.album    { merged.album    = v }
-        if let v = np.playbackRate { merged.playbackRate = v }
-        if let v = np.playbackState { merged.playbackState = v }
-        if let v = np.duration     { merged.duration = v }
-        if let v = np.elapsedTime  { merged.elapsedTime = v }
-        if let v = np.playbackStateTimestamp { merged.playbackStateTimestamp = v }
+        guard let decoded = MRPDecoder.decodeNowPlaying(from: msg) else { continue }
+        switch decoded {
+        case .activeClient(let bid):
+            activeBundle = bid
+        case .removeClient(let bid):
+            byBundle.removeValue(forKey: bid)
+            if activeBundle == bid { activeBundle = nil }
+        case .stateUpdate(let np):
+            // Per-bundle merge so a chatty paused player can't clobber the
+            // active one.
+            let key = np.bundleIdentifier ?? "_unknown"
+            var entry = byBundle[key] ?? MRPNowPlayingUpdate()
+            if let v = np.title    { entry.title    = v }
+            if let v = np.artist   { entry.artist   = v }
+            if let v = np.album    { entry.album    = v }
+            if let v = np.playbackRate { entry.playbackRate = v }
+            if let v = np.playbackState { entry.playbackState = v }
+            if let v = np.duration     { entry.duration = v }
+            if let v = np.elapsedTime  { entry.elapsedTime = v }
+            if let v = np.playbackStateTimestamp { entry.playbackStateTimestamp = v }
+            if let v = np.displayName       { entry.displayName = v }
+            entry.bundleIdentifier = np.bundleIdentifier
+            byBundle[key] = entry
+        }
+    }
+    // Pick: active client → otherwise the one currently playing → otherwise nothing.
+    if let active = activeBundle, let entry = byBundle[active] {
+        merged = entry
+    } else if let playing = byBundle.values.first(where: { $0.playbackState == 1 }) {
+        merged = playing
+    } else if let any = byBundle.values.first {
+        merged = any
     }
 
     let stateName: String

@@ -49,6 +49,7 @@ public struct NowPlayingMergeInput: Sendable {
 
     public static func from(airplay u: MRPNowPlayingUpdate) -> Self {
         Self(title: u.title, artist: u.artist, album: u.album,
+             app: u.displayName,
              duration: u.duration, elapsedTime: u.elapsedTime,
              playbackRate: u.playbackRate,
              playbackStateTimestamp: u.playbackStateTimestamp,
