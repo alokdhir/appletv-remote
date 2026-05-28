@@ -1,0 +1,17 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "lsp": {
+    "swift": {
+      "command": "sourcekit-lsp"
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^bash$",
+        "command": "./hooks/rtk-rewrite.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

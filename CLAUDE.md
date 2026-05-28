@@ -6,6 +6,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Short sentences. Only necessary words. No preamble, no recap, no filler.
 
+## Tooling: rtk (required)
+
+This repo's `crush.json` registers a `PreToolUse` hook
+(`hooks/rtk-rewrite.sh`) that pipes bash commands through
+[`rtk`](https://github.com/rtk-ai/rtk) — a CLI proxy that filters
+verbose output (git, ls, grep, swift, xcodebuild, …) down to just the
+signal an LLM needs. Lower token counts, faster turns.
+
+Install (macOS):
+
+```bash
+brew install rtk
+```
+
+Without `rtk` on `PATH` the hook no-ops (commands run unfiltered) — but
+you'll burn tokens on noisy build/test output. Project-specific
+extension: the hook wraps `xcodebuild build/clean/archive/...` in
+`rtk err` and `xcodebuild test` (incl. `-only-testing:`) in
+`rtk test`, since rtk has no native xcodebuild proxy.
+
+Introspection invocations (`xcodebuild -list`, `-showBuildSettings`,
+`-version`) and already-`rtk`-prefixed commands are passed through
+unchanged.
+
 ## Git commits
 
 Do NOT add "Assisted-by", "Co-Authored-By", or any attribution lines to commit messages.
