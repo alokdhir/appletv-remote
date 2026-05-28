@@ -321,6 +321,10 @@ final class CompanionConnection: ObservableObject {
         lastPlaybackStateTimestamp = 0
         lastNowPlayingRefreshAt = nil
         nowPlaying = nil
+        airPlayStateByBundle.removeAll()
+        airPlayLastTSByBundle.removeAll()
+        airPlayLastUpdateAtByBundle.removeAll()
+        activeAirPlayBundle = nil
         airPlayTunnel?.close()
         airPlayTunnel = nil
     }
@@ -613,15 +617,18 @@ final class CompanionConnection: ObservableObject {
     }
 
     /// Push whichever bundle currently wins the display rules to
-    /// `nowPlaying`. Never clears existing footer content to nil from a
-    /// republish — we only overwrite when we have a winner. (The footer
-    /// already hides itself if `info` has no displayable content.)
+    /// `nowPlaying`. Clears `nowPlaying` when no bundles remain *and* the
+    /// AirPlay tunnel is active (the tunnel is the authoritative source —
+    /// "no clients" means nothing is playing). If there's no tunnel yet,
+    /// leaves `nowPlaying` alone so Companion `_iMC` data isn't wiped
+    /// before AirPlay connects.
     private func republishActiveBundle() {
         let winner = activeAirPlayBundle ?? fallbackBundle()
         guard let winner, let info = airPlayStateByBundle[winner] else {
-            // No bundles known at all — leave nowPlaying as-is rather than
-            // wiping a value that came in via Companion `_iMC` or sticking
-            // around from a previous session.
+            if airPlayTunnel != nil {
+                nowPlaying = nil
+                lastPlaybackStateTimestamp = 0
+            }
             return
         }
         nowPlaying = info
