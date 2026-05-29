@@ -318,6 +318,15 @@ final class CompanionConnection: ObservableObject {
         transport.reset()
         attentionState = nil
         keyboardActive = false
+        resetNowPlayingState()
+    }
+
+    /// Tears down all now-playing state: per-bundle maps, AirPlay tunnel,
+    /// published nowPlaying, and timestamp bookkeeping. Called on user-
+    /// initiated `disconnect()` and from `AutoReconnector` once retries are
+    /// exhausted — NOT on every transient socket close, since the ATV's
+    /// 30s idle-EOF reconnect would flicker the footer on each cycle.
+    func resetNowPlayingState() {
         lastPlaybackStateTimestamp = 0
         lastNowPlayingRefreshAt = nil
         nowPlaying = nil

@@ -72,6 +72,11 @@ final class AutoReconnector: ObservableObject {
                         self.retryTask = nil
                         self.isReconnecting = false
                         self.hasEverConnected = false
+                        // No device or user disconnected — clear the footer
+                        // so the connect prompt doesn't show stale metadata.
+                        // (User disconnect already cleared via disconnect();
+                        // this is a defensive idempotent reset.)
+                        connection.resetNowPlayingState()
                         return
                     }
                     // If a retry is already pending, let the debounce finish.
@@ -103,6 +108,9 @@ final class AutoReconnector: ObservableObject {
                 self.retryCount = 0
                 self.retryTask = nil
                 self.isReconnecting = false
+                // Reconnect won't happen — clear the footer so we stop
+                // showing what was playing when the ATV was last reachable.
+                connection.resetNowPlayingState()
                 return
             }
             self.retryCount += 1
