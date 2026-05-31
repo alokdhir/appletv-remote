@@ -2,6 +2,17 @@ import Foundation
 import Darwin
 import AppleTVLogging
 
+// Installed once on first use of CompanionSession. Without this, a Darwin.write
+// to a socket whose peer has already closed (extremely common on tvOS reboots /
+// idle drops) raises SIGPIPE and the kernel default-action terminates the
+// process — no crash report, just `launchd: exited due to SIGPIPE`. Ignoring
+// the signal turns it into a normal write() == -1, errno == EPIPE that the
+// existing error path in sendFrame handles cleanly.
+private let _installSigPipeIgnore: Void = {
+    signal(SIGPIPE, SIG_IGN)
+    return ()
+}()
+
 // MARK: - Delegate
 
 /// Callbacks from `CompanionSession` to its owner (`CompanionConnection`).
@@ -80,6 +91,7 @@ public final class CompanionSession {
                 transport: EncryptedFrameTransport,
                 writeQueue: DispatchQueue,
                 readQueue: DispatchQueue) {
+        _ = _installSigPipeIgnore
         self.fd = fd
         self.epoch = epoch
         self.transport = transport
