@@ -403,26 +403,50 @@ final class CompanionConnection: ObservableObject {
               let host = device.host,
               let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
         let airPlayClientID = String(data: creds.clientID, encoding: .utf8)
+        let openEpoch = connectionEpoch
         // Inherit MainActor from the calling @MainActor context. AirPlayTunnel.open
         // suspends while its dedicated openQueue does the blocking I/O, so MainActor
         // isn't held during the wait — no need for Task.detached + MainActor.run.
         Task { [weak self] in
-            do {
-                let tunnel = try await AirPlayTunnel.open(
-                    host: host,
-                    credentials: creds,
-                    mrpClientID: airPlayClientID,
-                    onMessage: { [weak self] msgData in
-                        guard let decoded = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
-                        Task { @MainActor [weak self] in
-                            self?.handleAirPlayMessage(decoded)
+            // Retry with backoff: a single-shot open commonly fails on
+            // sleep/wake when the network stack is still settling, leaving
+            // us in Companion-only mode where MRP pushes never arrive and
+            // the now-playing footer goes stale until the user quits and
+            // relaunches. 4 attempts × ~7 s of total backoff is enough to
+            // ride out a typical wake-from-sleep network reattach.
+            let backoff: [TimeInterval] = [0, 0.5, 1.5, 5.0]
+            for delay in backoff {
+                if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+                // Bail if the user disconnected or we reconnected in the
+                // meantime (a newer epoch is already opening its own tunnel).
+                guard let self else { return }
+                let stillCurrent = await MainActor.run { openEpoch == self.connectionEpoch && self.state == .connected }
+                guard stillCurrent else { return }
+                do {
+                    let tunnel = try await AirPlayTunnel.open(
+                        host: host,
+                        credentials: creds,
+                        mrpClientID: airPlayClientID,
+                        onMessage: { [weak self] msgData in
+                            guard let decoded = MRPDecoder.decodeNowPlaying(from: msgData) else { return }
+                            Task { @MainActor [weak self] in
+                                self?.handleAirPlayMessage(decoded)
+                            }
                         }
+                    )
+                    await MainActor.run {
+                        guard openEpoch == self.connectionEpoch else {
+                            tunnel.close()
+                            return
+                        }
+                        self.airPlayTunnel = tunnel
                     }
-                )
-                self?.airPlayTunnel = tunnel
-            } catch {
-                Log.pairing.report("AirPlay MRP tunnel: \(error) — now-playing will use Companion only")
+                    return
+                } catch {
+                    Log.pairing.report("AirPlay MRP tunnel open failed (delay=\(delay)s): \(error)")
+                }
             }
+            Log.pairing.report("AirPlay MRP tunnel: giving up after retries — now-playing will use Companion only")
         }
     }
 
@@ -563,7 +587,18 @@ final class CompanionConnection: ObservableObject {
     /// Stores the update under its bundle id and re-publishes only if it
     /// belongs to the foreground player.
     private func applyAirPlayUpdate(_ update: MRPNowPlayingUpdate) {
-        let bundle = update.bundleIdentifier ?? "_unknown"
+        // Type 56 (UPDATE_CONTENT_ITEM_MESSAGE) carries no bundleIdentifier
+        // — by definition it updates the *active* player's currently-showing
+        // item. Without this routing, type 56 pushes (which carry fresh
+        // elapsed every ~1s while the user scrubs/skips) accumulate under
+        // a phantom "_unknown" bucket that never drives the display, while
+        // the active bundle's state stays anchored to whatever stale
+        // elapsed arrived in the last (rare) type 4 push. Net effect:
+        // the displayed elapsed lagged TV reality by 10+ minutes.
+        let bundle = update.bundleIdentifier
+            ?? activeAirPlayBundle
+            ?? fallbackBundle()
+            ?? "_unknown"
         let current = airPlayStateByBundle[bundle] ?? NowPlayingInfo()
         let lastTS = airPlayLastTSByBundle[bundle] ?? 0
         let out = current.merging(NowPlayingMergeInput.from(airplay: update),
