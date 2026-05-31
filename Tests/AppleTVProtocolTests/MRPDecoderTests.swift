@@ -438,4 +438,85 @@ final class MRPDecoderTests: XCTestCase {
         }
         XCTAssertEqual(bid, "com.netflix.Netflix")
     }
+
+    // MARK: - routedBundle
+
+    /// Type 4 (SET_STATE) carries its own bundleIdentifier; that wins
+    /// regardless of what tvOS told us is active.
+    func testRoutedBundleUsesUpdateBundleWhenPresent() {
+        var u = MRPNowPlayingUpdate()
+        u.bundleIdentifier = "com.netflix.Netflix"
+
+        let bucket = u.routedBundle(active: "com.hulu.plus", fallback: { "com.apple.TVAppleTVApp" })
+
+        XCTAssertEqual(bucket, "com.netflix.Netflix",
+            "an explicit bundleIdentifier on the update must take precedence")
+    }
+
+    /// Type 56 (UPDATE_CONTENT_ITEM) has no bundleIdentifier — it must
+    /// route to the currently-active client. This is the fix for the
+    /// stale-elapsed bug.
+    func testRoutedBundleFallsBackToActive() {
+        var u = MRPNowPlayingUpdate()
+        u.elapsedTime = 1234   // typical type-56 payload: just elapsed
+        XCTAssertNil(u.bundleIdentifier)
+
+        let bucket = u.routedBundle(active: "com.hulu.plus", fallback: { "anything-else" })
+
+        XCTAssertEqual(bucket, "com.hulu.plus")
+    }
+
+    /// If tvOS hasn't announced an active client yet (early in a session,
+    /// or after a type-46 with no client), we fall back to the caller's
+    /// per-bundle ranking — typically the most-recently-updated bundle.
+    func testRoutedBundleFallsBackToFallbackWhenActiveNil() {
+        var u = MRPNowPlayingUpdate()
+        u.elapsedTime = 100
+
+        let bucket = u.routedBundle(active: nil, fallback: { "com.apple.TVAppleTVApp" })
+
+        XCTAssertEqual(bucket, "com.apple.TVAppleTVApp")
+    }
+
+    /// All routes exhausted: log + last-resort `_unknown`.
+    func testRoutedBundleFallsThroughToUnknown() {
+        var u = MRPNowPlayingUpdate()
+        u.elapsedTime = 100
+        var loggedMessages: [String] = []
+
+        let bucket = u.routedBundle(
+            active: nil,
+            fallback: { nil },
+            unknownLogger: { loggedMessages.append($0) }
+        )
+
+        XCTAssertEqual(bucket, "_unknown")
+        XCTAssertEqual(loggedMessages.count, 1, "a fallthrough should produce exactly one breadcrumb")
+    }
+
+    /// Logger is optional — fallthrough must still return `_unknown` when
+    /// no logger was supplied (used by tests / non-app callers).
+    func testRoutedBundleUnknownWithoutLoggerDoesNotCrash() {
+        var u = MRPNowPlayingUpdate()
+        u.elapsedTime = 100
+
+        let bucket = u.routedBundle(active: nil, fallback: { nil })
+
+        XCTAssertEqual(bucket, "_unknown")
+    }
+
+    /// Fallback closure must not be evaluated unnecessarily — important if
+    /// the caller's `fallback()` walks a non-trivial map ranking.
+    func testRoutedBundleDoesNotInvokeFallbackWhenNotNeeded() {
+        var u = MRPNowPlayingUpdate()
+        u.bundleIdentifier = "com.netflix.Netflix"
+        var fallbackInvoked = false
+
+        _ = u.routedBundle(active: "com.hulu.plus", fallback: {
+            fallbackInvoked = true
+            return "x"
+        })
+
+        XCTAssertFalse(fallbackInvoked, "fallback closure should be lazy")
+    }
 }

@@ -325,6 +325,37 @@ public struct MRPNowPlayingUpdate: Sendable {
         playbackRate == nil && duration == nil && elapsedTime == nil
     }
 
+    /// Resolve which per-bundle bucket this update belongs to.
+    ///
+    /// `SET_STATE_MESSAGE` (type 4) carries `bundleIdentifier` directly.
+    /// `UPDATE_CONTENT_ITEM_MESSAGE` (type 56) does not — by protocol
+    /// definition it refers to the currently-active player, identified
+    /// out-of-band by the most recent `SET_NOW_PLAYING_CLIENT_MESSAGE`
+    /// (type 46). Treating type 56 as a separate `_unknown` bundle was
+    /// the cause of the displayed-elapsed lag bug, since type 56 carries
+    /// fresh elapsed every ~1s and nothing else does.
+    ///
+    /// Fallback chain:
+    ///   1. Update's own `bundleIdentifier` if set (type 4 path).
+    ///   2. The bundle tvOS most recently announced as active (type 46).
+    ///   3. Caller's `fallback()` — typically the most-recently-updated
+    ///      bundle in the per-bundle map.
+    ///   4. `"_unknown"` as last resort. `unknownLogger` (if non-nil)
+    ///      receives a one-line breadcrumb so we can spot regressions
+    ///      in the wire protocol if a future tvOS build changes the
+    ///      bundleIdentifier semantics.
+    public func routedBundle(
+        active: String?,
+        fallback: () -> String?,
+        unknownLogger: ((String) -> Void)? = nil
+    ) -> String {
+        if let b = bundleIdentifier { return b }
+        if let b = active           { return b }
+        if let b = fallback()       { return b }
+        unknownLogger?("MRP update has no bundle id, no active client, no fallback bucket — using _unknown")
+        return "_unknown"
+    }
+
     public init() {}
 }
 

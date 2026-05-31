@@ -435,7 +435,14 @@ final class CompanionConnection: ObservableObject {
                         }
                     )
                     await MainActor.run {
-                        guard openEpoch == self.connectionEpoch else {
+                        // Post-await guard: connection epoch advances on
+                        // disconnect()/wakeAndConnect(), but `sessionDidClose`
+                        // (the EOF path) only flips state to .disconnected
+                        // without bumping the epoch. Either signal means the
+                        // tunnel we just opened is orphaned — close it and
+                        // let the next connect spin up a fresh one.
+                        guard openEpoch == self.connectionEpoch,
+                              self.state == .connected else {
                             tunnel.close()
                             return
                         }
@@ -594,11 +601,13 @@ final class CompanionConnection: ObservableObject {
         // a phantom "_unknown" bucket that never drives the display, while
         // the active bundle's state stays anchored to whatever stale
         // elapsed arrived in the last (rare) type 4 push. Net effect:
-        // the displayed elapsed lagged TV reality by 10+ minutes.
-        let bundle = update.bundleIdentifier
-            ?? activeAirPlayBundle
-            ?? fallbackBundle()
-            ?? "_unknown"
+        // the displayed elapsed lagged TV reality by 10+ minutes. See
+        // `MRPNowPlayingUpdate.routedBundle` for the fallback chain.
+        let bundle = update.routedBundle(
+            active: activeAirPlayBundle,
+            fallback: { [weak self] in self?.fallbackBundle() },
+            unknownLogger: { Log.companion.fail($0) }
+        )
         let current = airPlayStateByBundle[bundle] ?? NowPlayingInfo()
         let lastTS = airPlayLastTSByBundle[bundle] ?? 0
         let out = current.merging(NowPlayingMergeInput.from(airplay: update),
