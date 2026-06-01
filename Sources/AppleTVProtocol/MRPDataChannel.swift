@@ -135,6 +135,18 @@ public final class MRPDataChannel: @unchecked Sendable {
     /// Called on the internal queue whenever a decoded MRP ProtocolMessage arrives.
     public var onMessage: (@Sendable (Data) -> Void)?
 
+    /// Called once when the receive loop exits (NWConnection error / EOF /
+    /// peer drop). Used by upstream owners (`AirPlayTunnel.Tunnel` →
+    /// `CompanionConnection`) to detect a dead tunnel and reopen.
+    /// Without this, NWConnection drops are invisible to callers — the
+    /// tunnel just stops delivering messages with no notification.
+    public var onClose: (@Sendable () -> Void)?
+
+    /// Guards `onClose` against firing twice. NWConnection can deliver an
+    /// error and an `isComplete=true` in successive callbacks; we only
+    /// want one notification.
+    private var closedFired = false
+
     public init(connection: NWConnection, session: HAPSession) {
         self.connection = connection
         self.session    = session
@@ -193,14 +205,29 @@ public final class MRPDataChannel: @unchecked Sendable {
                     }
                 } catch {
                     Log.pairing.fail("MRPDataChannel: decrypt error: \(error)")
+                    self.fireOnClose()
                     return
                 }
             }
             if err != nil || isComplete {
+                if let err {
+                    Log.pairing.fail("MRPDataChannel: receive ended — \(err)")
+                } else {
+                    Log.pairing.report("MRPDataChannel: receive ended — EOF")
+                }
+                self.fireOnClose()
                 return
             }
             self.receiveLoop()
         }
+    }
+
+    /// Idempotent firing of `onClose`. Runs on `queue` (the receive
+    /// callback context) so the read of `closedFired` is race-free.
+    private func fireOnClose() {
+        guard !closedFired else { return }
+        closedFired = true
+        onClose?()
     }
 
     private func processPlaintext(_ plain: Data) {

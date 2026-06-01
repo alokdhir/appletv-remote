@@ -1,5 +1,7 @@
 import Foundation
+import AppKit
 import Darwin
+import Combine
 import AppleTVLogging
 import AppleTVProtocol
 
@@ -72,6 +74,31 @@ final class CompanionConnection: ObservableObject {
     /// The bundle tvOS told us is the foreground "now playing" client via
     /// SET_NOW_PLAYING_CLIENT_MESSAGE. Nil when no active client is known.
     private var activeAirPlayBundle: String?
+
+    /// Wake-from-sleep observer. Mac sleep silently kills the AirPlay
+    /// MRP TCP socket without NWConnection ever firing `.failed`, so the
+    /// receive loop just stops delivering messages and the now-playing
+    /// footer goes stale until the user manually relaunches.
+    /// Subscribing to `NSWorkspace.didWakeNotification` lets us proactively
+    /// tear down + reopen the tunnel as soon as the Mac comes back, instead
+    /// of waiting for an event that never fires.
+    private var wakeObserver: NSObjectProtocol?
+
+    init() {
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleSystemWake() }
+        }
+    }
+
+    // No deinit needed: CompanionConnection is held as a @StateObject by
+    // AppleTVRemoteApp and lives the entire process lifetime, so the
+    // wake observer is implicitly cleaned up at exit. Adding a deinit
+    // here would also require crossing MainActor isolation under Swift 6
+    // strict concurrency for what amounts to dead cleanup code.
 
     // MARK: - Connect / Disconnect
 
@@ -432,6 +459,19 @@ final class CompanionConnection: ObservableObject {
                             Task { @MainActor [weak self] in
                                 self?.handleAirPlayMessage(decoded)
                             }
+                        },
+                        onMRPClose: { [weak self] in
+                            // The AirPlay MRP socket died (NWConnection error,
+                            // EOF, or peer drop). Without this, the tunnel
+                            // silently stops delivering now-playing pushes —
+                            // observed across overnight Mac sleep where the
+                            // kernel dropped the TCP sockets, NWConnection
+                            // never fired .failed, and the footer stayed
+                            // stuck on the pre-sleep snapshot until the user
+                            // manually quit and relaunched.
+                            Task { @MainActor [weak self] in
+                                self?.handleAirPlayTunnelClose(epoch: openEpoch)
+                            }
                         }
                     )
                     await MainActor.run {
@@ -455,6 +495,38 @@ final class CompanionConnection: ObservableObject {
             }
             Log.pairing.report("AirPlay MRP tunnel: giving up after retries — now-playing will use Companion only")
         }
+    }
+
+    /// Reactive recovery: the AirPlay MRP receive loop exited (NWConnection
+    /// error / EOF / decrypt failure). Drop our tunnel reference if it
+    /// belongs to this open's epoch and reopen if we're still connected.
+    private func handleAirPlayTunnelClose(epoch: Int) {
+        // Stale callback from a tunnel that's already been replaced — ignore.
+        guard epoch == connectionEpoch else { return }
+        // Don't fight a healthy reconnect already in flight via wakeAndConnect.
+        guard state == .connected else { return }
+        Log.pairing.report("AirPlay MRP tunnel closed — reopening")
+        airPlayTunnel?.close()
+        airPlayTunnel = nil
+        startAirPlayMRP()
+    }
+
+    /// Proactive recovery: the Mac just woke from sleep. NWConnection
+    /// usually doesn't notice that its sockets died during sleep — they
+    /// just stop delivering reads. Tear the AirPlay tunnel down and let
+    /// `startAirPlayMRP`'s retry loop spin up a fresh one.
+    ///
+    /// Companion is left alone: it has TCP keepalive (10s idle timer set
+    /// in connect()) so if its socket actually died the read loop will
+    /// notice within ~30s and AutoReconnector takes over. We don't preempt
+    /// that path because connecting too eagerly post-wake races with
+    /// Wi-Fi reattach and burns reconnect attempts.
+    private func handleSystemWake() {
+        guard state == .connected else { return }
+        Log.pairing.report("System woke — refreshing AirPlay tunnel")
+        airPlayTunnel?.close()
+        airPlayTunnel = nil
+        startAirPlayMRP()
     }
 
     /// Minimum interval between nudges. Prevents a cascade if the ATV's

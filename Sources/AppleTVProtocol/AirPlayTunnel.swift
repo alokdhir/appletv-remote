@@ -102,6 +102,7 @@ public enum AirPlayTunnel {
                             credentials: AirPlayCredentials,
                             mrpClientID: String? = nil,
                             onMessage: (@Sendable (Data) -> Void)? = nil,
+                            onMRPClose: (@Sendable () -> Void)? = nil,
                             connectTimeout: TimeInterval = 5) async throws -> Tunnel {
         // All BSD socket I/O (openHTTP + RTSP requests) is blocking — run it on
         // a dedicated queue so we never stall the cooperative thread pool.
@@ -112,6 +113,7 @@ public enum AirPlayTunnel {
                                                  credentials: credentials,
                                                  mrpClientID: mrpClientID,
                                                  onMessage: onMessage,
+                                                 onMRPClose: onMRPClose,
                                                  connectTimeout: connectTimeout)
                     cont.resume(returning: tunnel)
                 } catch {
@@ -127,6 +129,7 @@ public enum AirPlayTunnel {
                                      credentials: AirPlayCredentials,
                                      mrpClientID: String?,
                                      onMessage: (@Sendable (Data) -> Void)?,
+                                     onMRPClose: (@Sendable () -> Void)?,
                                      connectTimeout: TimeInterval) throws -> Tunnel {
         let (rtsp, sharedSecret) = try openHTTP(host: host, credentials: credentials,
                                                 connectTimeout: connectTimeout)
@@ -312,6 +315,7 @@ public enum AirPlayTunnel {
         // which would arrive while open() is still executing (before the caller
         // can set onMessage on the returned Tunnel).
         mrpChannel.onMessage = onMessage
+        mrpChannel.onClose = onMRPClose
         mrpChannel.start()
         mrp = mrpChannel
         Log.pairing.report("AirPlayTunnel: MRP data channel up")
