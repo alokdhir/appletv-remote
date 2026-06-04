@@ -33,11 +33,20 @@ final class AutoReconnector: ObservableObject {
     private var cancellable: AnyCancellable?
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0
-    private let maxRetries  = 3
-    // Short debounce — the ATV drops idle Companion sockets at ~30 s, and a
-    // pair-verify reconnect only takes ~70 ms. Waiting 5 s here was the main
-    // source of the user-visible "blip" on every idle-close cycle.
-    private let retryDelay: TimeInterval = 0.25
+    // Exponential backoff schedule. retryCount indexes this array; once we
+    // pass the end we keep using the last delay. The first attempt is
+    // cheap (250 ms) so the common case — ATV drops the idle Companion
+    // socket at ~30 s and pair-verify recovers in ~70 ms — still feels
+    // instant. Later attempts back off to ride out longer outages
+    // (ATV-side service restart, network blip, brief Wi-Fi reattach).
+    //
+    // Total budget: ~70 s across 8 attempts. Previously 3 attempts × 250 ms
+    // gave up after under a second of true unavailability, which left the
+    // app stuck in error-with-no-retry whenever the ATV briefly refused
+    // Companion connections (observed: ATV closes socket, refuses for
+    // ~10–20 s, then accepts again — old code surrendered way before).
+    private let backoffSchedule: [TimeInterval] = [0.25, 0.5, 1, 2, 4, 8, 15, 30]
+    private var maxRetries: Int { backoffSchedule.count }
 
     func setUp(connection: CompanionConnection,
                discovery: DeviceDiscovery,
@@ -94,7 +103,11 @@ final class AutoReconnector: ObservableObject {
     private func scheduleRetry(device: AppleTVDevice,
                                connection: CompanionConnection,
                                discovery: DeviceDiscovery) {
-        let delay = retryDelay
+        // retryCount has been bumped by every prior in-flight attempt that
+        // settled into a .disconnected/.error before the next .connected.
+        // Use it to index the backoff schedule for the *upcoming* attempt.
+        let index = min(self.retryCount, backoffSchedule.count - 1)
+        let delay = backoffSchedule[index]
         retryTask = Task { [weak self, weak connection, weak discovery] in
             // Debounce: sleep first, then re-check. If state flipped out of
             // .disconnected/.error during this window the sink has already
@@ -122,7 +135,7 @@ final class AutoReconnector: ObservableObject {
                 self.isReconnecting = false
                 return
             }
-            Log.companion.report("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries))")
+            Log.companion.report("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries), delay=\(delay)s)")
             connection.wakeAndConnect(to: target)
             self.retryTask = nil
         }

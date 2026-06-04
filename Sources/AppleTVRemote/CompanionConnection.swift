@@ -124,10 +124,19 @@ final class CompanionConnection: ObservableObject {
         }
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            let reachable = Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 0.3)
-            Log.companion.report("SmartConnect: \(device.name) reachable=\(reachable)")
+            let probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
+            Log.companion.report("SmartConnect: \(device.name) probe=\(probe)")
 
-            if reachable {
+            // .reachable: Companion service is accepting → connect now.
+            // .refused:   Host is alive on the network but the Companion
+            //             service is briefly refusing (mid-restart, post-EOF
+            //             grace window, sleep-state transition). WoL is
+            //             pointless — the host isn't sleeping. Fall through
+            //             to connect(); its built-in transient-errno retry
+            //             handles the brief refusal window, and on failure
+            //             AutoReconnector's exponential backoff covers
+            //             outages longer than that.
+            if probe == .reachable || probe == .refused {
                 let s = self
                 await MainActor.run {
                     guard let conn = s, conn.state == .connecting else { return }
@@ -156,8 +165,12 @@ final class CompanionConnection: ObservableObject {
                 let stillWaking = await MainActor.run { s2?.state == .waking }
                 if !stillWaking { return }
 
-                if Self.isReachableSync(host: host, port: Int(port), timeoutSeconds: 2) {
-                    Log.companion.report("SmartConnect: \(device.name) responded after \(wolSent) WoL packet(s)")
+                let p = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 2)
+                // The host has come back online once the network stack starts
+                // RST-ing instead of timing out (.refused), or the Companion
+                // service is fully up (.reachable). Either way, stop WoL'ing.
+                if p == .reachable || p == .refused {
+                    Log.companion.report("SmartConnect: \(device.name) responded (\(p)) after \(wolSent) WoL packet(s)")
                     let s3 = self
                     await MainActor.run {
                         guard let conn = s3, conn.state == .waking else { return }
@@ -182,9 +195,29 @@ final class CompanionConnection: ObservableObject {
         }
     }
 
-    private nonisolated static func isReachableSync(host: String, port: Int, timeoutSeconds: Double) -> Bool {
+    /// Result of a fast TCP-handshake probe.
+    ///
+    /// `.refused` means the kernel got a TCP RST back (typically
+    /// `ECONNREFUSED`): the host is alive on the network — we exchanged
+    /// SYN/RST — but no process is currently bound to that port. Treating
+    /// this as "asleep" and entering the WoL flow burns 90 s of yellow-ball
+    /// while sending packets that do nothing (the ATV is already awake).
+    enum Reachability: CustomStringConvertible {
+        case reachable
+        case refused
+        case unreachable
+        var description: String {
+            switch self {
+            case .reachable:   return "reachable"
+            case .refused:     return "refused"
+            case .unreachable: return "unreachable"
+            }
+        }
+    }
+
+    private nonisolated static func probeReachability(host: String, port: Int, timeoutSeconds: Double) -> Reachability {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return .unreachable }
 
         var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
@@ -192,7 +225,7 @@ final class CompanionConnection: ObservableObject {
 
         let boundSrc = PrimaryInterface.bindSourceAddress(fd: fd, logHost: host)
         if boundSrc == nil {
-            Log.companion.report("isReachableSync: bindSourceAddress returned nil for \(host)")
+            Log.companion.report("probeReachability: bindSourceAddress returned nil for \(host)")
         }
 
         let flags = fcntl(fd, F_GETFL, 0)
@@ -210,27 +243,30 @@ final class CompanionConnection: ObservableObject {
             }
         }
 
-        if result == 0 { return true }
+        if result == 0 { return .reachable }
         if errno != EINPROGRESS {
-            Log.companion.report("isReachableSync: connect() returned \(result), errno \(errno) (\(String(cString: strerror(errno))))")
-            return false
+            let immediateErr = errno
+            Log.companion.report("probeReachability: connect() returned \(result), errno \(immediateErr) (\(String(cString: strerror(immediateErr))))")
+            // Some non-blocking stacks complete the RST synchronously
+            // before EINPROGRESS — surface ECONNREFUSED as .refused.
+            return immediateErr == ECONNREFUSED ? .refused : .unreachable
         }
 
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         let ms    = Int32(timeoutSeconds * 1000)
         let ready = poll(&pfd, 1, ms)
         if ready <= 0 {
-            Log.companion.report("isReachableSync: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
-            return false
+            Log.companion.report("probeReachability: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
+            return .unreachable
         }
 
         var err: Int32 = 0
         var len = socklen_t(MemoryLayout<Int32>.size)
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
-        if err != 0 {
-            Log.companion.report("isReachableSync: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
-        }
-        return err == 0
+        if err == 0 { return .reachable }
+        Log.companion.report("probeReachability: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
+        // ECONNREFUSED → host alive, port refusing. Skip WoL.
+        return err == ECONNREFUSED ? .refused : .unreachable
     }
 
     func connect(to device: AppleTVDevice) {
