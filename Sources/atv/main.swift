@@ -450,9 +450,10 @@ private func fmtTime(_ seconds: Double) -> String {
 
 func colorForState(_ text: String) -> String {
     switch text {
-    case "Connected":                      return green(text)
-    case "Disconnected":                   return dim(text)
-    case let t where t.hasPrefix("Error"): return red(text)
+    case "Connected":                       return green(text)
+    case "Sleeping":                        return dim(text)
+    case "Disconnected":                    return dim(text)
+    case let t where t.hasPrefix("Error"):  return red(text)
     case let t where t.hasPrefix("Waking"): return cyan(text)
     default:                                return cyan(text)
     }

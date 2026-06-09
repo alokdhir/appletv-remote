@@ -22,8 +22,8 @@ public protocol CompanionSessionDelegate: AnyObject {
     func sessionDidUpdateNowPlaying(_ info: CompanionNowPlayingUpdate)
     func sessionDidChangeKeyboardActive(_ active: Bool, data: Data?)
     func sessionDidUpdateAttentionState(_ state: Int)
-    func sessionDidReadError(_ message: String)
-    func sessionDidClose()
+    func sessionDidReadError(_ message: String, epoch: Int)
+    func sessionDidClose(epoch: Int)
     func sessionDidConfirmStart()
     func sessionDidReceivePairingFrame(_ frame: CompanionFrame)
     func sessionDidFetchApps(_ apps: [(id: String, name: String)])
@@ -61,7 +61,7 @@ public final class CompanionSession {
 
     private let transport: EncryptedFrameTransport
     private let fd: Int32
-    private let epoch: Int
+    public let epoch: Int
     private let writeQueue: DispatchQueue
     private let readQueue: DispatchQueue
 
@@ -422,9 +422,9 @@ public final class CompanionSession {
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         if err != 0 {
-                            self.delegate?.sessionDidReadError("Read error: \(reason)")
+                            self.delegate?.sessionDidReadError("Read error: \(reason)", epoch: self.epoch)
                         } else {
-                            self.delegate?.sessionDidClose()
+                            self.delegate?.sessionDidClose(epoch: self.epoch)
                         }
                     }
                     return
@@ -451,7 +451,7 @@ public final class CompanionSession {
                 // frame. Log + tear down the session so AutoReconnector can
                 // bring up a fresh one.
                 Log.companion.fail("Companion: \(error) — dropping connection")
-                delegate?.sessionDidReadError("Malformed frame: \(error)")
+                delegate?.sessionDidReadError("Malformed frame: \(error)", epoch: epoch)
                 return
             }
             guard let frame else { return }

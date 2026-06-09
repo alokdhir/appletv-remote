@@ -40,6 +40,7 @@ public struct AppleTVDevice: Identifiable, Hashable, @unchecked Sendable {
 /// Possible states of the connection to an Apple TV.
 public enum ConnectionState: Equatable {
     case disconnected
+    case sleeping         // user-initiated sleep; AutoReconnector won't retry
     case waking           // WoL packet sent, waiting for Apple TV to boot
     case connecting
     case awaitingPairingPin
@@ -49,6 +50,7 @@ public enum ConnectionState: Equatable {
     public var displayText: String {
         switch self {
         case .disconnected:       return "Disconnected"
+        case .sleeping:           return "Sleeping"
         case .waking:             return "Waking up Apple TV…"
         case .connecting:         return "Connecting…"
         case .awaitingPairingPin: return "Enter PIN shown on Apple TV"

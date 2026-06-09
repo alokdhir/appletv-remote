@@ -68,10 +68,10 @@ final class CompanionSessionTests: XCTestCase {
         func sessionDidUpdateAttentionState(_ state: Int) {
             attentionStates.append(state)
         }
-        func sessionDidReadError(_ message: String) {
+        func sessionDidReadError(_ message: String, epoch: Int) {
             readErrors.append(message)
         }
-        func sessionDidClose() {
+        func sessionDidClose(epoch: Int) {
             closedCount += 1
         }
         func sessionDidConfirmStart() {

@@ -194,7 +194,7 @@ final class IPCServer {
             }
             broadcast(.event(IPCEvent(event: .connected,
                                       message: connection.currentDevice?.name)))
-        case .disconnected:
+        case .disconnected, .sleeping:
             // Only broadcast if we actually came down from something alive.
             switch lastBroadcastState {
             case .connected, .connecting, .awaitingPairingPin, .waking:
@@ -466,7 +466,7 @@ final class IPCServer {
 
     private func handlePower(id: String, client: IPCClient) {
         if connection.state == .connected {
-            connection.send(.sleep)
+            connection.sleep()
             client.send(.response(.ok(id)))
             return
         }

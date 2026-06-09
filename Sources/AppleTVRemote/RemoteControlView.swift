@@ -64,7 +64,7 @@ struct RemoteControlView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 switch connection.state {
-                case .disconnected:
+                case .disconnected, .sleeping:
                     connectPrompt
                 case .waking:
                     wakingView
@@ -432,7 +432,15 @@ struct RemoteControlView: View {
                     }
                 }
                 .overlay(alignment: .topTrailing) {
-                    Button { connection.send(.sleep) } label: {
+                    let isSleeping = connection.state == .sleeping
+                    Button {
+                        if connection.state == .connected {
+                            connection.sleep()
+                        } else if isSleeping {
+                            let fresh = discovery.devices.first(where: { $0.id == device.id }) ?? device
+                            connection.wakeAndConnect(to: fresh)
+                        }
+                    } label: {
                         Image(systemName: "power")
                             .font(.system(size: 38 * 0.38, weight: .medium))
                             .foregroundStyle(.blue)
@@ -441,7 +449,7 @@ struct RemoteControlView: View {
                     }
                     .buttonStyle(PressableFillStyle())
                     .noFocusRing()
-                    .help("Sleep")
+                    .help(isSleeping ? "Wake" : "Sleep")
                     .offset(x: 20, y: -20)
                 }
 
@@ -536,6 +544,7 @@ struct RemoteControlView: View {
     private var statusColor: Color {
         switch connection.state {
         case .connected:          return .green
+        case .sleeping:           return .gray
         case .waking:             return .blue
         case .connecting:         return .yellow
         case .awaitingPairingPin: return .orange

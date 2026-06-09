@@ -40,7 +40,7 @@ final class AutoReconnector: ObservableObject {
     // instant. Later attempts back off to ride out longer outages
     // (ATV-side service restart, network blip, brief Wi-Fi reattach).
     //
-    // Total budget: ~70 s across 8 attempts. Previously 3 attempts × 250 ms
+    // Total budget: ~61 s across 8 attempts. Previously 3 attempts × 250 ms
     // gave up after under a second of true unavailability, which left the
     // app stuck in error-with-no-retry whenever the ATV briefly refused
     // Companion connections (observed: ATV closes socket, refuses for
@@ -63,6 +63,14 @@ final class AutoReconnector: ObservableObject {
                     self.retryTask = nil
                     self.isReconnecting = false
                     self.hasEverConnected = true
+                case .sleeping:
+                    // User put the ATV to sleep intentionally — clear retry
+                    // budget and stay quiet until the user explicitly wakes
+                    // the device (which transitions through .connecting).
+                    self.retryCount = 0
+                    self.retryTask?.cancel()
+                    self.retryTask = nil
+                    self.isReconnecting = false
                 case .connecting, .waking, .awaitingPairingPin:
                     // Mid-handshake — cancel any pending retry so the transient
                     // `.disconnected` that happened before this doesn't count

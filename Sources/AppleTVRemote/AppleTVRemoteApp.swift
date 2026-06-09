@@ -70,7 +70,11 @@ struct AppleTVRemoteApp: App {
                     if let device = devices.first(where: {
                         autoConnect.isEnabled($0.id) && $0.host != nil
                     }) {
-                        connection.wakeAndConnect(to: device)
+                        // Probe-only: if the ATV is asleep we transition to
+                        // .sleeping rather than firing WoL. Avoids waking an
+                        // ATV the user intentionally slept just because the
+                        // Mac app relaunched (or woke from sleep itself).
+                        connection.connectIfAwake(to: device)
                     }
                 }
         }

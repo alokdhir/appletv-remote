@@ -138,8 +138,16 @@ final class DeviceDiscovery: ObservableObject {
                 }
                 Log.discovery.report("Resolved \(name) → \(host):\(port)")
                 if let idx = self.devices.firstIndex(where: { $0.id == name }) {
-                    self.devices[idx].host = host
-                    self.devices[idx].port = UInt16(port)
+                    // Single-shot update: assigning to a local then back to
+                    // self.devices[idx] is one @Published publish. Mutating
+                    // .host then .port directly publishes twice, leaving
+                    // observers a racy window where host is set but port
+                    // isn't — auto-connect callers that filter on host
+                    // alone would fire too early.
+                    var updated = self.devices[idx]
+                    updated.host = host
+                    updated.port = UInt16(port)
+                    self.devices[idx] = updated
                 }
                 // Cache MAC address from ARP so Wake-on-LAN works when the ATV sleeps.
                 // Run off-main so the blocking ARP lookup doesn't stall the UI.

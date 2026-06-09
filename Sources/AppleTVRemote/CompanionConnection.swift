@@ -59,6 +59,16 @@ final class CompanionConnection: ObservableObject {
 
     /// Live AirPlay MRP tunnel — provides real-time now-playing pushes.
     private var airPlayTunnel: AirPlayTunnel.Tunnel?
+    /// In-flight `startAirPlayMRP` task. Cancelled and replaced on every new
+    /// start so overlapping triggers (pair-verify completion, tunnel close,
+    /// system wake mid-open) can't race two opens against the same epoch —
+    /// the loser would overwrite `airPlayTunnel` and leak the other tunnel's
+    /// three NWConnections.
+    private var airPlayOpenTask: Task<Void, Never>?
+    /// Wall-clock of the most recent close-triggered tunnel teardown. Used to
+    /// detect a close storm (tunnel dies right after every open) and insert a
+    /// cooldown so we don't hammer the ATV with back-to-back handshakes.
+    private var lastTunnelCloseAt: Date?
     private var lastPlaybackStateTimestamp: Double = 0
 
     /// Per-bundle now-playing state. tvOS multiplexes several players over
@@ -105,7 +115,7 @@ final class CompanionConnection: ObservableObject {
     /// Smart connect: probes the device first (0.3 s TCP timeout).
     func wakeAndConnect(to device: AppleTVDevice) {
         switch state {
-        case .disconnected, .error: break
+        case .disconnected, .sleeping, .error: break
         default: return
         }
         userInitiatedDisconnect = false
@@ -269,9 +279,51 @@ final class CompanionConnection: ObservableObject {
         return err == ECONNREFUSED ? .refused : .unreachable
     }
 
+    /// Probe-only connect. If the ATV answers TCP we connect; if it doesn't,
+    /// state goes to `.sleeping` and we stop. No WoL, no AutoReconnector retry.
+    /// Used by the launch auto-connect path so an ATV the user intentionally
+    /// slept (in this app, via Siri Remote, or via a previous session) stays
+    /// asleep across app relaunches. Manual user actions (Connect button,
+    /// `atv power`, the in-app power button while sleeping) still go through
+    /// `wakeAndConnect()` and will WoL.
+    func connectIfAwake(to device: AppleTVDevice) {
+        switch state {
+        case .disconnected, .sleeping, .error: break
+        default: return
+        }
+        userInitiatedDisconnect = false
+        // Set currentDevice + .connecting before the resolved-host guard so
+        // AutoReconnector's retry path has a target if a still-resolving
+        // device slipped past the caller's filter (the host/port @Published
+        // updates are atomic now, but defense in depth).
+        state = .connecting
+        currentDevice = device
+        guard let host = device.host, let port = device.port else {
+            state = .error("Device not yet resolved — try again")
+            return
+        }
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
+            Log.companion.report("connectIfAwake: \(device.name) probe=\(probe)")
+            await MainActor.run { [weak self] in
+                // Guard against a concurrent user action having moved us
+                // out of the .connecting we just installed.
+                guard let self, self.state == .connecting else { return }
+                switch probe {
+                case .reachable, .refused:
+                    self.connect(to: device)
+                case .unreachable:
+                    // ATV is asleep — surface that, don't WoL, don't retry.
+                    self.state = .sleeping
+                }
+            }
+        }
+    }
+
     func connect(to device: AppleTVDevice) {
         switch state {
-        case .disconnected, .connecting, .waking, .error: break
+        case .disconnected, .sleeping, .connecting, .waking, .error: break
         default: return
         }
         userInitiatedDisconnect = false
@@ -385,10 +437,11 @@ final class CompanionConnection: ObservableObject {
     }
 
     /// Tears down all now-playing state: per-bundle maps, AirPlay tunnel,
-    /// published nowPlaying, and timestamp bookkeeping. Called on user-
-    /// initiated `disconnect()` and from `AutoReconnector` once retries are
-    /// exhausted — NOT on every transient socket close, since the ATV's
-    /// 30s idle-EOF reconnect would flicker the footer on each cycle.
+    /// any in-flight tunnel open, published nowPlaying, and timestamp
+    /// bookkeeping. Called on user-initiated `disconnect()`, on `sleep()`,
+    /// and from `AutoReconnector` once retries are exhausted — NOT on every
+    /// transient socket close, since the ATV's 30s idle-EOF reconnect would
+    /// flicker the footer on each cycle.
     func resetNowPlayingState() {
         lastPlaybackStateTimestamp = 0
         lastNowPlayingRefreshAt = nil
@@ -397,13 +450,50 @@ final class CompanionConnection: ObservableObject {
         airPlayLastTSByBundle.removeAll()
         airPlayLastUpdateAtByBundle.removeAll()
         activeAirPlayBundle = nil
+        airPlayOpenTask?.cancel()
+        airPlayOpenTask = nil
+        lastTunnelCloseAt = nil
         airPlayTunnel?.close()
         airPlayTunnel = nil
     }
 
     // MARK: - Remote Commands (post-session)
 
+    /// Send the sleep command and transition to `.sleeping` immediately.
+    /// The state flip prevents AutoReconnector from retrying when the ATV
+    /// drops the Companion socket on its way down, and gives the UI an
+    /// instant visual cue without waiting for the (lossy) socket close.
+    func sleep() {
+        guard state == .connected else { return }
+        session?.send(.sleep)
+        // Bump epoch so the old session's pending sessionDidClose (which the
+        // ATV will fire as it goes down) is ignored if a quick wake-and-connect
+        // races it on the main queue. Without this, the stale close lands
+        // after wakeAndConnect set state to .connecting and clobbers it back
+        // to .disconnected, leaving the wake stuck.
+        connectionEpoch &+= 1
+        state = .sleeping
+        // Clear the footer and tear down the AirPlay tunnel now: the epoch
+        // bump above makes the tunnel's eventual onMRPClose a stale no-op,
+        // so nothing else would ever close it — and the now-playing card
+        // would keep showing pre-sleep playback for as long as the ATV
+        // sleeps. The Companion session is left alone so the queued .sleep
+        // write can flush; its EOF is epoch-guarded out in sessionDidClose.
+        resetNowPlayingState()
+    }
+
+    /// Wake from `.sleeping` on user input (button press in the UI).
+    /// Returns true if the press was consumed as a wake gesture and the
+    /// caller should NOT also treat it as a remote command.
+    @discardableResult
+    private func wakeOnInputIfSleeping() -> Bool {
+        guard state == .sleeping, let device = currentDevice else { return false }
+        wakeAndConnect(to: device)
+        return true
+    }
+
     func send(_ command: RemoteCommand) {
+        if wakeOnInputIfSleeping() { return }
         guard state == .connected else { return }
         session?.send(command)
         // Left / right while watching video acts as ff / rew — the ATV
@@ -419,11 +509,13 @@ final class CompanionConnection: ObservableObject {
     }
 
     func sendLongPress(_ command: RemoteCommand, ms: Int = 1000) {
+        if wakeOnInputIfSleeping() { return }
         guard state == .connected else { return }
         session?.sendLongPress(command, ms: ms)
     }
 
     func sendSwipe(_ direction: SwipeDirection) {
+        if wakeOnInputIfSleeping() { return }
         guard state == .connected else { return }
         session?.sendSwipe(direction)
     }
@@ -462,6 +554,11 @@ final class CompanionConnection: ObservableObject {
     // MARK: - AirPlay MRP
 
     private func startAirPlayMRP() {
+        // One open task at a time. A tunnel close or system wake can retrigger
+        // while a previous open is still awaiting its blocking handshake; the
+        // cancelled task notices after its await and closes whatever it opened
+        // instead of installing it over ours.
+        airPlayOpenTask?.cancel()
         guard let device = currentDevice,
               let host = device.host,
               let creds = credentialStore.loadAirPlay(deviceID: device.id) else { return }
@@ -470,7 +567,7 @@ final class CompanionConnection: ObservableObject {
         // Inherit MainActor from the calling @MainActor context. AirPlayTunnel.open
         // suspends while its dedicated openQueue does the blocking I/O, so MainActor
         // isn't held during the wait — no need for Task.detached + MainActor.run.
-        Task { [weak self] in
+        airPlayOpenTask = Task { [weak self] in
             // Retry with backoff: a single-shot open commonly fails on
             // sleep/wake when the network stack is still settling, leaving
             // us in Companion-only mode where MRP pushes never arrive and
@@ -480,9 +577,10 @@ final class CompanionConnection: ObservableObject {
             let backoff: [TimeInterval] = [0, 0.5, 1.5, 5.0]
             for delay in backoff {
                 if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-                // Bail if the user disconnected or we reconnected in the
-                // meantime (a newer epoch is already opening its own tunnel).
-                guard let self else { return }
+                // Bail if a newer open superseded us (cancellation), the user
+                // disconnected, or we reconnected in the meantime (a newer
+                // epoch is already opening its own tunnel).
+                guard !Task.isCancelled, let self else { return }
                 let stillCurrent = await MainActor.run { openEpoch == self.connectionEpoch && self.state == .connected }
                 guard stillCurrent else { return }
                 do {
@@ -514,14 +612,21 @@ final class CompanionConnection: ObservableObject {
                         // Post-await guard: connection epoch advances on
                         // disconnect()/wakeAndConnect(), but `sessionDidClose`
                         // (the EOF path) only flips state to .disconnected
-                        // without bumping the epoch. Either signal means the
-                        // tunnel we just opened is orphaned — close it and
-                        // let the next connect spin up a fresh one.
-                        guard openEpoch == self.connectionEpoch,
+                        // without bumping the epoch. Cancellation means a
+                        // newer open superseded this one. Any of these means
+                        // the tunnel we just opened is orphaned — close it
+                        // and let the current owner spin up a fresh one.
+                        guard !Task.isCancelled,
+                              openEpoch == self.connectionEpoch,
                               self.state == .connected else {
                             tunnel.close()
                             return
                         }
+                        // The EOF-reconnect path deliberately leaves the dead
+                        // tunnel reference in place (footer continuity), so a
+                        // stale tunnel can still be sitting here — close it
+                        // rather than leak its NWConnections on overwrite.
+                        self.airPlayTunnel?.close()
                         self.airPlayTunnel = tunnel
                     }
                     return
@@ -533,6 +638,12 @@ final class CompanionConnection: ObservableObject {
         }
     }
 
+    /// A tunnel that closes again within this window of the previous close is
+    /// treated as a close storm (dies right after every open).
+    private static let tunnelCloseStormWindow: TimeInterval = 30
+    /// Cooldown applied between reopen attempts during a close storm.
+    private static let tunnelReopenCooldown: TimeInterval = 10
+
     /// Reactive recovery: the AirPlay MRP receive loop exited (NWConnection
     /// error / EOF / decrypt failure). Drop our tunnel reference if it
     /// belongs to this open's epoch and reopen if we're still connected.
@@ -541,10 +652,32 @@ final class CompanionConnection: ObservableObject {
         guard epoch == connectionEpoch else { return }
         // Don't fight a healthy reconnect already in flight via wakeAndConnect.
         guard state == .connected else { return }
-        Log.pairing.report("AirPlay MRP tunnel closed — reopening")
         airPlayTunnel?.close()
         airPlayTunnel = nil
-        startAirPlayMRP()
+        let now = Date()
+        let stormy = lastTunnelCloseAt.map { now.timeIntervalSince($0) < Self.tunnelCloseStormWindow } ?? false
+        lastTunnelCloseAt = now
+        guard stormy else {
+            Log.pairing.report("AirPlay MRP tunnel closed — reopening")
+            startAirPlayMRP()
+            return
+        }
+        // Tunnel died again within the storm window: every reopen is a full
+        // RTSP + pair-verify handshake, so back off instead of spinning
+        // open/close cycles against a flaky AirPlay daemon. The reopen task
+        // re-checks epoch/state/tunnel after the cooldown — a user
+        // disconnect, reconnect, or wake-triggered open during the sleep
+        // makes it a no-op.
+        Log.pairing.report("AirPlay MRP tunnel closed again within \(Int(Self.tunnelCloseStormWindow))s — cooling down \(Int(Self.tunnelReopenCooldown))s")
+        let cooldownEpoch = connectionEpoch
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.tunnelReopenCooldown))
+            guard let self,
+                  self.connectionEpoch == cooldownEpoch,
+                  self.state == .connected,
+                  self.airPlayTunnel == nil else { return }
+            self.startAirPlayMRP()
+        }
     }
 
     /// Proactive recovery: the Mac just woke from sleep. NWConnection
@@ -823,13 +956,21 @@ extension CompanionConnection: CompanionSessionDelegate {
         attentionState = st
     }
 
-    func sessionDidReadError(_ message: String) {
+    func sessionDidReadError(_ message: String, epoch: Int) {
+        // Stale callback from a session that's been replaced. Could fire after
+        // the user slept-then-woke quickly: the old socket's EOF lands after
+        // wakeAndConnect() has already installed a new .connecting state.
+        guard epoch == connectionEpoch else { return }
         keyboardActive = false
+        // Expected when the ATV drops the socket after we asked it to sleep.
+        if state == .sleeping { return }
         state = .error(message)
     }
 
-    func sessionDidClose() {
+    func sessionDidClose(epoch: Int) {
+        guard epoch == connectionEpoch else { return }
         keyboardActive = false
+        if state == .sleeping { return }
         state = .disconnected
     }
 
