@@ -73,6 +73,19 @@ public struct NowPlayingInfo: Equatable, Sendable {
         self.raw = r
     }
 
+    /// Humanize a bundle identifier as a footer fallback when the player
+    /// publishes no `displayName`. Netflix in particular ships zero metadata
+    /// — without this fallback the footer disappears entirely the moment the
+    /// AirPlay tunnel names Netflix the active client. Strategy: take the
+    /// last dot-separated component (`com.netflix.Netflix` → "Netflix",
+    /// `com.google.ios.youtube` → "youtube"). Returns nil for empty / nil
+    /// inputs so callers can chain with `??`.
+    public static func appName(fromBundle bid: String?) -> String? {
+        guard let bid, !bid.isEmpty else { return nil }
+        let last = bid.split(separator: ".").last.map(String.init) ?? bid
+        return last.isEmpty ? bid : last
+    }
+
     /// Drop "Season N, Episode N" album values that Apple TV's catalog injects
     /// for video content. Those numbers are the catalog's internal index, not
     /// the show's real season/episode (we've seen the same "Season 8,

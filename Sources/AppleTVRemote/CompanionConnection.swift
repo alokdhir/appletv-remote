@@ -918,15 +918,30 @@ final class CompanionConnection: ObservableObject {
     /// before AirPlay connects.
     private func republishActiveBundle() {
         let winner = activeAirPlayBundle ?? fallbackBundle()
-        guard let winner, let info = airPlayStateByBundle[winner] else {
+        guard let winner else {
             if airPlayTunnel != nil {
                 nowPlaying = nil
                 lastPlaybackStateTimestamp = 0
             }
             return
         }
-        nowPlaying = info
-        lastPlaybackStateTimestamp = airPlayLastTSByBundle[winner] ?? 0
+        if let info = airPlayStateByBundle[winner] {
+            nowPlaying = info
+            lastPlaybackStateTimestamp = airPlayLastTSByBundle[winner] ?? 0
+            return
+        }
+        // Active bundle announced (SET_NOW_PLAYING_CLIENT) but no state has
+        // landed yet, or the player ships zero metadata (Netflix). Surface
+        // at least the app name so the footer doesn't vanish entirely.
+        if let appName = NowPlayingInfo.appName(fromBundle: winner) {
+            var stub = NowPlayingInfo()
+            stub.app = appName
+            nowPlaying = stub
+            lastPlaybackStateTimestamp = 0
+        } else if airPlayTunnel != nil {
+            nowPlaying = nil
+            lastPlaybackStateTimestamp = 0
+        }
     }
 
     /// Companion `_iMC` path. Companion only carries `_mcF` flags in practice

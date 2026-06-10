@@ -340,4 +340,36 @@ final class NowPlayingMergeTests: XCTestCase {
         XCTAssertEqual(out.info.raw["key1"], "updated")
         XCTAssertEqual(out.info.raw["key2"], "val2")
     }
+
+    // MARK: - AirPlay app fallback (Netflix-style "no displayName at all")
+
+    func testAirplayInputUsesDisplayNameWhenPresent() {
+        var u = MRPNowPlayingUpdate()
+        u.displayName = "Netflix"
+        u.bundleIdentifier = "com.netflix.Netflix"
+        let input = NowPlayingMergeInput.from(airplay: u)
+        XCTAssertEqual(input.app, "Netflix")
+    }
+
+    func testAirplayInputFallsBackToBundleLastComponent() {
+        var u = MRPNowPlayingUpdate()
+        u.bundleIdentifier = "com.netflix.Netflix"
+        let input = NowPlayingMergeInput.from(airplay: u)
+        XCTAssertEqual(input.app, "Netflix",
+            "displayName is nil — must fall back to the bundle id's last component so the footer still shows the app name")
+    }
+
+    func testAirplayInputAppIsNilWhenNoIdentifierAtAll() {
+        let u = MRPNowPlayingUpdate()
+        let input = NowPlayingMergeInput.from(airplay: u)
+        XCTAssertNil(input.app)
+    }
+
+    func testAppNameFromBundleHelper() {
+        XCTAssertEqual(NowPlayingInfo.appName(fromBundle: "com.netflix.Netflix"), "Netflix")
+        XCTAssertEqual(NowPlayingInfo.appName(fromBundle: "com.apple.TVAppleTVApp"), "TVAppleTVApp")
+        XCTAssertEqual(NowPlayingInfo.appName(fromBundle: "Netflix"), "Netflix")
+        XCTAssertNil(NowPlayingInfo.appName(fromBundle: nil))
+        XCTAssertNil(NowPlayingInfo.appName(fromBundle: ""))
+    }
 }
