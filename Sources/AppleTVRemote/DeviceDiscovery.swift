@@ -201,13 +201,21 @@ final class ServiceResolver: NSObject, NetServiceDelegate {
             Log.discovery.trace("ServiceResolver: \(sender.name) — txtRecordData() nil at resolve time")
         }
 
-        // Prefer IPv4 (AF_INET=2) over IPv6. On BSD/macOS sockaddr layout:
-        // byte 0 = sa_len, byte 1 = sa_family
-        let sorted = addresses.sorted { a, _ in
-            a.withUnsafeBytes { $0.load(fromByteOffset: 1, as: UInt8.self) == 2 }
+        // IPv4 only — every connect site (CompanionConnection, Standalone,
+        // probeReachability, WoL) hard-codes AF_INET + inet_pton. Handing back
+        // an IPv6 literal (esp. a link-local fe80::…%en0 on hosts whose v4
+        // hasn't bound yet) would fail inet_pton downstream. On BSD/macOS
+        // sockaddr layout: byte 0 = sa_len, byte 1 = sa_family; AF_INET = 2.
+        let v4Addresses = addresses.filter { addr in
+            addr.withUnsafeBytes { $0.load(fromByteOffset: 1, as: UInt8.self) == AF_INET }
         }
 
-        for addressData in sorted {
+        guard !v4Addresses.isEmpty else {
+            Log.discovery.report("ServiceResolver: \(sender.name) resolved with no IPv4 address (\(addresses.count) v6-only) — waiting for next resolve")
+            return
+        }
+
+        for addressData in v4Addresses {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             let ok = addressData.withUnsafeBytes { rawPtr -> Bool in
                 let sa = rawPtr.baseAddress!.assumingMemoryBound(to: sockaddr.self)
