@@ -304,8 +304,21 @@ final class CompanionConnection: ObservableObject {
         }
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            let probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
-            Log.companion.report("connectIfAwake: \(device.name) probe=\(probe)")
+            // ARP race: at app launch the kernel hasn't resolved the ATV's
+            // MAC yet, so an immediate TCP connect() returns EHOSTUNREACH
+            // synchronously (errno 65, "No route to host") within a few ms
+            // — well before any timeout — and we'd misclassify the ATV as
+            // asleep. Discovery's parallel ARP probe usually fills the cache
+            // ~20-50ms later. Retry the probe a few times with a short delay
+            // before declaring the ATV genuinely unreachable.
+            var probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
+            var attempts = 1
+            while probe == .unreachable && attempts < 4 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.5)
+                attempts += 1
+            }
+            Log.companion.report("connectIfAwake: \(device.name) probe=\(probe) (attempts=\(attempts))")
             await MainActor.run { [weak self] in
                 // Guard against a concurrent user action having moved us
                 // out of the .connecting we just installed.
