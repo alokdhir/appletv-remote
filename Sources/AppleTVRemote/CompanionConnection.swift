@@ -94,6 +94,24 @@ final class CompanionConnection: ObservableObject {
     /// of waiting for an event that never fires.
     private var wakeObserver: NSObjectProtocol?
 
+    /// Watchdog for the .connecting state. `Darwin.connect` blocks with the
+    /// kernel-default TCP timeout (~75 s × 3 retries) and the blocking read
+    /// loop only notices a hung pair-verify once TCP keepalive fires (~10
+    /// min worst case), so a stale post-Mac-sleep socket or an ATV that
+    /// briefly accepts TCP but never replies to PV_Start can leave us
+    /// stuck on "Connecting…" forever — quit-and-relaunch is the user's
+    /// only escape. The watchdog forces .error after a bounded handshake
+    /// budget so AutoReconnector takes over with exponential backoff.
+    private var connectWatchdog: DispatchWorkItem?
+    /// Combine subscription on `$state` that arms / disarms the watchdog
+    /// when entering / leaving `.connecting`.
+    private var stateObserver: AnyCancellable?
+    /// Total budget for TCP connect + pair-verify. Pair-verify on a healthy
+    /// LAN completes in <100 ms; even a slow ATV finishes in <1 s. 15 s
+    /// gives the kernel a few seconds to surface a real connect failure
+    /// without making the user stare at a stuck spinner.
+    private static let connectTimeout: TimeInterval = 15
+
     init() {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -102,6 +120,11 @@ final class CompanionConnection: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleSystemWake() }
         }
+        stateObserver = $state
+            .removeDuplicates()
+            .sink { [weak self] new in
+                self?.handleStateChangeForWatchdog(new)
+            }
     }
 
     // No deinit needed: CompanionConnection is held as a @StateObject by
@@ -118,9 +141,32 @@ final class CompanionConnection: ObservableObject {
         case .disconnected, .sleeping, .error: break
         default: return
         }
+        // Capture *before* mutating state so we know whether this entry came
+        // from a user-confirmed sleep. An ATV the user slept via this app
+        // (or Siri Remote) keeps its network stack alive for WoL but stops
+        // the Companion TCP service: the kernel RSTs new SYNs, so the
+        // initial probe below would classify .refused — and the .refused
+        // branch deliberately skips WoL, leaving the ATV asleep forever
+        // while we loop ECONNREFUSED in connect(). Skipping the probe in
+        // this case sends WoL immediately, which is the only thing that
+        // can actually wake the device.
+        let wasSleeping = (state == .sleeping)
         userInitiatedDisconnect = false
         state = .connecting
         currentDevice = device
+        // Waking a slept ATV should also turn its TV back on. CEC power-on
+        // only fires for a "real" button press (Menu) — not for the bare
+        // Companion wake/connect — so queue a .menu to replay once the
+        // session is up. Every wake-from-sleep entry point benefits: the
+        // power button and Connect prompt call wakeAndConnect directly
+        // (no command), and even a Menu press that set its own pending
+        // command lands here as .menu anyway. Auto-reconnect (state .error/
+        // .disconnected, wasSleeping == false) is deliberately excluded so
+        // a routine idle-socket reconnect doesn't fire a spurious Menu.
+        if wasSleeping, pendingWakeCommand == nil {
+            pendingWakeCommand = .menu
+            pendingWakeCommandAt = Date()
+        }
 
         guard let host = device.host, let port = device.port else {
             state = .error("Device not yet resolved — try again")
@@ -134,18 +180,23 @@ final class CompanionConnection: ObservableObject {
         }
 
         Task.detached(priority: .userInitiated) { [weak self] in
-            let probe = Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
-            Log.companion.report("SmartConnect: \(device.name) probe=\(probe)")
+            // Skip the initial probe when we know the ATV is sleeping — see
+            // the wasSleeping comment above.
+            let probe: Reachability = wasSleeping
+                ? .unreachable
+                : Self.probeReachability(host: host, port: Int(port), timeoutSeconds: 0.3)
+            Log.companion.report("SmartConnect: \(device.name) probe=\(probe)\(wasSleeping ? " (skipped — wasSleeping)" : "")")
 
             // .reachable: Companion service is accepting → connect now.
             // .refused:   Host is alive on the network but the Companion
             //             service is briefly refusing (mid-restart, post-EOF
-            //             grace window, sleep-state transition). WoL is
-            //             pointless — the host isn't sleeping. Fall through
-            //             to connect(); its built-in transient-errno retry
-            //             handles the brief refusal window, and on failure
-            //             AutoReconnector's exponential backoff covers
-            //             outages longer than that.
+            //             grace window). WoL is pointless — the host isn't
+            //             sleeping. Fall through to connect(); its built-in
+            //             transient-errno retry handles the brief refusal
+            //             window, and on failure AutoReconnector's
+            //             exponential backoff covers outages longer than
+            //             that. (We never reach this branch with .refused
+            //             when wasSleeping, because the probe was skipped.)
             if probe == .reachable || probe == .refused {
                 let s = self
                 await MainActor.run {
@@ -346,7 +397,30 @@ final class CompanionConnection: ObservableObject {
         }
         state = .connecting
         currentDevice = device
+        // Tear down any prior session before opening a new socket. sleep()
+        // deliberately leaves its CompanionSession running (open fd + 25 s
+        // keepalive timer) so the queued .sleep write can flush. On wake we
+        // must close it first: otherwise we open a *second* TCP connection
+        // while the stale one is still alive, and the ATV's Companion server
+        // never answers PV_Start on the new socket — the wake-from-sleep
+        // hang. The leftover keepalive also keeps firing encrypted sends
+        // ("encrypt failed: notReady" once the transport is reset). A fresh
+        // app launch has no prior session, which is why quit+relaunch
+        // always reconnected cleanly. Bump the epoch so the old session's
+        // EOF (from the close) is ignored as stale.
+        if session != nil {
+            connectionEpoch &+= 1
+            session?.close()
+            session = nil
+            transport.reset()
+        }
         transport.resetNonces()
+        // Snapshot the epoch before kicking off the blocking connect: if a
+        // user disconnect, sleep, or the connect-watchdog fires while we're
+        // sitting in Darwin.connect (kernel default ~75 s × 3), the epoch
+        // bumps and the post-connect main hop below has to drop the fd
+        // instead of installing a session over the new state.
+        let entryEpoch = connectionEpoch
 
         let deviceCopy = device
         writeQueue.async { [weak self] in
@@ -413,6 +487,16 @@ final class CompanionConnection: ObservableObject {
 
             DispatchQueue.main.async {
                 guard let self else { return }
+                // The user disconnected, slept, or the watchdog tripped while
+                // we were blocking in Darwin.connect. Don't quietly install a
+                // session over the new state — drop the fd and bail. State is
+                // already correct (.disconnected/.sleeping/.error) and
+                // AutoReconnector handles retries.
+                guard self.state == .connecting,
+                      self.connectionEpoch == entryEpoch else {
+                    Darwin.close(fd)
+                    return
+                }
                 self.connectionEpoch &+= 1
                 let sess = CompanionSession(
                     fd: fd,
@@ -446,6 +530,8 @@ final class CompanionConnection: ObservableObject {
         transport.reset()
         attentionState = nil
         keyboardActive = false
+        pendingWakeCommand = nil
+        pendingWakeCommandAt = nil
         resetNowPlayingState()
     }
 
@@ -498,15 +584,65 @@ final class CompanionConnection: ObservableObject {
     /// Wake from `.sleeping` on user input (button press in the UI).
     /// Returns true if the press was consumed as a wake gesture and the
     /// caller should NOT also treat it as a remote command.
+    ///
+    /// When `replaying` is supplied, the command is stashed and re-sent once
+    /// the connection reaches `.connected` (see `flushPendingWakeCommand`).
+    /// This is what makes a single Menu press both wake the ATV *and* drive
+    /// its HDMI-CEC TV-power-on — without it the first press only
+    /// woke/connected and the user had to press Menu a second time to
+    /// actually turn the TV on.
     @discardableResult
-    private func wakeOnInputIfSleeping() -> Bool {
+    private func wakeOnInputIfSleeping(replaying command: RemoteCommand? = nil) -> Bool {
         guard state == .sleeping, let device = currentDevice else { return false }
+        if let command {
+            pendingWakeCommand = command
+            pendingWakeCommandAt = Date()
+        }
         wakeAndConnect(to: device)
         return true
     }
 
+    /// Command captured by `wakeOnInputIfSleeping(replaying:)` (or defaulted to
+    /// `.menu` in `wakeAndConnect`), flushed to the ATV once the freshly-woken
+    /// connection reaches `.connected`. Expires after `pendingWakeCommandTTL`
+    /// so a wake that takes the full WoL budget (or fails and is abandoned)
+    /// can't fire a stale command minutes later.
+    private var pendingWakeCommand: RemoteCommand?
+    private var pendingWakeCommandAt: Date?
+    private static let pendingWakeCommandTTL: TimeInterval = 100
+
+    /// Replay (and clear) any command that triggered a wake-from-sleep, now
+    /// that the session is up. Called from the `.connected` transition. The
+    /// optional delay lets the queued session-init frames reach the ATV
+    /// before the HID command (they share the serial writeQueue, so ordering
+    /// is preserved, but the ATV needs a beat to process _sessionStart before
+    /// it will act on input).
+    private func flushPendingWakeCommand(afterDelay delay: TimeInterval = 0) {
+        guard let command = pendingWakeCommand else { return }
+        let age = pendingWakeCommandAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        pendingWakeCommand = nil
+        pendingWakeCommandAt = nil
+        guard age <= Self.pendingWakeCommandTTL else {
+            Log.companion.report("Companion: dropping stale wake command (age \(Int(age))s)")
+            return
+        }
+        guard delay > 0 else {
+            sendWakeCommandNow(command)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.sendWakeCommandNow(command)
+        }
+    }
+
+    private func sendWakeCommandNow(_ command: RemoteCommand) {
+        guard state == .connected else { return }
+        Log.companion.report("Companion: replaying wake command after connect")
+        session?.send(command)
+    }
+
     func send(_ command: RemoteCommand) {
-        if wakeOnInputIfSleeping() { return }
+        if wakeOnInputIfSleeping(replaying: command) { return }
         guard state == .connected else { return }
         session?.send(command)
         // Left / right while watching video acts as ff / rew — the ATV
@@ -711,6 +847,50 @@ final class CompanionConnection: ObservableObject {
         startAirPlayMRP()
     }
 
+    // MARK: - Connect watchdog
+
+    /// State observer hook: arm the watchdog whenever we enter `.connecting`,
+    /// disarm it the moment we leave for any other state (success, error,
+    /// user disconnect, sleep, or the user-paced `.awaitingPairingPin`).
+    /// Wakeup paths (`.waking`) are left without a watchdog because
+    /// `wakeAndConnect` already enforces a 90 s WoL deadline; once that
+    /// expires it transitions back to `.connecting` and the watchdog arms
+    /// fresh.
+    private func handleStateChangeForWatchdog(_ s: ConnectionState) {
+        if case .connecting = s {
+            scheduleConnectWatchdog()
+        } else {
+            cancelConnectWatchdog()
+        }
+    }
+
+    private func scheduleConnectWatchdog() {
+        connectWatchdog?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.state == .connecting else { return }
+            let name = self.currentDevice?.name ?? "Apple TV"
+            Log.companion.fail("Companion: \(name) handshake stalled past \(Int(Self.connectTimeout)) s — aborting so AutoReconnector can retry")
+            // Bump epoch first so any late writeQueue post-connect dispatch
+            // (Darwin.connect can sit in the kernel for 75 s × 3 with no
+            // user-space timeout) drops its fd instead of installing a
+            // session over the .error state we're about to set.
+            self.connectionEpoch &+= 1
+            self.session?.close()
+            self.session = nil
+            self.pairingFlow.reset()
+            self.transport.reset()
+            self.connectWatchdog = nil
+            self.state = .error("Connection timed out")
+        }
+        connectWatchdog = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.connectTimeout, execute: item)
+    }
+
+    private func cancelConnectWatchdog() {
+        connectWatchdog?.cancel()
+        connectWatchdog = nil
+    }
+
     /// Minimum interval between nudges. Prevents a cascade if the ATV's
     /// response to our nudge itself contains a state we treat as a change
     /// trigger (e.g., playbackState == 5 during a long scrub).
@@ -787,6 +967,14 @@ final class CompanionConnection: ObservableObject {
                     self.session?.sendSessionInit(clientID: stored.clientID, name: stored.name)
                     self.session?.startKeepalive()
                     self.startAirPlayMRP()
+                    // Replay any wake-from-sleep command (e.g. the .menu that
+                    // drives CEC TV power-on) here, not in sessionDidConfirmStart:
+                    // on wake the ATV often acks _sessionStart but never answers
+                    // the follow-up FetchAttentionState, so the confirm callback
+                    // never fires and the TV stayed off. The session-init frames
+                    // above are queued ahead of this on the serial writeQueue, so
+                    // a short delay lets the ATV process them before the HID.
+                    self.flushPendingWakeCommand(afterDelay: 0.4)
                 }
             },
             installKeys: { [weak self] enc, dec in
