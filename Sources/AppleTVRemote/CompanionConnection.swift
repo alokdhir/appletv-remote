@@ -54,6 +54,10 @@ final class CompanionConnection: ObservableObject {
     /// True when the ATV has an active text field waiting for keyboard input.
     @Published var keyboardActive: Bool = false
 
+    /// True when the focused ATV text field is a secure (password) field, so
+    /// the staging input should be masked.
+    @Published var keyboardSecure: Bool = false
+
     /// Apps available for launch on the ATV, fetched after each session start.
     @Published var appList: [(id: String, name: String)] = []
 
@@ -530,6 +534,7 @@ final class CompanionConnection: ObservableObject {
         transport.reset()
         attentionState = nil
         keyboardActive = false
+        keyboardSecure = false
         pendingWakeCommand = nil
         pendingWakeCommandAt = nil
         resetNowPlayingState()
@@ -1165,6 +1170,11 @@ extension CompanionConnection: CompanionSessionDelegate {
 
     func sessionDidChangeKeyboardActive(_ active: Bool, data: Data?) {
         keyboardActive = active
+        if let data, active {
+            keyboardSecure = RTITextOperations.isSecureTextEntry(from: data)
+        } else {
+            keyboardSecure = false
+        }
         if !active { return }
     }
 
@@ -1178,6 +1188,7 @@ extension CompanionConnection: CompanionSessionDelegate {
         // wakeAndConnect() has already installed a new .connecting state.
         guard epoch == connectionEpoch else { return }
         keyboardActive = false
+        keyboardSecure = false
         // Expected when the ATV drops the socket after we asked it to sleep.
         if state == .sleeping { return }
         state = .error(message)
@@ -1186,6 +1197,7 @@ extension CompanionConnection: CompanionSessionDelegate {
     func sessionDidClose(epoch: Int) {
         guard epoch == connectionEpoch else { return }
         keyboardActive = false
+        keyboardSecure = false
         if state == .sleeping { return }
         state = .disconnected
     }

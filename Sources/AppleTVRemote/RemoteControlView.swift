@@ -567,7 +567,13 @@ struct RemoteControlView: View {
             Text(connection.currentDevice?.name ?? "Apple TV")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            TextField("Type here…", text: $keyboardInputText)
+            Group {
+                if connection.keyboardSecure {
+                    SecureField("Password…", text: $keyboardInputText)
+                } else {
+                    TextField("Type here…", text: $keyboardInputText)
+                }
+            }
                 .textFieldStyle(.roundedBorder)
                 .focused($keyboardInputFocused)
                 .onSubmit { submitKeyboardText() }

@@ -281,4 +281,28 @@ public enum RTITextOperations {
 
         return text
     }
+
+    /// Detect whether the focused text field is a secure (password) field.
+    ///
+    /// tvOS encodes the keyboard traits somewhere inside the `documentState`
+    /// object graph of the `_tiD` archive, but — unlike `sessionUUID` and
+    /// `contextBeforeInput` — the exact key path is undocumented and has
+    /// shifted across tvOS releases. pyatv never reads it, so there is no
+    /// canonical path to copy. Rather than hard-code a fragile index chain we
+    /// scan every dictionary in `$objects` for a `secureTextEntry`-style key
+    /// set to a truthy value.
+    public static func isSecureTextEntry(from tiD: Data) -> Bool {
+        guard let plist = try? PropertyListSerialization.propertyList(from: tiD,
+                                                                       format: nil) as? [String: Any],
+              let objects = plist["$objects"] as? [Any] else { return false }
+
+        for obj in objects {
+            guard let dict = obj as? [String: Any] else { continue }
+            for (key, value) in dict where key.lowercased().contains("secure") {
+                if let b = value as? Bool, b { return true }
+                if let n = value as? NSNumber, n.boolValue { return true }
+            }
+        }
+        return false
+    }
 }

@@ -356,6 +356,45 @@ final class RTITextOperationsTests: XCTestCase {
         XCTAssertNil(RTITextOperations.extractSessionUUID(from: tiD))
     }
 
+    // MARK: - isSecureTextEntry tests
+
+    func testIsSecureTextEntryTrue() throws {
+        let plistDict: [String: Any] = [
+            "$version": 100000,
+            "$archiver": "NSKeyedArchiver",
+            "$top": ["documentState": ["CF$UID": 1]],
+            "$objects": [
+                "$null",
+                ["secureTextEntry": true, "keyboardType": 0],
+            ],
+        ]
+        let tiD = try PropertyListSerialization.data(fromPropertyList: plistDict,
+                                                      format: .binary,
+                                                      options: 0)
+        XCTAssertTrue(RTITextOperations.isSecureTextEntry(from: tiD))
+    }
+
+    func testIsSecureTextEntryFalse() throws {
+        let plistDict: [String: Any] = [
+            "$version": 100000,
+            "$archiver": "NSKeyedArchiver",
+            "$top": ["documentState": ["CF$UID": 1]],
+            "$objects": [
+                "$null",
+                ["secureTextEntry": false, "keyboardType": 7],
+            ],
+        ]
+        let tiD = try PropertyListSerialization.data(fromPropertyList: plistDict,
+                                                      format: .binary,
+                                                      options: 0)
+        XCTAssertFalse(RTITextOperations.isSecureTextEntry(from: tiD))
+    }
+
+    func testIsSecureTextEntryAbsentReturnsFalse() throws {
+        let payload = RTITextOperations.inputPayload(sessionUUID: fixedUUID, text: "hello")
+        XCTAssertFalse(RTITextOperations.isSecureTextEntry(from: payload))
+    }
+
     // MARK: - Round-trip: inputPayload UUID survives encode/decode
 
     func testInputPayloadRoundTripUUID() throws {

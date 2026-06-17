@@ -535,6 +535,9 @@ public final class CompanionSession {
                     guard let self else { return }
                     let d = (resp["_c"] as? [String: Any])?["_tiD"] as? Data
                     self.currentTextInputData = d
+                    if d != nil {
+                        self.delegate?.sessionDidChangeKeyboardActive(true, data: d)
+                    }
                 }
                 sendEncrypted(OPACK.encodeTextInputStart(txn: tiTxn))
             }
