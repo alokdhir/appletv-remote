@@ -171,6 +171,13 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 - Post-pairing frames are ChaCha20-Poly1305 encrypted E_OPACK
 - `CompanionSession` is the testable core; `CompanionConnection` is this app's SwiftUI wrapper around it
 - Reference implementation: [pyatv](https://github.com/postlund/pyatv) (`pyatv/protocols/companion/`)
+- **Debugging protocol bugs: check pyatv FIRST.** When the ATV silently ignores a
+  request, or behavior changes after a tvOS update, diff our handshake against
+  pyatv's connect sequence (`protocols/companion/api.py`) and its fake server
+  (`tests/fake_device/companion.py`) before theorizing about wire encoding or
+  session identity. Example: tvOS 26.5 stopped answering FetchLaunchableApplicationsEvent
+  / FetchAttentionState until the client sends `TVRCSessionStart` on connect —
+  pyatv had already added this (`_tv_rc_session_start`) with an explanatory docstring.
 
 ## Issue tracking
 
