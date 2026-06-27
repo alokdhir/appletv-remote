@@ -43,6 +43,42 @@ final class CompanionSessionTests: XCTestCase {
         return (session, peerFD)
     }
 
+    /// Build a session with encryption keys installed, plus a mirror transport
+    /// keyed to decrypt what the session seals. Lets a test read the peer fd
+    /// and recover the plaintext OPACK frames the session actually sent.
+    private func makeKeyedSession() -> (session: CompanionSession, peer: Int32, decrypt: EncryptedFrameTransport) {
+        let (sessionFD, peerFD) = makeFDs()
+        let key = SymmetricKey(size: .bits256)
+        let transport = EncryptedFrameTransport()
+        transport.installSessionKeys(encrypt: key, decrypt: key)
+        let session = CompanionSession(
+            fd: sessionFD,
+            epoch: 1,
+            transport: transport,
+            writeQueue: DispatchQueue(label: "test.write"),
+            readQueue:  DispatchQueue(label: "test.read")
+        )
+        session.start()
+        let decrypt = EncryptedFrameTransport()
+        decrypt.installSessionKeys(encrypt: key, decrypt: key)
+        return (session, peerFD, decrypt)
+    }
+
+    /// Read everything currently buffered on `fd` (non-blocking), giving the
+    /// session's async write queue a brief window to flush first.
+    private func drain(_ fd: Int32, waitMs: Int = 200) -> Data {
+        usleep(UInt32(waitMs) * 1000)
+        let flags = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        var out = Data()
+        var buf = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let n = buf.withUnsafeMutableBufferPointer { Darwin.read(fd, $0.baseAddress, $0.count) }
+            if n > 0 { out.append(buf, count: n) } else { break }
+        }
+        return out
+    }
+
     private func opack(_ dict: [String: Any]) -> Data {
         OPACK.pack(dict)
     }
@@ -225,6 +261,34 @@ final class CompanionSessionTests: XCTestCase {
 
         // attentionState fires from the default case
         XCTAssertEqual(spy.attentionStates, [1])
+    }
+
+    /// Regression guard for the tvOS 26.5 app-list/attention-state breakage:
+    /// recent tvOS ignores FetchLaunchableApplicationsEvent and
+    /// FetchAttentionState unless the client registers a TV Remote Client
+    /// session via TVRCSessionStart during setup. Assert sendSessionInit emits
+    /// it, in the required order between _sessionStart and _tiStart.
+    func testSendSessionInitEmitsTVRCSessionStartInOrder() {
+        let (session, peer, decrypt) = makeKeyedSession()
+        defer { session.close(); Darwin.close(peer) }
+
+        session.sendSessionInit(clientID: "client-id", name: "Test Mac")
+
+        var buffer = drain(peer)
+        var identifiers: [String] = []
+        while let frame = try? CompanionFrame.read(from: &buffer) {
+            guard frame.type == .eOPACK,
+                  let plain = try? decrypt.open(frame.payload),
+                  let dict = OPACK.decodeDict(plain),
+                  let id = dict["_i"] as? String
+            else { continue }
+            identifiers.append(id)
+        }
+
+        XCTAssertEqual(identifiers,
+                       ["_systemInfo", "_touchStart", "_sessionStart",
+                        "TVRCSessionStart", "_tiStart"],
+                       "sendSessionInit must register a TV Remote Client session")
     }
 
     // MARK: - sendText guard

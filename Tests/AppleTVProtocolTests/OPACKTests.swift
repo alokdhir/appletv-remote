@@ -203,4 +203,15 @@ final class OPACKTests: XCTestCase {
         XCTAssertNil(decoded?["a"])          // nested dict skipped
         XCTAssertEqual(decoded?["b"] as? Int, 1)
     }
+
+    // MARK: - TVRCSessionStart (required for app-list / attention-state on recent tvOS)
+
+    func testTVRCSessionStartEncodesExpectedShape() {
+        let decoded = OPACK.decodeDict(OPACK.encodeTVRCSessionStart(txn: 7))
+        XCTAssertEqual(decoded?["_i"] as? String, "TVRCSessionStart")
+        XCTAssertEqual(decoded?["_t"] as? Int, 2)            // request
+        XCTAssertEqual(decoded?["_x"] as? Int, 7)
+        let content = decoded?["_c"] as? [String: Any]
+        XCTAssertEqual(content?["ProtocolVersionKey"] as? String, "1.2")
+    }
 }
