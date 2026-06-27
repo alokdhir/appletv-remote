@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import AppleTVProtocol
+import AppleTVLogging
 
 @main
 struct AppleTVRemoteApp: App {
@@ -50,6 +51,7 @@ struct AppleTVRemoteApp: App {
     /// Idempotent: safe to call again from .onAppear.
     private func setUp() {
         appDelegate.onFinishLaunching = nil  // clear after first real call
+        if ProcessInfo.processInfo.environment["ATV_VERBOSE"] != nil { Log.verbose = true }
         appDelegate.connection = connection
         discovery.startDiscovery()
         MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect, reconnector: reconnector)

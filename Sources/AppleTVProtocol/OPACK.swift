@@ -328,6 +328,19 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Encode `TVRCSessionStart` — registers a TV Remote Client session with
+    /// the tvremoted process. tvOS will not answer FetchAttentionState or
+    /// FetchLaunchableApplicationsEvent until this is sent.
+    /// Mirrors pyatv's `_tv_rc_session_start` (api.py).
+    public static func encodeTVRCSessionStart(txn: UInt32) -> Data {
+        pack([
+            "_i": "TVRCSessionStart",
+            "_t": 2,
+            "_x": txn,
+            "_c": ["ProtocolVersionKey": "1.2"] as [String: Any],
+        ] as [String: Any])
+    }
+
     /// Encode `_interest` event subscription — tells the ATV we want to be
     /// notified of events of a given type (e.g. `_iMC` for media control).
     ///

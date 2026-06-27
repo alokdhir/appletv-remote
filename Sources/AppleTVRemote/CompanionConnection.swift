@@ -1203,7 +1203,30 @@ extension CompanionConnection: CompanionSessionDelegate {
     }
 
     func sessionDidConfirmStart() {
-        if appList.isEmpty { session?.fetchApps() }
+        if appList.isEmpty { fetchAppsWithRetry(attempt: 0) }
+    }
+
+    /// Fetch the app list, retrying on an empty/failed result with backoff.
+    /// The real prerequisite for the ATV to answer is TVRCSessionStart (sent
+    /// during session init) — without it tvOS silently drops the request. The
+    /// retry is a cheap safety net for the occasional transient drop or a
+    /// reply that races session bring-up; it stops as soon as the list arrives.
+    private func fetchAppsWithRetry(attempt: Int) {
+        let delays: [TimeInterval] = [0.6, 1.2, 2.0, 3.0, 4.0]
+        session?.fetchApps { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                guard self.appList.isEmpty else { return }   // a parallel fetch won
+                if case .success(let apps) = result, !apps.isEmpty { return }
+                guard attempt < delays.count, self.state == .connected else { return }
+                let delay = delays[attempt]
+                Log.companion.report("Companion: app-list fetch attempt \(attempt + 1) empty, retrying in \(delay)s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, self.appList.isEmpty, self.state == .connected else { return }
+                    self.fetchAppsWithRetry(attempt: attempt + 1)
+                }
+            }
+        }
     }
 
     func sessionDidFetchApps(_ apps: [(id: String, name: String)]) {

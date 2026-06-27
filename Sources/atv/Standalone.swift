@@ -260,10 +260,11 @@ final class StandaloneSession {
             if trace { FileHandle.standardError.write(Data("← \(label) ← \(dictPreview(resp))\n".utf8)) }
             return resp
         }
-        _ = try step("_systemInfo",   OPACK.encodeSystemInfo(clientID: creds.clientID, name: creds.name, txn: nextTxn()))
-        _ = try step("_touchStart",   OPACK.encodeTouchStart(txn: nextTxn()))
-        _ = try step("_sessionStart", OPACK.encodeSessionStart(txn: nextTxn(), localSID: UInt32.random(in: 0..<UInt32.max)))
-        _ = try step("_tiStart",      OPACK.encodeTextInputStart(txn: nextTxn()))
+        _ = try step("_systemInfo",       OPACK.encodeSystemInfo(clientID: creds.clientID, name: creds.name, txn: nextTxn()))
+        _ = try step("_touchStart",       OPACK.encodeTouchStart(txn: nextTxn()))
+        _ = try step("_sessionStart",     OPACK.encodeSessionStart(txn: nextTxn(), localSID: UInt32.random(in: 0..<UInt32.max)))
+        _ = try step("TVRCSessionStart",  OPACK.encodeTVRCSessionStart(txn: nextTxn()))
+        _ = try step("_tiStart",          OPACK.encodeTextInputStart(txn: nextTxn()))
     }
 
     /// Send FetchLaunchable, wait for response, decode app list.

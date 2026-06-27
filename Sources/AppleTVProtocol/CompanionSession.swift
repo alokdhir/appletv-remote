@@ -118,8 +118,11 @@ public final class CompanionSession {
 
     // MARK: - Session startup
 
-    /// Send the five session-init messages (_systemInfo, _touchStart, _sessionStart,
-    /// _tiStart) that the ATV requires before it considers the session open.
+    /// Send the session-init messages the ATV requires before it considers the session open:
+    /// _systemInfo, _touchStart, _sessionStart, TVRCSessionStart, _tiStart.
+    /// TVRCSessionStart registers a TV Remote Client session with tvremoted —
+    /// without it tvOS silently ignores FetchAttentionState and
+    /// FetchLaunchableApplicationsEvent. See pyatv api.py `_tv_rc_session_start`.
     public func sendSessionInit(clientID: String, name: String) {
         let txn1 = nextTxn()
         sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, name: name, txn: txn1))
@@ -131,6 +134,9 @@ public final class CompanionSession {
         let localSID = UInt32.random(in: 0..<UInt32.max)
         sessionStartTxn = txn3
         sendEncrypted(OPACK.encodeSessionStart(txn: txn3, localSID: localSID))
+
+        let txnRC = nextTxn()
+        sendEncrypted(OPACK.encodeTVRCSessionStart(txn: txnRC))
 
         let txn4 = nextTxn()
         pendingCallbacks[txn4] = { [weak self] response in
@@ -566,14 +572,15 @@ public final class CompanionSession {
                 sendEncrypted(OPACK.encodeInterest(
                     events: ["_iMC", "SystemStatus", "TVSystemStatus",
                              "_tiStarted", "_tiStopped"], txn: t))
+                // Confirm the session as soon as it's up — do NOT gate this on
+                // the FetchAttentionState reply. On wake the ATV frequently acks
+                // _sessionStart but never answers FetchAttentionState, so gating
+                // here left the app list (and anything else keyed off confirm)
+                // stuck "loading" forever. FetchAttentionState is now fire-and-
+                // forget; its reply (when it arrives) updates attention state via
+                // the `case "FetchAttentionState"` / msgType==3 paths below.
+                delegate?.sessionDidConfirmStart()
                 let attnTxn = nextTxn()
-                pendingCallbacks[attnTxn] = { [weak self] resp in
-                    guard let self else { return }
-                    if let st = (resp["_c"] as? [String: Any])?["state"] as? Int {
-                        self.delegate?.sessionDidUpdateAttentionState(st)
-                    }
-                    self.delegate?.sessionDidConfirmStart()
-                }
                 sendEncrypted(OPACK.encodeFetchAttentionState(txn: attnTxn))
             }
             if msgType == 3,
