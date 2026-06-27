@@ -1044,6 +1044,20 @@ final class CompanionConnection: ObservableObject {
         case .activeClient(let bid):
             activeAirPlayBundle = bid
             Log.companion.report("AirPlay: active client → \(bid ?? "(none)")")
+            if bid == nil {
+                // tvOS explicitly announced *no* now-playing client. This is
+                // the authoritative "nothing is playing" signal — it fires
+                // when you leave a player back to the app picker / Home (the
+                // app stays alive, so REMOVE_CLIENT never arrives, and the
+                // app's own paused SET_STATE keeps its title cached). Wipe all
+                // cached player state so a stale paused bundle can't be
+                // resurrected by the fallback ranking and keep haunting the
+                // footer. Re-entering an app re-announces it via type 46 and
+                // re-pushes fresh state.
+                airPlayStateByBundle.removeAll()
+                airPlayLastTSByBundle.removeAll()
+                airPlayLastUpdateAtByBundle.removeAll()
+            }
             republishActiveBundle()
 
         case .removeClient(let bid):
@@ -1088,6 +1102,7 @@ final class CompanionConnection: ObservableObject {
         if Log.verbose {
             let parts: [String] = [
                 "bundle=\(bundle)",
+                "pbState=\(update.playbackState.map(String.init) ?? "nil")",
                 update.title.map       { "title=\"\($0)\"" },
                 update.artist.map      { "artist=\"\($0)\"" },
                 update.duration.map    { "duration=\($0)" },
@@ -1129,9 +1144,18 @@ final class CompanionConnection: ObservableObject {
     /// Pick the best bundle when tvOS hasn't named an active client.
     /// Prefers a currently-playing bundle; otherwise the most-recently-
     /// updated one (so paused metadata doesn't disappear).
+    ///
+    /// Only bundles that actually have something to show are eligible. On
+    /// session bring-up tvOS replays the last clients (Music, AirPlay, the
+    /// last-watched app) as empty paused stubs — no title, no elapsed, just
+    /// the app identity. Without the content filter the most-recently-replayed
+    /// stub would win and surface a bare app name ("Prime Video") in the
+    /// footer even though nothing is playing. A genuinely-paused player keeps
+    /// its title cached, so it still qualifies and stays resumable.
     private func fallbackBundle() -> String? {
-        let playing = airPlayStateByBundle.filter { ($0.value.playbackRate ?? 0) > 0 }
-        let pool = playing.isEmpty ? airPlayStateByBundle : playing
+        let withContent = airPlayStateByBundle.filter { $0.value.title != nil }
+        let playing = withContent.filter { ($0.value.playbackRate ?? 0) > 0 }
+        let pool = playing.isEmpty ? withContent : playing
         return pool.keys.max { (a, b) in
             (airPlayLastUpdateAtByBundle[a] ?? .distantPast)
                 < (airPlayLastUpdateAtByBundle[b] ?? .distantPast)
