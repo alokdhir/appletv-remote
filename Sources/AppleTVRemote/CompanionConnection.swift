@@ -607,6 +607,25 @@ final class CompanionConnection: ObservableObject {
         return true
     }
 
+    /// When the user presses a button while in `.error` or `.disconnected`,
+    /// immediately kick off a reconnect instead of silently swallowing input.
+    /// The command is queued as `pendingWakeCommand` so it replays once the
+    /// session is re-established.
+    @discardableResult
+    private func reconnectOnInputIfError(replaying command: RemoteCommand? = nil) -> Bool {
+        switch state {
+        case .error, .disconnected: break
+        default: return false
+        }
+        guard let device = currentDevice else { return false }
+        if let command {
+            pendingWakeCommand = command
+            pendingWakeCommandAt = Date()
+        }
+        wakeAndConnect(to: device)
+        return true
+    }
+
     /// Command captured by `wakeOnInputIfSleeping(replaying:)` (or defaulted to
     /// `.menu` in `wakeAndConnect`), flushed to the ATV once the freshly-woken
     /// connection reaches `.connected`. Expires after `pendingWakeCommandTTL`
@@ -648,6 +667,7 @@ final class CompanionConnection: ObservableObject {
 
     func send(_ command: RemoteCommand) {
         if wakeOnInputIfSleeping(replaying: command) { return }
+        if reconnectOnInputIfError(replaying: command) { return }
         guard state == .connected else { return }
         session?.send(command)
         // Left / right while watching video acts as ff / rew — the ATV
@@ -664,12 +684,14 @@ final class CompanionConnection: ObservableObject {
 
     func sendLongPress(_ command: RemoteCommand, ms: Int = 1000) {
         if wakeOnInputIfSleeping() { return }
+        if reconnectOnInputIfError() { return }
         guard state == .connected else { return }
         session?.sendLongPress(command, ms: ms)
     }
 
     func sendSwipe(_ direction: SwipeDirection) {
         if wakeOnInputIfSleeping() { return }
+        if reconnectOnInputIfError() { return }
         guard state == .connected else { return }
         session?.sendSwipe(direction)
     }

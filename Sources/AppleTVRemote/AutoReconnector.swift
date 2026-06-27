@@ -5,7 +5,7 @@ import AppleTVProtocol
 
 // MARK: - Auto-reconnect on connection drop
 
-/// Watches for unexpected disconnects on auto-connect devices and retries up to 3 times.
+/// Watches for unexpected disconnects and retries indefinitely with exponential backoff.
 ///
 /// The retry is debounced: the counter only increments if the connection stays
 /// in `.disconnected`/`.error` for the full `retryDelay` window. Transitions
@@ -34,19 +34,14 @@ final class AutoReconnector: ObservableObject {
     private var retryTask:   Task<Void, Never>?
     private var retryCount  = 0
     // Exponential backoff schedule. retryCount indexes this array; once we
-    // pass the end we keep using the last delay. The first attempt is
-    // cheap (250 ms) so the common case — ATV drops the idle Companion
-    // socket at ~30 s and pair-verify recovers in ~70 ms — still feels
-    // instant. Later attempts back off to ride out longer outages
-    // (ATV-side service restart, network blip, brief Wi-Fi reattach).
-    //
-    // Total budget: ~61 s across 8 attempts. Previously 3 attempts × 250 ms
-    // gave up after under a second of true unavailability, which left the
-    // app stuck in error-with-no-retry whenever the ATV briefly refused
-    // Companion connections (observed: ATV closes socket, refuses for
-    // ~10–20 s, then accepts again — old code surrendered way before).
+    // pass the end we keep using the last delay (30 s) indefinitely.
+    // The first attempt is cheap (250 ms) so the common case — ATV drops
+    // the idle Companion socket at ~30 s and pair-verify recovers in
+    // ~70 ms — still feels instant. Later attempts back off to ride out
+    // longer outages (ATV-side service restart, network blip, brief
+    // Wi-Fi reattach). There is no retry cap: the app keeps trying every
+    // 30 s until it reconnects or the user explicitly disconnects.
     private let backoffSchedule: [TimeInterval] = [0.25, 0.5, 1, 2, 4, 8, 15, 30]
-    private var maxRetries: Int { backoffSchedule.count }
 
     func setUp(connection: CompanionConnection,
                discovery: DeviceDiscovery,
@@ -124,16 +119,6 @@ final class AutoReconnector: ObservableObject {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled,
                   let self, let connection, let discovery else { return }
-            guard self.retryCount < self.maxRetries else {
-                Log.companion.fail("AutoReconnector: max retries reached, giving up")
-                self.retryCount = 0
-                self.retryTask = nil
-                self.isReconnecting = false
-                // Reconnect won't happen — clear the footer so we stop
-                // showing what was playing when the ATV was last reachable.
-                connection.resetNowPlayingState()
-                return
-            }
             self.retryCount += 1
             let attempt = self.retryCount
             let target = discovery.devices.first { $0.id == device.id } ?? device
@@ -143,7 +128,7 @@ final class AutoReconnector: ObservableObject {
                 self.isReconnecting = false
                 return
             }
-            Log.companion.report("AutoReconnector: connecting (attempt \(attempt)/\(self.maxRetries), delay=\(delay)s)")
+            Log.companion.report("AutoReconnector: connecting (attempt \(attempt), delay=\(delay)s)")
             connection.wakeAndConnect(to: target)
             self.retryTask = nil
         }
