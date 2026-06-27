@@ -141,13 +141,13 @@ struct AppLauncherView: View {
         }
     }
 
-    // Key codes: left=123 right=124 down=125 up=126 return=36 r=15 tab=48
+    // Key codes: left=123 right=124 down=125 up=126 return=36 dismiss=15 tab=48
     private func handleKey(_ keyCode: UInt16, apps: [(id: String, name: String)], cols: Int) {
         if keyCode == 48 {  // Tab → focus search (ignored if already focused)
             if !searchFocused { searchFocused = true }
             return
         }
-        if keyCode == 15 {
+        if keyCode == 15 {  // dismiss (⌃A / ⌃R)
             withAnimation(.easeInOut(duration: 0.18)) { showAppLauncher = false }
             return
         }
@@ -250,20 +250,18 @@ private struct KeyMonitor: NSViewRepresentable {
             if window != nil {
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                     let code = event.keyCode
+                    let ctrl = event.modifierFlags.contains(.control)
+                    // ⌃A / ⌃R dismiss the launcher (symmetric with ⌃A to show it)
+                    if ctrl, let ch = event.charactersIgnoringModifiers?.lowercased(),
+                       ch == "a" || ch == "r" {
+                        DispatchQueue.main.async { self?.onKey?(15) }  // 15 = dismiss
+                        return nil
+                    }
                     // Escape: if search field is focused, let NoTabTextField handle it (clears text)
                     if code == 53 {
                         let inField = (event.window?.firstResponder as? NSText) != nil
                         if inField { return event }  // let the text field consume it
                         return event  // otherwise let it propagate normally
-                    }
-                    // 'r' exits launcher unless a text field has focus
-                    if code == 15 {
-                        let inField = (event.window?.firstResponder as? NSText) != nil
-                        if !inField {
-                            DispatchQueue.main.async { self?.onKey?(code) }
-                            return nil
-                        }
-                        return event
                     }
                     // Tab focuses search; consumed entirely (no focus iteration)
                     if code == 48 {

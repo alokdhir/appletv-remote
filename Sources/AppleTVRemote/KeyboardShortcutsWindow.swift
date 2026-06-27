@@ -40,6 +40,7 @@ private let shortcutGroups: [ShortcutGroup] = [
     ]),
     ShortcutGroup(title: "System", entries: [
         Shortcut(keys: "⌃A",     description: "Apps grid"),
+        Shortcut(keys: "⌃R",     description: "Remote"),
         Shortcut(keys: "⌃H",     description: "Home (hold for Control Center)"),
         Shortcut(keys: "⌃M",     description: "Menu / Back (hold for long-press)"),
         Shortcut(keys: "Delete", description: "Backspace (when ATV text input is active)"),

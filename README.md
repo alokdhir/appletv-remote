@@ -10,7 +10,7 @@ A macOS app that discovers and controls Apple TVs on the local network via the *
 - **Keyboard text input** — type into active Apple TV text fields from the Mac
 - **`atv` CLI** — scriptable control from the terminal or shell scripts
 - **Auto-reconnect** — reconnects automatically when the Apple TV becomes reachable
-- **Keyboard shortcuts** — `⌃A` to open app grid, `R` to return to remote, arrow keys to navigate apps; full list in the menu-bar icon's right-click menu
+- **Keyboard shortcuts** — `⌃A` to open app grid, `⌃R` to return to remote, arrow keys to navigate apps; full list in the menu-bar icon's right-click menu
 
 ## Screenshots
 
@@ -162,6 +162,7 @@ atv --standalone --device "Living Room" l
 | `Esc` | Menu / Back _(hold for long-press)_ |
 | `Space` | Play / Pause |
 | `⌃ A` | Open app launcher |
+| `⌃ R` | Return to remote |
 | `⌃ H` | Home _(hold for Control Center)_ |
 | `⌃ M` | Menu / Back _(hold for long-press)_ |
 | `⌃ P` | Play / Pause |
@@ -177,7 +178,7 @@ The letter shortcuts require Control so accidental key-presses don't fire comman
 | `↑ ↓ ← →` | Navigate app grid |
 | `Return` | Launch selected app |
 | `Tab` | Focus search field |
-| `R` | Return to remote |
+| `⌃R` / `⌃A` | Return to remote |
 
 ## Credential Storage
 

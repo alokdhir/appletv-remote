@@ -746,6 +746,8 @@ private final class KeyCatcherView: NSView {
             case "a":
                 if !event.isARepeat { onShowApps() }
                 return
+            case "r":
+                return  // already on remote; consumed so AppKit doesn't beep
             case "h":
                 handleHoldableKey(.home, event: event)
                 return
