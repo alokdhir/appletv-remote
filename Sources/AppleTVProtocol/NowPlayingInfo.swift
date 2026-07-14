@@ -93,15 +93,19 @@ public struct NowPlayingInfo: Equatable, Sendable {
     /// metadata for music ("A Night at the Opera" etc.) doesn't match the
     /// pattern and is preserved.
     ///
-    /// Amazon Prime Video adds a wrinkle: it packs an abbreviated label plus
-    /// the spelled-out one into a single album string, e.g. "Season 2, Ep. 5
-    /// Episode 5" — same synthetic index, just formatted redundantly. The
-    /// trailing `(\s+\p{L}+\.?\s+\d+)?` group absorbs that optional repeat so
-    /// it's dropped like any other catalog-injected season/episode value.
+    /// Amazon Prime Video adds redundant labeling on top: it packs an
+    /// abbreviated token plus a spelled-out one into a single string, and the
+    /// exact shape varies — "Season 2, Ep. 5 Episode 5", "S2 E6 Episode 6",
+    /// etc. Rather than enumerate every abbreviation Amazon might use, match
+    /// the general shape: two or more "letters(+optional period) then
+    /// digits" tokens (e.g. "Season 2", "S2", "Ep. 5", "E6", "Episode 6")
+    /// chained by a comma and/or whitespace. Any run of those is a
+    /// catalog-injected index, never real album text.
     public static func filterAlbum(_ album: String?) -> String? {
         guard let album else { return nil }
+        let token = #"\p{L}+\.?\s*\d+"#
         return album.range(
-            of: #"^\p{L}+\s+\d+,\s*\p{L}+\.?\s+\d+(\s+\p{L}+\.?\s+\d+)?$"#,
+            of: "^\(token)(?:(?:,\\s*|\\s+)\(token))+$",
             options: .regularExpression) != nil ? nil : album
     }
 }

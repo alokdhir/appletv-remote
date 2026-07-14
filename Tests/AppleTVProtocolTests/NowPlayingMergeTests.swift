@@ -234,6 +234,8 @@ final class NowPlayingMergeTests: XCTestCase {
     func testAlbumFilterDropsAmazonAbbreviatedAndFullEpisodeLabel() {
         XCTAssertNil(NowPlayingInfo.filterAlbum("Season 2, Ep. 5 Episode 5"))
         XCTAssertNil(NowPlayingInfo.filterAlbum("Season 1, Ep. 12 Episode 12"))
+        XCTAssertNil(NowPlayingInfo.filterAlbum("S2 E6 Episode 6"))
+        XCTAssertNil(NowPlayingInfo.filterAlbum("S1 E1 Episode 1"))
     }
 
     func testAlbumFilterKeepsRealAlbumTitle() {
