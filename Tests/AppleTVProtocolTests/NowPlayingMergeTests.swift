@@ -231,11 +231,14 @@ final class NowPlayingMergeTests: XCTestCase {
         XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 12,Episode 7"))
     }
 
-    func testAlbumFilterDropsAmazonAbbreviatedAndFullEpisodeLabel() {
-        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 2, Ep. 5 Episode 5"))
-        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 1, Ep. 12 Episode 12"))
-        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("S2 E6 Episode 6"))
-        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("S1 E1 Episode 1"))
+    func testAlbumFilterCollapsesAmazonRedundantEpisodeLabelToLastToken() {
+        // Amazon's redundant chains (3+ tokens: abbreviated season/episode
+        // markers plus the spelled-out episode) collapse to just the
+        // trailing spelled-out token instead of being dropped outright.
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 2, Ep. 5 Episode 5"), "Episode 5")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 1, Ep. 12 Episode 12"), "Episode 12")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S2 E6 Episode 6"), "Episode 6")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S1 E1 Episode 1"), "Episode 1")
     }
 
     func testAlbumFilterKeepsRealAlbumTitle() {
@@ -260,12 +263,12 @@ final class NowPlayingMergeTests: XCTestCase {
         XCTAssertEqual(out.info.album, "Kind of Blue")
     }
 
-    func testMergeArtistSeasonEpisodeLabelIsFiltered() {
+    func testMergeArtistRedundantEpisodeLabelIsCollapsed() {
         // Amazon Prime Video puts the redundant season/episode label in the
         // artist field for some titles instead of album.
         let input = NowPlayingMergeInput(artist: "S2 E6 Episode 6")
         let out = merge(input)
-        XCTAssertNil(out.info.artist, "Season/Episode artist must be dropped by merge")
+        XCTAssertEqual(out.info.artist, "Episode 6", "Redundant prefix should collapse, keeping the episode label")
     }
 
     func testMergeRealArtistIsPreserved() {

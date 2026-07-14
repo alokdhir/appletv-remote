@@ -95,20 +95,31 @@ public struct NowPlayingInfo: Equatable, Sendable {
     /// match the pattern and is preserved.
     ///
     /// Applied to both `album` and `artist`: Amazon Prime Video puts this
-    /// synthetic label in whichever field varies per title, and it's also
-    /// internally redundant — an abbreviated token plus a spelled-out one
-    /// packed into one string, shape varying by title: "Season 2, Ep. 5
-    /// Episode 5", "S2 E6 Episode 6", etc. Rather than enumerate every
-    /// abbreviation Amazon might use, match the general shape: two or more
-    /// "letters(+optional period) then digits" tokens (e.g. "Season 2",
-    /// "S2", "Ep. 5", "E6", "Episode 6") chained by a comma and/or
-    /// whitespace. Any run of those is a catalog-injected index, never real
-    /// album/artist text.
+    /// synthetic label in whichever field varies per title, and unlike
+    /// Apple's plain two-token form it's internally redundant — an
+    /// abbreviated season/episode token (or two) followed by the same
+    /// episode spelled out in full: "Season 2, Ep. 5 Episode 5", "S2 E6
+    /// Episode 6", etc. That trailing spelled-out token is the one worth
+    /// keeping, so a 3+ token chain collapses down to just its last token
+    /// instead of being dropped outright. A plain 2-token chain (no
+    /// abbreviation, just "Season N, Episode N") has no redundancy to
+    /// collapse — that's Apple's original unreliable-index case, so it's
+    /// still dropped entirely.
     public static func filterSeasonEpisode(_ value: String?) -> String? {
         guard let value else { return nil }
         let token = #"\p{L}+\.?\s*\d+"#
-        return value.range(
-            of: "^\(token)(?:(?:,\\s*|\\s+)\(token))+$",
-            options: .regularExpression) != nil ? nil : value
+        guard let regex = try? NSRegularExpression(
+            pattern: "^\(token)(?:(?:,\\s*|\\s+)\(token))+$"
+        ), regex.firstMatch(
+            in: value, range: NSRange(value.startIndex..., in: value)
+        ) != nil else {
+            return value
+        }
+        guard let tokenRegex = try? NSRegularExpression(pattern: token) else { return nil }
+        let matches = tokenRegex.matches(in: value, range: NSRange(value.startIndex..., in: value))
+        guard matches.count >= 3, let last = matches.last, let range = Range(last.range, in: value) else {
+            return nil
+        }
+        return String(value[range])
     }
 }
