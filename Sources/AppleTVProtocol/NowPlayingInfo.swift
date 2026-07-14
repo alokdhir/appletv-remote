@@ -58,8 +58,9 @@ public struct NowPlayingInfo: Equatable, Sendable {
             return nil
         }
         self.title        = str("title", "kMRMediaRemoteNowPlayingInfoTitle")
-        self.artist       = str("artist", "kMRMediaRemoteNowPlayingInfoArtist")
-        self.album        = NowPlayingInfo.filterAlbum(
+        self.artist       = NowPlayingInfo.filterSeasonEpisode(
+            str("artist", "kMRMediaRemoteNowPlayingInfoArtist"))
+        self.album        = NowPlayingInfo.filterSeasonEpisode(
             str("album", "kMRMediaRemoteNowPlayingInfoAlbum"))
         self.app          = str("clientName", "displayName", "bundleIdentifier")
         self.elapsedTime  = num("elapsedTime", "kMRMediaRemoteNowPlayingInfoElapsedTime")
@@ -86,26 +87,28 @@ public struct NowPlayingInfo: Equatable, Sendable {
         return last.isEmpty ? bid : last
     }
 
-    /// Drop "Season N, Episode N" album values that Apple TV's catalog injects
-    /// for video content. Those numbers are the catalog's internal index, not
-    /// the show's real season/episode (we've seen the same "Season 8,
-    /// Episode 3" string attached to two unrelated shows). Real album
-    /// metadata for music ("A Night at the Opera" etc.) doesn't match the
-    /// pattern and is preserved.
+    /// Drop "Season N, Episode N"-shaped values that Apple TV's catalog
+    /// injects for video content. Those numbers are the catalog's internal
+    /// index, not the show's real season/episode (we've seen the same
+    /// "Season 8, Episode 3" string attached to two unrelated shows). Real
+    /// album/artist metadata for music ("A Night at the Opera" etc.) doesn't
+    /// match the pattern and is preserved.
     ///
-    /// Amazon Prime Video adds redundant labeling on top: it packs an
-    /// abbreviated token plus a spelled-out one into a single string, and the
-    /// exact shape varies — "Season 2, Ep. 5 Episode 5", "S2 E6 Episode 6",
-    /// etc. Rather than enumerate every abbreviation Amazon might use, match
-    /// the general shape: two or more "letters(+optional period) then
-    /// digits" tokens (e.g. "Season 2", "S2", "Ep. 5", "E6", "Episode 6")
-    /// chained by a comma and/or whitespace. Any run of those is a
-    /// catalog-injected index, never real album text.
-    public static func filterAlbum(_ album: String?) -> String? {
-        guard let album else { return nil }
+    /// Applied to both `album` and `artist`: Amazon Prime Video puts this
+    /// synthetic label in whichever field varies per title, and it's also
+    /// internally redundant — an abbreviated token plus a spelled-out one
+    /// packed into one string, shape varying by title: "Season 2, Ep. 5
+    /// Episode 5", "S2 E6 Episode 6", etc. Rather than enumerate every
+    /// abbreviation Amazon might use, match the general shape: two or more
+    /// "letters(+optional period) then digits" tokens (e.g. "Season 2",
+    /// "S2", "Ep. 5", "E6", "Episode 6") chained by a comma and/or
+    /// whitespace. Any run of those is a catalog-injected index, never real
+    /// album/artist text.
+    public static func filterSeasonEpisode(_ value: String?) -> String? {
+        guard let value else { return nil }
         let token = #"\p{L}+\.?\s*\d+"#
-        return album.range(
+        return value.range(
             of: "^\(token)(?:(?:,\\s*|\\s+)\(token))+$",
-            options: .regularExpression) != nil ? nil : album
+            options: .regularExpression) != nil ? nil : value
     }
 }

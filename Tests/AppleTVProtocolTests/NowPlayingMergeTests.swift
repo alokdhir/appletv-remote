@@ -226,26 +226,26 @@ final class NowPlayingMergeTests: XCTestCase {
     // MARK: - Album filter
 
     func testAlbumFilterDropsSeasonEpisode() {
-        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 1, Episode 5"))
-        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 8, Episode 3"))
-        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 12,Episode 7"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 1, Episode 5"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 8, Episode 3"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 12,Episode 7"))
     }
 
     func testAlbumFilterDropsAmazonAbbreviatedAndFullEpisodeLabel() {
-        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 2, Ep. 5 Episode 5"))
-        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 1, Ep. 12 Episode 12"))
-        XCTAssertNil(NowPlayingInfo.filterAlbum("S2 E6 Episode 6"))
-        XCTAssertNil(NowPlayingInfo.filterAlbum("S1 E1 Episode 1"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 2, Ep. 5 Episode 5"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 1, Ep. 12 Episode 12"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("S2 E6 Episode 6"))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("S1 E1 Episode 1"))
     }
 
     func testAlbumFilterKeepsRealAlbumTitle() {
-        XCTAssertEqual(NowPlayingInfo.filterAlbum("A Night at the Opera"), "A Night at the Opera")
-        XCTAssertEqual(NowPlayingInfo.filterAlbum("Abbey Road"), "Abbey Road")
-        XCTAssertEqual(NowPlayingInfo.filterAlbum("1989"), "1989")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("A Night at the Opera"), "A Night at the Opera")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Abbey Road"), "Abbey Road")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("1989"), "1989")
     }
 
     func testAlbumFilterNilPassthrough() {
-        XCTAssertNil(NowPlayingInfo.filterAlbum(nil))
+        XCTAssertNil(NowPlayingInfo.filterSeasonEpisode(nil))
     }
 
     func testMergeAlbumInjectedFieldIsFiltered() {
@@ -258,6 +258,20 @@ final class NowPlayingMergeTests: XCTestCase {
         let input = NowPlayingMergeInput(album: "Kind of Blue")
         let out = merge(input)
         XCTAssertEqual(out.info.album, "Kind of Blue")
+    }
+
+    func testMergeArtistSeasonEpisodeLabelIsFiltered() {
+        // Amazon Prime Video puts the redundant season/episode label in the
+        // artist field for some titles instead of album.
+        let input = NowPlayingMergeInput(artist: "S2 E6 Episode 6")
+        let out = merge(input)
+        XCTAssertNil(out.info.artist, "Season/Episode artist must be dropped by merge")
+    }
+
+    func testMergeRealArtistIsPreserved() {
+        let input = NowPlayingMergeInput(artist: "Miles Davis")
+        let out = merge(input)
+        XCTAssertEqual(out.info.artist, "Miles Davis")
     }
 
     // MARK: - liveElapsed clamps to duration

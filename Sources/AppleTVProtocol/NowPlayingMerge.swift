@@ -122,8 +122,8 @@ extension NowPlayingInfo {
         }
 
         if let v = input.title       { info.title       = v }
-        if let v = input.artist      { info.artist      = v }
-        if let v = input.album       { info.album       = NowPlayingInfo.filterAlbum(v) }
+        if let v = input.artist      { info.artist      = NowPlayingInfo.filterSeasonEpisode(v) }
+        if let v = input.album       { info.album       = NowPlayingInfo.filterSeasonEpisode(v) }
         if let v = input.app         { info.app         = v }
         if let v = input.duration    { info.duration    = v }
         if let v = input.elapsedTime { info.elapsedTime = v }
