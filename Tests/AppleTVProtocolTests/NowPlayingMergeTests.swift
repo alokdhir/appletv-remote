@@ -231,6 +231,11 @@ final class NowPlayingMergeTests: XCTestCase {
         XCTAssertNil(NowPlayingInfo.filterAlbum("Season 12,Episode 7"))
     }
 
+    func testAlbumFilterDropsAmazonAbbreviatedAndFullEpisodeLabel() {
+        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 2, Ep. 5 Episode 5"))
+        XCTAssertNil(NowPlayingInfo.filterAlbum("Season 1, Ep. 12 Episode 12"))
+    }
+
     func testAlbumFilterKeepsRealAlbumTitle() {
         XCTAssertEqual(NowPlayingInfo.filterAlbum("A Night at the Opera"), "A Night at the Opera")
         XCTAssertEqual(NowPlayingInfo.filterAlbum("Abbey Road"), "Abbey Road")

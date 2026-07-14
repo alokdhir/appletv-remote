@@ -92,9 +92,16 @@ public struct NowPlayingInfo: Equatable, Sendable {
     /// Episode 3" string attached to two unrelated shows). Real album
     /// metadata for music ("A Night at the Opera" etc.) doesn't match the
     /// pattern and is preserved.
+    ///
+    /// Amazon Prime Video adds a wrinkle: it packs an abbreviated label plus
+    /// the spelled-out one into a single album string, e.g. "Season 2, Ep. 5
+    /// Episode 5" — same synthetic index, just formatted redundantly. The
+    /// trailing `(\s+\p{L}+\.?\s+\d+)?` group absorbs that optional repeat so
+    /// it's dropped like any other catalog-injected season/episode value.
     public static func filterAlbum(_ album: String?) -> String? {
         guard let album else { return nil }
-        return album.range(of: #"^\p{L}+\s+\d+,\s*\p{L}+\s+\d+$"#,
-                           options: .regularExpression) != nil ? nil : album
+        return album.range(
+            of: #"^\p{L}+\s+\d+,\s*\p{L}+\.?\s+\d+(\s+\p{L}+\.?\s+\d+)?$"#,
+            options: .regularExpression) != nil ? nil : album
     }
 }
