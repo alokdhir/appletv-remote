@@ -231,14 +231,15 @@ final class NowPlayingMergeTests: XCTestCase {
         XCTAssertNil(NowPlayingInfo.filterSeasonEpisode("Season 12,Episode 7"))
     }
 
-    func testAlbumFilterCollapsesAmazonRedundantEpisodeLabelToLastToken() {
-        // Amazon's redundant chains (3+ tokens: abbreviated season/episode
-        // markers plus the spelled-out episode) collapse to just the
-        // trailing spelled-out token instead of being dropped outright.
-        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 2, Ep. 5 Episode 5"), "Episode 5")
-        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 1, Ep. 12 Episode 12"), "Episode 12")
-        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S2 E6 Episode 6"), "Episode 6")
-        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S1 E1 Episode 1"), "Episode 1")
+    func testAlbumFilterKeepsSeasonAndCollapsesRedundantEpisodeAbbreviation() {
+        // Amazon's redundant chains (3+ tokens: season, then one or more
+        // abbreviated episode markers, then the spelled-out episode) keep
+        // the season token and the trailing spelled-out episode token, and
+        // drop only the redundant middle abbreviation(s).
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 2, Ep. 5 Episode 5"), "Season 2 Episode 5")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("Season 1, Ep. 12 Episode 12"), "Season 1 Episode 12")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S2 E6 Episode 6"), "S2 Episode 6")
+        XCTAssertEqual(NowPlayingInfo.filterSeasonEpisode("S1 E1 Episode 1"), "S1 Episode 1")
     }
 
     func testAlbumFilterKeepsRealAlbumTitle() {
@@ -268,7 +269,7 @@ final class NowPlayingMergeTests: XCTestCase {
         // artist field for some titles instead of album.
         let input = NowPlayingMergeInput(artist: "S2 E6 Episode 6")
         let out = merge(input)
-        XCTAssertEqual(out.info.artist, "Episode 6", "Redundant prefix should collapse, keeping the episode label")
+        XCTAssertEqual(out.info.artist, "S2 Episode 6", "Season + episode should be kept, only the redundant abbreviation dropped")
     }
 
     func testMergeRealArtistIsPreserved() {

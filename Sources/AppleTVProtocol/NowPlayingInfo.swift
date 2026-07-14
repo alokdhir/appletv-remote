@@ -96,15 +96,15 @@ public struct NowPlayingInfo: Equatable, Sendable {
     ///
     /// Applied to both `album` and `artist`: Amazon Prime Video puts this
     /// synthetic label in whichever field varies per title, and unlike
-    /// Apple's plain two-token form it's internally redundant — an
-    /// abbreviated season/episode token (or two) followed by the same
-    /// episode spelled out in full: "Season 2, Ep. 5 Episode 5", "S2 E6
-    /// Episode 6", etc. That trailing spelled-out token is the one worth
-    /// keeping, so a 3+ token chain collapses down to just its last token
-    /// instead of being dropped outright. A plain 2-token chain (no
-    /// abbreviation, just "Season N, Episode N") has no redundancy to
-    /// collapse — that's Apple's original unreliable-index case, so it's
-    /// still dropped entirely.
+    /// Apple's plain two-token form it's internally redundant — a season
+    /// token, then one or more abbreviated episode tokens that all repeat
+    /// the same number as a final spelled-out one: "Season 2, Ep. 5 Episode
+    /// 5", "S2 E6 Episode 6", etc. The season token and the trailing
+    /// spelled-out episode token are both real information worth keeping
+    /// ("S2 Episode 6"); only the redundant middle abbreviation(s) are
+    /// dropped. A plain 2-token chain (no abbreviation, just "Season N,
+    /// Episode N") has no redundancy to collapse — that's Apple's original
+    /// unreliable-index case, so it's still dropped entirely.
     public static func filterSeasonEpisode(_ value: String?) -> String? {
         guard let value else { return nil }
         let token = #"\p{L}+\.?\s*\d+"#
@@ -117,9 +117,13 @@ public struct NowPlayingInfo: Equatable, Sendable {
         }
         guard let tokenRegex = try? NSRegularExpression(pattern: token) else { return nil }
         let matches = tokenRegex.matches(in: value, range: NSRange(value.startIndex..., in: value))
-        guard matches.count >= 3, let last = matches.last, let range = Range(last.range, in: value) else {
+        guard matches.count >= 3,
+              let first = matches.first, let last = matches.last,
+              let firstRange = Range(first.range, in: value),
+              let lastRange = Range(last.range, in: value)
+        else {
             return nil
         }
-        return String(value[range])
+        return "\(value[firstRange]) \(value[lastRange])"
     }
 }
