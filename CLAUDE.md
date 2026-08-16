@@ -6,30 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Short sentences. Only necessary words. No preamble, no recap, no filler.
 
-## Tooling: rtk (required)
-
-This repo's `crush.json` registers a `PreToolUse` hook
-(`hooks/rtk-rewrite.sh`) that pipes bash commands through
-[`rtk`](https://github.com/rtk-ai/rtk) — a CLI proxy that filters
-verbose output (git, ls, grep, swift, xcodebuild, …) down to just the
-signal an LLM needs. Lower token counts, faster turns.
-
-Install (macOS):
-
-```bash
-brew install rtk
-```
-
-Without `rtk` on `PATH` the hook no-ops (commands run unfiltered) — but
-you'll burn tokens on noisy build/test output. Project-specific
-extension: the hook wraps `xcodebuild build/clean/archive/...` in
-`rtk err` and `xcodebuild test` (incl. `-only-testing:`) in
-`rtk test`, since rtk has no native xcodebuild proxy.
-
-Introspection invocations (`xcodebuild -list`, `-showBuildSettings`,
-`-version`) and already-`rtk`-prefixed commands are passed through
-unchanged.
-
 ## Git commits
 
 Do NOT add "Assisted-by", "Co-Authored-By", or any attribution lines to commit messages.
@@ -181,17 +157,23 @@ This is a SwiftUI macOS app that discovers and controls Apple TVs on the local n
 
 ## Issue tracking
 
-This project uses **bd (beads)** for all issue tracking. Do NOT create markdown TODO lists. Run `bd prime` for full workflow context.
+This project uses **trekker** for all issue tracking. Do NOT create markdown TODO lists.
+Data lives in `.trekker/trekker.db` (no separate daemon required).
 
 ```bash
-bd ready                    # find available work
-bd show <id>                # view issue details
-bd update <id> --claim      # claim work atomically
-bd close <id>               # complete work
+trekker ready                        # find available work
+trekker task show <id>               # view task details
+trekker task update <id> -s in_progress  # claim work
+trekker task update <id> -s completed    # complete work
+trekker quickstart                   # full workflow reference
 ```
 
-- Use `bd` for ALL task tracking — do NOT use markdown TODO lists
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `trekker` for ALL task tracking — do NOT use markdown TODO lists
+- Persistent knowledge (former "bd remember" facts) lives under the **Project Memory**
+  epic (`EPIC-1`) as completed tasks tagged `memory`. Search with
+  `trekker search "<keyword>" --type task`. Add a new one with:
+  `trekker task create -t "<short-key>" -d "<insight>" -e EPIC-1 --tags memory -s completed`
+- Do NOT use MEMORY.md files
 
 ## Shell safety
 

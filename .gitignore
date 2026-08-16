@@ -6,13 +6,14 @@ dist/
 *.swp
 .DS_Store
 
-# Dolt database files (added by bd init)
+# Dolt database files (formerly used by bd init)
 .dolt/
 *.db
 .beads/
+.trekker/
 .claude/
 
-# Beads / Dolt files (added by bd init)
+# Beads / Dolt files (legacy, from bd init)
 .beads-credential-key
 AppleTVRemote.xcodeproj/project.xcworkspace/
 AppleTVRemote.xcodeproj/xcuserdata/

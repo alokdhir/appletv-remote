@@ -1,18 +1,22 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
+This project uses **trekker** for issue tracking. Run `trekker quickstart` for full workflow context.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
+trekker ready                            # Find available work
+trekker task show <id>                   # View task details
+trekker task update <id> -s in_progress  # Claim work
+trekker task update <id> -s completed    # Complete work
 ```
 
-- Use `bd` for ALL task tracking — do NOT use markdown TODO lists
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `trekker` for ALL task tracking — do NOT use markdown TODO lists
+- Persistent knowledge lives under the **Project Memory** epic (`EPIC-1`) as
+  completed tasks tagged `memory`. Search with
+  `trekker search "<keyword>" --type task`. Add a new one with:
+  `trekker task create -t "<short-key>" -d "<insight>" -e EPIC-1 --tags memory -s completed`
+- Do NOT use MEMORY.md files
 
 ## Building & Testing
 

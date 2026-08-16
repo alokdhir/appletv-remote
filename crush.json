@@ -4,14 +4,5 @@
     "swift": {
       "command": "sourcekit-lsp"
     }
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^bash$",
-        "command": "./hooks/rtk-rewrite.sh",
-        "timeout": 5
-      }
-    ]
   }
 }
