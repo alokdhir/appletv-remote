@@ -290,7 +290,7 @@ final class CompanionConnection: ObservableObject {
 
         let boundSrc = PrimaryInterface.bindSourceAddress(fd: fd, logHost: host)
         if boundSrc == nil {
-            Log.companion.report("probeReachability: bindSourceAddress returned nil for \(host)")
+            Log.companion.trace("probeReachability: bindSourceAddress returned nil for \(host)")
         }
 
         let flags = fcntl(fd, F_GETFL, 0)
@@ -311,7 +311,7 @@ final class CompanionConnection: ObservableObject {
         if result == 0 { return .reachable }
         if errno != EINPROGRESS {
             let immediateErr = errno
-            Log.companion.report("probeReachability: connect() returned \(result), errno \(immediateErr) (\(String(cString: strerror(immediateErr))))")
+            Log.companion.trace("probeReachability: connect() returned \(result), errno \(immediateErr) (\(String(cString: strerror(immediateErr))))")
             // Some non-blocking stacks complete the RST synchronously
             // before EINPROGRESS — surface ECONNREFUSED as .refused.
             return immediateErr == ECONNREFUSED ? .refused : .unreachable
@@ -321,7 +321,7 @@ final class CompanionConnection: ObservableObject {
         let ms    = Int32(timeoutSeconds * 1000)
         let ready = poll(&pfd, 1, ms)
         if ready <= 0 {
-            Log.companion.report("probeReachability: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
+            Log.companion.trace("probeReachability: poll() returned \(ready) (timeout \(ms)ms), errno \(errno)")
             return .unreachable
         }
 
@@ -329,7 +329,7 @@ final class CompanionConnection: ObservableObject {
         var len = socklen_t(MemoryLayout<Int32>.size)
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
         if err == 0 { return .reachable }
-        Log.companion.report("probeReachability: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
+        Log.companion.trace("probeReachability: SO_ERROR=\(err) (\(String(cString: strerror(err))))")
         // ECONNREFUSED → host alive, port refusing. Skip WoL.
         return err == ECONNREFUSED ? .refused : .unreachable
     }

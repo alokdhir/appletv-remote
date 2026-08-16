@@ -158,7 +158,7 @@ public enum PrimaryInterface {
         }
         if let host = logHost {
             let ipStr = String(cString: inet_ntoa(addr))
-            Log.companion.report("Bound source IP \(ipStr) (\(name)) for \(host)")
+            Log.companion.trace("Bound source IP \(ipStr) (\(name)) for \(host)")
         }
         return name
     }
@@ -183,7 +183,7 @@ public enum PrimaryInterface {
             return nil
         }
         if let host = logHost {
-            Log.companion.report("Bound socket to \(name) (idx=\(idx)) for \(host)")
+            Log.companion.trace("Bound socket to \(name) (idx=\(idx)) for \(host)")
         }
         return name
     }

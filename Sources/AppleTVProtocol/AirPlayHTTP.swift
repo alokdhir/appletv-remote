@@ -62,7 +62,7 @@ public final class AirPlayHTTP: @unchecked Sendable {
     private var detachedSink: ((Data?, Error?, Bool) -> Void)?
 
     private func trace(_ msg: String) {
-        Log.pairing.report("AirPlayHTTP: \(msg)")
+        Log.pairing.trace("AirPlayHTTP: \(msg)")
         if verbose { FileHandle.standardError.write(Data("    [http] \(msg)\n".utf8)) }
     }
 

@@ -85,7 +85,7 @@ public final class AirPlayEventChannel: @unchecked Sendable {
             }
 
             let statusLine = String(lines.first ?? "?")
-            Log.pairing.report("EventChannel: rx \(statusLine) (body=\(contentLength)B)")
+            Log.pairing.trace("EventChannel: rx \(statusLine) (body=\(contentLength)B)")
 
             // Consume from buffer.
             plainBuffer = Data(plainBuffer[bodyEnd...])

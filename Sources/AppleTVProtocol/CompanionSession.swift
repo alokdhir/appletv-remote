@@ -558,7 +558,7 @@ public final class CompanionSession {
             if let inner = msg["_c"] as? [String: Any],
                let st = inner["state"] as? Int {
                 delegate?.sessionDidUpdateAttentionState(st)
-                Log.companion.report("Companion: attentionState=\(st)")
+                Log.companion.trace("Companion: attentionState=\(st)")
             }
         default:
             let msgType = msg["_t"] as? Int ?? 0
@@ -587,7 +587,7 @@ public final class CompanionSession {
                let inner = msg["_c"] as? [String: Any],
                let st = inner["state"] as? Int {
                 delegate?.sessionDidUpdateAttentionState(st)
-                Log.companion.report("Companion: attentionState=\(st)")
+                Log.companion.trace("Companion: attentionState=\(st)")
             }
         }
     }

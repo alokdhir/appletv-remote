@@ -262,7 +262,7 @@ public final class MRPDataChannel: @unchecked Sendable {
             let msg = Data(mrpFrames[mrpFrames.index(mrpFrames.startIndex, offsetBy: o)..<mrpFrames.index(mrpFrames.startIndex, offsetBy: end)])
             offset = end
             let msgType = MRPDecoder.messageType(from: msg) ?? 0
-            Log.pairing.report("MRPDataChannel: rx MRP type=\(msgType) (\(msg.count)B)")
+            Log.pairing.trace("MRPDataChannel: rx MRP type=\(msgType) (\(msg.count)B)")
             onMessage?(msg)
         }
     }
