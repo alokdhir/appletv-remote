@@ -35,6 +35,23 @@ public enum PrimaryInterface {
         return name
     }
 
+    /// The default IPv4 gateway (router) address, or `nil` if no default
+    /// route is configured. Read from the same `SCDynamicStore` key as
+    /// `name()`, so it's consistent with what `route get` and the primary
+    /// interface actually use.
+    public static func gatewayIPv4() -> in_addr? {
+        guard let store = SCDynamicStoreCreate(nil,
+                                               "com.adhir.appletv-remote.primary-iface" as CFString,
+                                               nil, nil),
+              let dict  = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString)
+                            as? [String: Any],
+              let router = dict["Router"] as? String
+        else { return nil }
+        var addr = in_addr()
+        guard inet_pton(AF_INET, router, &addr) == 1 else { return nil }
+        return addr
+    }
+
     /// `if_nametoindex` of the primary interface, or `nil` if unavailable.
     public static func index() -> UInt32? {
         guard let name = name() else { return nil }
@@ -69,11 +86,23 @@ public enum PrimaryInterface {
         return nil
     }
 
-    /// The IPv4 address of `interfaceName` as an `in_addr`, or `nil`.
+    /// The IPv4 address of `interfaceName` as an `in_addr`.
+    ///
+    /// An interface can carry more than one IPv4 address (secondary aliases
+    /// added for VPNs, bridges, etc.). When that happens we must pick the
+    /// one that's actually routable to the LAN — i.e. the one whose subnet
+    /// contains the default gateway — rather than whichever `getifaddrs`
+    /// happens to list first, which can be a stale/unrelated alias and send
+    /// every outbound packet down the wrong subnet.
     public static func ipv4Address(of interfaceName: String) -> in_addr? {
         var ifap: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifap) == 0 else { return nil }
         defer { freeifaddrs(ifap) }
+
+        let gateway = gatewayIPv4()
+        var firstMatch: in_addr?
+        var gatewayMatch: in_addr?
+
         var cur = ifap
         while let p = cur {
             defer { cur = p.pointee.ifa_next }
@@ -82,9 +111,19 @@ public enum PrimaryInterface {
                   let addr = p.pointee.ifa_addr,
                   addr.pointee.sa_family == sa_family_t(AF_INET)
             else { continue }
-            return addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            if firstMatch == nil { firstMatch = sin }
+
+            if let gateway,
+               let mask = p.pointee.ifa_netmask,
+               mask.pointee.sa_family == sa_family_t(AF_INET) {
+                let maskAddr = mask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+                if (sin.s_addr & maskAddr.s_addr) == (gateway.s_addr & maskAddr.s_addr) {
+                    gatewayMatch = sin
+                }
+            }
         }
-        return nil
+        return gatewayMatch ?? firstMatch
     }
 
     /// Bind the socket to the primary interface's IPv4 address via `bind(2)`,
