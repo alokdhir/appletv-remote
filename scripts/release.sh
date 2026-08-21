@@ -8,8 +8,8 @@
 #
 # What it does:
 #   1. Sanity-checks the working tree is clean and we're on main.
-#   2. Tags the current commit with the supplied version.
-#   3. Builds the signed + notarized DMG via build-dmg.sh.
+#   2. Builds the signed + notarized DMG via build-dmg.sh.
+#   3. Tags the current commit with the supplied version.
 #   4. Pushes the tag.
 #   5. Creates a GitHub release attaching the DMG.
 #
@@ -79,11 +79,19 @@ echo
 echo "==> Tagging $VERSION (local)"
 git tag -a "$VERSION" -m "Release $VERSION"
 
+# ── Push tag ──────────────────────────────────────────────────────────────
+# `gh release create` on current `gh` versions refuses to operate on a
+# local-only tag ("tag exists locally but has not been pushed"), so push
+# it to origin first, then create the release against the pushed tag.
+echo
+echo "==> Pushing tag $VERSION to origin"
+if ! git push origin "$VERSION"; then
+    echo "release: failed to push tag $VERSION — leaving local tag in place" >&2
+    echo "release: delete it with 'git tag -d $VERSION' if you want to retry" >&2
+    exit 1
+fi
+
 # ── GitHub release ────────────────────────────────────────────────────────
-# Order is deliberate: create the release + upload the DMG BEFORE pushing
-# the tag. If the upload or release-create fails, we don't end up with a
-# tag on origin pointing at no release. `gh release create` works on a
-# local-only tag and pushes it as part of asset upload.
 echo
 echo "==> Creating GitHub release $VERSION + uploading DMG"
 release_args=("$VERSION" "$DMG_PATH" --title "$VERSION")
@@ -94,17 +102,11 @@ else
 fi
 
 if ! gh release create "${release_args[@]}"; then
-    echo "release: gh release create failed — leaving local tag in place" >&2
-    echo "release: delete it with 'git tag -d $VERSION' if you want to retry" >&2
+    echo "release: gh release create failed — tag $VERSION is already pushed to origin" >&2
+    echo "release: rerun 'gh release create $VERSION $DMG_PATH --title $VERSION --generate-notes' to retry" >&2
+    echo "release: or delete the tag with 'git tag -d $VERSION && git push origin :refs/tags/$VERSION' to fully roll back" >&2
     exit 1
 fi
-
-# ── Push tag (gh already pushed it as part of release create, but make
-#    sure local refs are visible explicitly so 'git pull' on other clones
-#    sees the tag without --tags). Idempotent.
-echo
-echo "==> Pushing tag $VERSION to origin"
-git push origin "$VERSION"
 
 echo
 echo "✓ Released $VERSION"
