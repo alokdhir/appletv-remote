@@ -202,14 +202,26 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             fmt.timeZone = TimeZone.current
             return fmt.string(from: mtime)
         }()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraph,
+        ]
+        let repoURL = URL(string: "https://github.com/alokdhir/appletv-remote")!
+        let credits = NSMutableAttributedString(
+            string: "Control your AppleTV(s) from your Mac.\n",
+            attributes: baseAttrs
+        )
+        var linkAttrs = baseAttrs
+        linkAttrs[.link] = repoURL
+        credits.append(NSAttributedString(string: "github.com/alokdhir/appletv-remote", attributes: linkAttrs))
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Apple TV Remote",
             .applicationVersion: "\(AppVersion.major)-\(stamp)",
             .version: "",
-            .credits: NSAttributedString(
-                string: "Control your AppleTV(s) from your Mac.",
-                attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
-            )
+            .credits: credits
         ])
     }
 
