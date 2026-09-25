@@ -169,7 +169,7 @@ trekker quickstart                   # full workflow reference
 ```
 
 - Use `trekker` for ALL task tracking — do NOT use markdown TODO lists
-- Persistent knowledge (former "bd remember" facts) lives under the **Project Memory**
+- Persistent knowledge lives under the **Project Memory**
   epic (`EPIC-1`) as completed tasks tagged `memory`. Search with
   `trekker search "<keyword>" --type task`. Add a new one with:
   `trekker task create -t "<short-key>" -d "<insight>" -e EPIC-1 --tags memory -s completed`
