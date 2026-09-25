@@ -93,6 +93,7 @@ class WindowSetupView: NSView {
         window.titlebarAppearsTransparent = true
         window.level = .normal
         window.collectionBehavior = [.fullScreenAuxiliary]
+        installTitlebarBlur(in: window)
 
         // Disable AppKit's saved-state restoration. macOS otherwise persists
         // the window frame to ~/Library/Saved Application State on ⌘Q and
@@ -197,6 +198,37 @@ class WindowSetupView: NSView {
             }
         }
     }
+}
+
+/// The titlebar strip (behind the traffic-light buttons) used to pick up a
+/// vibrant fill for free from AppKit whenever `titlebarAppearsTransparent`
+/// was set on a non-opaque window. Recent macOS versions stopped doing that,
+/// so with `isOpaque = false` / `backgroundColor = .clear` the strip is now
+/// literally see-through — you can see straight through to whatever's behind
+/// the window, with only the hairline window border left to mark its edges.
+/// Paint our own blur in there so it matches the translucency of the content
+/// area below (which gets its blur from the `VisualEffectBackground` sibling
+/// SwiftUI places behind `ContentView`), then draw a 1px hairline along the
+/// bottom edge so the titlebar still reads as a distinct region instead of
+/// fusing into one slab with the content. (`window.titlebarSeparatorStyle`
+/// doesn't help here — AppKit only draws that separator when the window has
+/// a toolbar, and this window doesn't have one.)
+@MainActor
+private func installTitlebarBlur(in window: NSWindow) {
+    guard let titlebarView = window.standardWindowButton(.closeButton)?.superview else { return }
+    guard !(titlebarView.subviews.first is NSVisualEffectView) else { return }
+    let blur = NSVisualEffectView(frame: titlebarView.bounds)
+    blur.autoresizingMask = [.width, .height]
+    blur.material = .underWindowBackground
+    blur.blendingMode = .behindWindow
+    blur.state = .active
+    titlebarView.addSubview(blur, positioned: .below, relativeTo: titlebarView.subviews.first)
+
+    let hairline = NSView(frame: NSRect(x: 0, y: 0, width: titlebarView.bounds.width, height: 1))
+    hairline.autoresizingMask = [.width]
+    hairline.wantsLayer = true
+    hairline.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
+    titlebarView.addSubview(hairline)
 }
 
 /// Background view that attaches window lifecycle hooks at the earliest possible point.
