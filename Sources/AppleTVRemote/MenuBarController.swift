@@ -16,6 +16,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var popover:          NSPopover?
     private var stateCancellable: AnyCancellable?
     weak var mainWindow:          NSWindow?
+    var openWindowAction:         OpenWindowAction?
     private weak var connection:  CompanionConnection?
 
     /// Set while `openMainWindow()` is transitioning from popover → main window.
@@ -118,7 +119,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
-            self.mainWindow?.makeKeyAndOrderFront(nil)
+            if let window = self.mainWindow, NSApp.windows.contains(window) {
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                window.alphaValue = 1
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                self.openWindowAction?(id: mainWindowSceneID)
+            }
         }
     }
 

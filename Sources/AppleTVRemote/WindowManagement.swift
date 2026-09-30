@@ -25,9 +25,22 @@ final class WindowHider: NSObject, NSWindowDelegate {
     var persistenceUnlocksAt: Date = .distantPast
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        persistFrame(sender, forced: true)
-        sender.orderOut(nil)
+        hide(sender)
         return false
+    }
+
+    /// Target of the red close button. SwiftUI can reclaim the window's
+    /// delegate, in which case `windowShouldClose` never runs and the window
+    /// is torn down for real; routing the button here keeps hide-on-close
+    /// working regardless of who owns the delegate.
+    @objc func closeButtonClicked(_ sender: NSButton) {
+        guard let window = sender.window else { return }
+        hide(window)
+    }
+
+    private func hide(_ window: NSWindow) {
+        persistFrame(window, forced: true)
+        window.orderOut(nil)
     }
 
     func windowDidMove(_ notification: Notification) {
@@ -72,6 +85,11 @@ final class WindowHider: NSObject, NSWindowDelegate {
 class WindowSetupView: NSView {
     private var observers: [NSObjectProtocol] = []
 
+    /// The startup hide only applies to the window created at launch. A
+    /// window recreated later (after SwiftUI actually closed the original)
+    /// was explicitly requested by the user and must stay visible.
+    private static var didHandleLaunchWindow = false
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {
@@ -81,6 +99,10 @@ class WindowSetupView: NSView {
         }
         guard let window else { return }
         window.delegate = WindowHider.shared
+        if let close = window.standardWindowButton(.closeButton) {
+            close.target = WindowHider.shared
+            close.action = #selector(WindowHider.closeButtonClicked(_:))
+        }
         // Store a direct reference so MenuBarController can show it reliably.
         MenuBarController.shared.mainWindow = window
 
@@ -182,9 +204,12 @@ class WindowSetupView: NSView {
         // + headroom). For hideWindowAtStartup=true (CLI/headless launches)
         // we orderOut instead of fading in — alpha is restored to 1 so the
         // next show (Dock click) appears normally.
-        let hide = UserDefaults.standard.object(forKey: "com.adhir.appletv-remote.hideWindowAtStartup") == nil
+        let isLaunchWindow = !Self.didHandleLaunchWindow
+        Self.didHandleLaunchWindow = true
+        let hideAtStartup = UserDefaults.standard.object(forKey: "com.adhir.appletv-remote.hideWindowAtStartup") == nil
             ? true
             : UserDefaults.standard.bool(forKey: "com.adhir.appletv-remote.hideWindowAtStartup")
+        let hide = isLaunchWindow && hideAtStartup
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak window] in
             guard let window else { return }
             if hide {
@@ -235,4 +260,19 @@ private func installTitlebarBlur(in window: NSWindow) {
 struct MainWindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { WindowSetupView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Scene id of the main remote window, used to recreate it via `openWindow`.
+let mainWindowSceneID = "main"
+
+/// Hands SwiftUI's `openWindow` action to MenuBarController so it can
+/// recreate the main window if it was ever truly closed (not just hidden).
+struct OpenWindowCapture: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear {
+            MenuBarController.shared.openWindowAction = openWindow
+        }
+    }
 }

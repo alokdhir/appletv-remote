@@ -22,7 +22,7 @@ struct AppleTVRemoteApp: App {
         // to be set in time for headless (`open -g`) launches.
         let _ = { appDelegate.onFinishLaunching = setUp }()
 
-        return WindowGroup {
+        return WindowGroup(id: mainWindowSceneID) {
             ContentView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
@@ -32,6 +32,7 @@ struct AppleTVRemoteApp: App {
                 .background(VisualEffectBackground(material: .underWindowBackground,
                                                    blendingMode: .behindWindow))
                 .background(MainWindowConfigurator())   // hide-on-close + translucency + no disconnect
+                .modifier(OpenWindowCapture())
                 .onAppear {
                     // Fallback for Dock/normal launches where the window appears.
                     setUp()
